@@ -33,6 +33,27 @@ test("long text is cut at a sentence boundary", () => {
   assert.match(r.notes[0], /over 40 words/);
 });
 
+test("on-screen claim in spoken text appends a voice-mcp note", () => {
+  const phrases = [
+    "The diff is on screen, take a look.",
+    "I've printed the results below.",
+    "See the output above for details.",
+    "The log is pasted in the reply.",
+    "Look at the table I printed.",
+  ];
+  for (const phrase of phrases) {
+    const r = prepareSpeech(phrase);
+    const onScreenNote = r.notes.find((n) => n.includes("NOT visible"));
+    assert.ok(onScreenNote, `Expected on-screen note for: "${phrase}"`);
+  }
+});
+
+test("plain speech with no on-screen claims does not get the on-screen note", () => {
+  const r = prepareSpeech("The build passed. Want me to open the pull request?");
+  const onScreenNote = r.notes.find((n) => n.includes("NOT visible"));
+  assert.equal(onScreenNote, undefined);
+});
+
 test("cleanTranscript drops whisper markers and timestamps", () => {
   assert.equal(cleanTranscript(" Yes, go ahead.\n [BLANK_AUDIO]\n"), "Yes, go ahead.");
   assert.equal(cleanTranscript("[00:00:00.000 --> 00:00:02.000]  Deploy it.\n"), "Deploy it.");
