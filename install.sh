@@ -4,7 +4,7 @@
 #   bash install.sh
 #
 # Safe to re-run: every step checks first and only does what's missing.
-#   1. Homebrew + Node.js 18+          (installs Node with brew only if missing)
+#   1. Homebrew + Node.js 22+          (installs Node with brew only if missing)
 #   2. Build this project              (skipped when already up to date)
 #   3. SoX, whisper.cpp, speech model  (via `setup`: reuses anything already present, asks before installing)
 #   4. Register with Claude Desktop    (merges into your config, with a backup; other servers untouched)
@@ -40,15 +40,15 @@ command -v brew >/dev/null 2>&1 || fail "Homebrew isn't installed. Install it fr
 ok "Homebrew found ($(command -v brew))"
 
 node_ok() {
-  command -v node >/dev/null 2>&1 && [ "$(node -p 'Number(process.versions.node.split(".")[0])')" -ge 18 ]
+  command -v node >/dev/null 2>&1 && [ "$(node -p 'Number(process.versions.node.split(".")[0])')" -ge 22 ]
 }
 if node_ok; then
   ok "Node.js $(node -v) already installed"
 else
-  info "Node.js 18+ not found — installing it with Homebrew…"
+  info "Node.js 22+ not found — installing it with Homebrew…"
   HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1 brew install node
   hash -r
-  node_ok || fail "Node.js still isn't available after installing. Open a new Terminal window and run this again."
+  node_ok || fail "Node.js 22+ still isn't available after installing. Open a new Terminal window and run this again."
   ok "Node.js $(node -v) installed"
 fi
 NODE="$(command -v node)"

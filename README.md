@@ -16,7 +16,7 @@
 <p align="center">
   <img alt="Platform: macOS, Apple Silicon" src="https://img.shields.io/badge/platform-macOS%20%C2%B7%20Apple%20Silicon-000000?logo=apple">
   <a href="https://modelcontextprotocol.io"><img alt="MCP server" src="https://img.shields.io/badge/MCP-server-6f42c1"></a>
-  <img alt="Node.js 18+" src="https://img.shields.io/node/v/mac-voice-mcp?logo=node.js&color=339933">
+  <img alt="Node.js 22+" src="https://img.shields.io/node/v/mac-voice-mcp?logo=node.js&color=339933">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
   <a href="SECURITY.md"><img alt="Dependabot enabled" src="https://img.shields.io/badge/Dependabot-enabled-025e8c?logo=dependabot"></a>
   <a href="#-vibe-coded"><img alt="Vibe-coded with Claude" src="https://img.shields.io/badge/vibe--coded-with%20Claude-d97757"></a>
@@ -59,19 +59,31 @@ The server has **two tools and two prompts**:
 
 ## Install
 
-**1. Add the server to your client.** You need Node.js 18.17 or newer.
+You need **Node.js 22 or newer**. Whichever way you install, run setup once afterwards (see *Then*, below).
+
+### One click
+
+<p>
+  <a href="https://cursor.com/en/install-mcp?name=voice-mcp&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIm1hYy12b2ljZS1tY3AiXX0%3D"><img alt="Add to Cursor" src="https://cursor.com/deeplink/mcp-install-dark.svg" height="32"></a>
+  <a href="https://insiders.vscode.dev/redirect/mcp/install?name=voice-mcp&config=%7B%22type%22%3A%22stdio%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22mac-voice-mcp%22%5D%7D"><img alt="Install in VS Code" src="https://img.shields.io/badge/VS_Code-Install_Server-0098FF?style=for-the-badge&logo=visualstudiocode&logoColor=white" height="32"></a>
+  <a href="https://insiders.vscode.dev/redirect/mcp/install?name=voice-mcp&config=%7B%22type%22%3A%22stdio%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22mac-voice-mcp%22%5D%7D&quality=insiders"><img alt="Install in VS Code Insiders" src="https://img.shields.io/badge/VS_Code_Insiders-Install_Server-24bfa5?style=for-the-badge&logo=visualstudiocode&logoColor=white" height="32"></a>
+</p>
+
+### From a marketplace
+
+- **Claude Code plugin marketplace.** This repo is its own marketplace:
+  ```
+  /plugin marketplace add jeet0007/mac-voice-mcp
+  /plugin install mac-voice-mcp@mac-voice-mcp
+  ```
+- **The official MCP Registry.** It's listed as [`io.github.jeet0007/mac-voice-mcp`](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.jeet0007/mac-voice-mcp). Apps and directories that read the registry pick it up from there. In VS Code, open the Extensions view (⇧⌘X), search `@mcp mac-voice`, and click **Install**. Smithery, Glama, PulseMCP and mcp.so copy the registry, so it shows up there too.
+
+### By hand
 
 **Claude Code**
 
 ```bash
 claude mcp add voice-mcp -s user -- npx -y mac-voice-mcp
-```
-
-Or install it as a Claude Code plugin:
-
-```
-/plugin marketplace add jeet0007/mac-voice-mcp
-/plugin install mac-voice-mcp@mac-voice-mcp
 ```
 
 **Claude Desktop.** Add this to `~/Library/Application Support/Claude/claude_desktop_config.json`, then quit (⌘Q) and reopen the app:
@@ -89,13 +101,19 @@ Or install it as a Claude Code plugin:
 
 If you get `spawn npx ENOENT`, use the full path from `which npx`, e.g. `"command": "/opt/homebrew/bin/npx"`.
 
-**Cursor.** Add the same `mcpServers` block to `~/.cursor/mcp.json`, or use the one-click link:
+**Cursor.** Add the same `mcpServers` block to `~/.cursor/mcp.json`.
 
-```
-cursor://anysphere.cursor-deeplink/mcp/install?name=voice-mcp&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIm1hYy12b2ljZS1tY3AiXX0=
+**VS Code.** Run **MCP: Add Server** from the Command Palette, or:
+
+```bash
+code --add-mcp '{"name":"voice-mcp","command":"npx","args":["-y","mac-voice-mcp"]}'
 ```
 
-**2. Run setup once.** Ask Claude to *"set up voice"*. In Claude Code you can also run `/mcp__voice-mcp__setup`, or from a terminal run `npx -y mac-voice-mcp setup`.
+**Any other MCP client.** Run `npx -y mac-voice-mcp` as a stdio server.
+
+### Then: set up and allow the mic
+
+**Run setup once.** Ask Claude to *"set up voice"*. In Claude Code you can also run `/mcp__voice-mcp__setup`, or from a terminal run `npx -y mac-voice-mcp setup`.
 
 Setup checks what's already there before it changes anything:
 
@@ -110,7 +128,7 @@ Setup checks what's already there before it changes anything:
 - **Nothing happens without your OK.** Claude calls `voice_setup` to check first, shows you the checklist, and asks before calling it with `install=true`.
 - **Slow installs don't time out.** If `brew install whisper-cpp` takes a while, setup reports INSTALLING. The install carries on in the background, and the next check picks up the result.
 
-**3. Allow the microphone.** The first time Claude listens, macOS asks whether Claude (or Cursor, or your terminal) can use the microphone. Click Allow.
+**Allow the microphone.** The first time Claude listens, macOS asks whether Claude (or Cursor, or your terminal) can use the microphone. Click Allow.
 
 ### Installing from a clone
 

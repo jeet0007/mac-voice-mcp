@@ -73,7 +73,7 @@ function freePort(): Promise<number> {
   });
 }
 
-/** fetch() with a timeout that also honours the caller's abort signal (Node 18 compatible). */
+/** fetch() with a timeout that also honours the caller's abort signal (works without AbortSignal.any). */
 async function fetchWithin(url: string, init: RequestInit, timeoutMs: number, signal?: AbortSignal): Promise<Response> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);

@@ -30,22 +30,22 @@ confirm_yes() { # same, but Enter means yes
 }
 gh_ready() { command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; }
 
-# GitHub's security features for the repo: secret scanning + push protection, Dependabot alerts
-# and automatic security fixes, private vulnerability reporting. Skipped when already on.
+# GitHub's security features for the repo: dependency graph + Dependabot alerts and automatic
+# security fixes, secret scanning with push protection, private vulnerability reporting.
+# Each call is idempotent; the question is asked only while something is still off.
 enable_github_security() {
   gh_ready || return 0
-  local status
-  status="$(gh api "repos/$REPO" --jq '.security_and_analysis.secret_scanning_push_protection.status' 2>/dev/null || true)"
-  if [ "$status" = "enabled" ]; then
+  if gh api "repos/$REPO/vulnerability-alerts" >/dev/null 2>&1 &&
+    [ "$(gh api "repos/$REPO/private-vulnerability-reporting" --jq .enabled 2>/dev/null)" = "true" ]; then
     ok "GitHub security features already on"
     return 0
   fi
-  confirm_yes "Turn on GitHub's security features (secret scanning + push protection, Dependabot alerts and fixes, private vulnerability reporting)?" || return 0
-  printf '%s' '{"security_and_analysis":{"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"}}}' |
-    gh api -X PATCH "repos/$REPO" --input - >/dev/null 2>&1 || info "Couldn't turn on secret scanning — enable it under Settings → Code security."
-  gh api -X PUT "repos/$REPO/vulnerability-alerts" >/dev/null 2>&1 || true
+  confirm_yes "Turn on GitHub's security features (dependency graph + Dependabot alerts and fixes, secret scanning with push protection, private vulnerability reporting)?" || return 0
+  gh api -X PUT "repos/$REPO/vulnerability-alerts" >/dev/null 2>&1 || info "Couldn't turn on Dependabot alerts — Settings → Code security."
   gh api -X PUT "repos/$REPO/automated-security-fixes" >/dev/null 2>&1 || true
   gh api -X PUT "repos/$REPO/private-vulnerability-reporting" >/dev/null 2>&1 || true
+  printf '%s' '{"security_and_analysis":{"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"}}}' |
+    gh api -X PATCH "repos/$REPO" --input - >/dev/null 2>&1 || true
   ok "GitHub security features on"
 }
 [ -t 0 ] || fail "Run this in an interactive Terminal — it asks before each public step."
@@ -71,22 +71,6 @@ else
 fi
 REPO="$GH_USER/$NAME"
 
-# GitHub config is kept in packaging/ (Claude can't write into .github/ for you) and synced here.
-# packaging/ is the source of truth: new or changed files are copied over.
-sync_file() { # src dest
-  if [ ! -e "$2" ] || ! cmp -s "$1" "$2"; then
-    mkdir -p "$(dirname "$2")"
-    cp "$1" "$2"
-    return 0
-  fi
-  return 1
-}
-synced=0
-for f in packaging/github-workflows/*.yml; do
-  sync_file "$f" ".github/workflows/$(basename "$f")" && synced=$((synced + 1))
-done
-[ -f packaging/dependabot.yml ] && sync_file packaging/dependabot.yml .github/dependabot.yml && synced=$((synced + 1))
-ok "GitHub config in place: CI, security scans, CodeQL, Dependabot, release workflow$([ "$synced" -gt 0 ] && echo " ($synced file(s) updated)")"
 
 # --- 2. Tests ------------------------------------------------------------------------------
 bold "2/6  Build and test"
@@ -144,6 +128,8 @@ else
 fi
 
 if git remote get-url origin >/dev/null 2>&1; then
+  # Bring in anything merged on GitHub (e.g. Dependabot PRs) before pushing.
+  git pull --rebase --autostash -q origin main 2>/dev/null || info "Couldn't pull from GitHub first — if the push is rejected, run: git pull --rebase"
   if git push -u origin HEAD; then
     ok "Pushed to github.com/$REPO"
   else
