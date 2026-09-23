@@ -13,6 +13,8 @@ export const SPEECH_RULES = [
   '  not paths ("in index.ts"), round numbers ("about two hundred ms"), spell out symbols.',
   '- Ask one question at a time, answerable in a few words ("Should I deploy it — yes or no?").',
   "- Put the details (diffs, logs, links) in your normal on-screen reply, and say so out loud.",
+  "- Tool output (Bash stdout, file writes) is NOT the on-screen reply. Only your own assistant message text renders.",
+  "- A spoken turn with no assistant message text shows the user nothing — never skip the on-screen reply.",
 ].join("\n");
 
 /** Claude Code reads these (truncated at 2 KB) — keep under that. */

@@ -111,6 +111,20 @@ export function prepareSpeech(input: string, opts: PrepareOptions = {}): Prepare
           "Next time send only short, plain spoken sentences — keep code, paths, links and tables in your on-screen reply.",
       ]
     : [];
+
+  // Detect when the model's spoken text claims content is visible on screen
+  // while it may only exist in tool/Bash output (which the user does not reliably see).
+  // Check the original input so internally-inserted "on screen" phrases don't trigger this.
+  const ON_SCREEN_PATTERN =
+    /\bon[\s-]screen\b|I['']ve printed\b|\bprinted\b|\bbelow\b|\babove\b|\bin the reply\b|\bpasted\b|\bsee the\b|\blook at the\b/i;
+  if (ON_SCREEN_PATTERN.test(input)) {
+    noteList.push(
+      "voice-mcp note: your spoken text says something is on screen. The spoken text is " +
+        "NOT visible, and Bash/tool output is not reliably shown to the user either. Put " +
+        "the content in your own assistant message for this turn, or the user will see nothing.",
+    );
+  }
+
   return { text: s, notes: noteList };
 }
 
