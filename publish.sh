@@ -182,7 +182,12 @@ else
     npm login
   fi
   if confirm "Publish $NAME@$VERSION to npm publicly as $(npm whoami)?"; then
-    npm publish --access public
+    if ! npm publish --access public; then
+      info "npm publish failed (see above). The usual cause is \"Two-factor authentication … is required\":"
+      info "  npmjs.com → your avatar → Account → Two-Factor Authentication → enable it (an authenticator app or a"
+      info "  security key), then run this script again. npm will ask for a one-time code when publishing."
+      fail "Not published."
+    fi
     ok "Published — anyone can now run: npx -y $NAME"
   fi
 fi
