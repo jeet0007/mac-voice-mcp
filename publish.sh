@@ -60,11 +60,11 @@ bold "2/6  Build and test"
 [ -d node_modules ] || npm install --no-audit --no-fund --loglevel=error
 if ! test_output="$(npm test 2>&1)"; then
   printf '%s\n' "$test_output" > test-output.log
-  printf '%s\n' "$test_output" | grep -E "^not ok|^# (pass|fail)" || printf '%s\n' "$test_output" | tail -15
+  printf '%s\n' "$test_output" | grep -E "^not ok|^✖|^(#|ℹ) (pass|fail)" || printf '%s\n' "$test_output" | tail -15
   fail "Tests are failing — not publishing. Full output saved to test-output.log (Claude can read it there)."
 fi
 rm -f test-output.log
-ok "All $(printf '%s\n' "$test_output" | sed -n 's/^# pass //p') tests pass"
+ok "All $(printf '%s\n' "$test_output" | sed -nE 's/^(#|ℹ) pass ([0-9]+).*/\2/p' | tail -1) tests pass"
 
 # --- 3. GitHub -----------------------------------------------------------------------------
 bold "3/6  GitHub (github.com/$REPO)"
@@ -76,19 +76,31 @@ if [ -z "$(git config user.name || true)" ] || [ -z "$(git config user.email || 
   fail "Git doesn't know who you are yet. Run: git config --global user.name \"Your Name\" && git config --global user.email you@example.com — then run this again."
 fi
 git add -A
+# Some global gitignores exclude CLAUDE.md; this one is example documentation and belongs in the repo.
+git add -f examples/CLAUDE.md 2>/dev/null || true
 if ! git diff --cached --quiet; then
   git commit -q -m "mac-voice-mcp v$VERSION"
   ok "Committed"
 fi
 if git remote get-url origin >/dev/null 2>&1; then
-  git push -q -u origin HEAD 2>/dev/null && ok "Pushed to $(git remote get-url origin)" || info "Push skipped or failed — check 'git push' yourself"
+  if git push -u origin HEAD; then
+    ok "Pushed to github.com/$REPO"
+  else
+    info "Push failed — see the message above. Fix it, then run this script again (npm comes next either way)."
+  fi
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    gh repo edit "$REPO" --add-topic mcp-server --add-topic mcp --add-topic voice --add-topic whisper --add-topic macos >/dev/null 2>&1 || true
+  fi
 elif command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   if confirm "Create the PUBLIC repository github.com/$REPO and push?"; then
-    gh repo create "$REPO" --public --source . --push \
+    if gh repo create "$REPO" --public --source . --push \
       --description "Talk with Claude out loud on your Mac — on-device speech with whisper.cpp. An MCP server." \
-      --homepage "https://www.npmjs.com/package/$NAME"
-    gh repo edit "$REPO" --add-topic mcp-server --add-topic mcp --add-topic voice --add-topic whisper --add-topic macos >/dev/null || true
-    ok "Created and pushed github.com/$REPO"
+      --homepage "https://www.npmjs.com/package/$NAME"; then
+      ok "Created and pushed github.com/$REPO"
+    else
+      info "The repo may have been created but the push failed — see above. Fix it, then run this script again."
+    fi
+    gh repo edit "$REPO" --add-topic mcp-server --add-topic mcp --add-topic voice --add-topic whisper --add-topic macos >/dev/null 2>&1 || true
   fi
 else
   info "The GitHub CLI isn't set up, so create the repo in your browser:"
