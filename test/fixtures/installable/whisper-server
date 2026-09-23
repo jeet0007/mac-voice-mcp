@@ -1,0 +1,21 @@
+#!/usr/bin/env node
+// Stub whisper-server: /health (503 while "loading", then 200) and /inference.
+const fs = require("fs"), http = require("http");
+const args = process.argv.slice(2);
+const port = Number(args[args.indexOf("--port") + 1]);
+const log = (m) => fs.appendFileSync(process.env.STUB_LOG, m + "\n");
+if (process.env.STUB_PID_FILE) fs.writeFileSync(process.env.STUB_PID_FILE, String(process.pid));
+log(`whisper-server start ${args.join(" ")}`);
+const readyAt = Date.now() + 300;
+http.createServer((req, res) => {
+  if (req.url === "/health") {
+    res.writeHead(Date.now() >= readyAt ? 200 : 503).end(JSON.stringify({ status: Date.now() >= readyAt ? "ok" : "loading model" }));
+  } else if (req.url === "/inference" && req.method === "POST") {
+    let n = 0;
+    req.on("data", (d) => (n += d.length));
+    req.on("end", () => {
+      log(`whisper-server inference bytes=${n}`);
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ text: " Stub transcript from the server.\n" }));
+    });
+  } else res.writeHead(404).end();
+}).listen(port, "127.0.0.1");

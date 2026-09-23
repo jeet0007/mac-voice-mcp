@@ -1,0 +1,40 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.jeet0007/mac-voice-mcp",
+  "description": "Talk with your AI assistant out loud on a Mac: speaks, listens for one natural turn, and transcribes on-device with whisper.cpp.",
+  "repository": {
+    "url": "https://github.com/jeet0007/mac-voice-mcp",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "mac-voice-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "VOICE_MCP_WHISPER_MODEL",
+          "description": "whisper.cpp model name (default base.en)",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "VOICE_MCP_LANGUAGE",
+          "description": "Spoken language code, e.g. en, th, or auto",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "VOICE_MCP_END_SILENCE_MS",
+          "description": "Pause length that ends your turn, in ms (default 1200)",
+          "isRequired": false,
+          "format": "number"
+        }
+      ]
+    }
+  ]
+}

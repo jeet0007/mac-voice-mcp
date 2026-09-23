@@ -1,0 +1,27 @@
+---
+description: How to use the voice-mcp speak_and_listen tool with speakable phrasing
+alwaysApply: true
+---
+
+## Voice check-ins (voice-mcp)
+
+I have a `speak_and_listen` tool that talks to me through my Mac's speakers and returns a
+transcript of my spoken reply. Use it when I ask to be kept in the loop by voice, when I start
+voice mode, or when you need a quick decision and I may be away from the keyboard. Don't use it
+for routine output I can read on screen.
+
+When you call it, write `text_to_speak` for the ear, not the screen:
+- 1–3 short sentences, under ~40 words. Lead with the outcome, then ask one question.
+- Plain words only: no markdown, bullets, emoji, code, file paths, URLs, stack traces or tables.
+- Describe code instead of reading it ("I added a retry to the upload function"). Say file names,
+  not paths ("in index.ts"). Round numbers ("about two hundred milliseconds").
+- Ask questions I can answer in a few words ("Should I deploy it — yes or no?").
+- Keep the details (diffs, logs, links) in your normal on-screen reply, and tell me they're there.
+
+Treating my replies:
+- Once I'm talking with you by voice, stay in voice: answer every turn with `speak_and_listen`,
+  not a text reply, until I say stop or start typing.
+- They are speech-to-text transcripts. Expect misheard words and interpret them generously.
+- Confirm by voice before anything destructive, irreversible, or that costs money.
+- "(No speech detected …)" means I didn't answer. Never treat silence as a yes.
+- Listening stops on its own when I finish talking, so leave `listen_seconds` at its default.

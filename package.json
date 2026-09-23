@@ -1,0 +1,66 @@
+{
+  "name": "mac-voice-mcp",
+  "mcpName": "io.github.jeet0007/mac-voice-mcp",
+  "version": "0.1.0",
+  "description": "Talk with Claude out loud on your Mac: speaks with macOS `say`, listens for one natural conversational turn, and transcribes on-device with whisper.cpp. An MCP server.",
+  "type": "module",
+  "bin": {
+    "mac-voice-mcp": "dist/index.js",
+    "voice-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "examples",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc && node -e \"require('fs').chmodSync('dist/index.js', 0o755)\"",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "setup": "node dist/index.js setup",
+    "test:voice": "node dist/index.js test",
+    "inspect": "npx -y @modelcontextprotocol/inspector node dist/index.js",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "voice",
+    "speech",
+    "tts",
+    "stt",
+    "whisper",
+    "whisper.cpp",
+    "macos",
+    "apple-silicon",
+    "claude",
+    "claude-code",
+    "vibe-coded"
+  ],
+  "author": "Jeet",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jeet0007/mac-voice-mcp.git"
+  },
+  "homepage": "https://github.com/jeet0007/mac-voice-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/jeet0007/mac-voice-mcp/issues"
+  }
+}

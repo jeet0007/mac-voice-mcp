@@ -1,0 +1,11 @@
+#!/usr/bin/env node
+// Stub Homebrew: "installs" formulae by symlinking stubs into $STUB_BREW_TARGET.
+const fs = require("fs"), path = require("path");
+const [cmd, ...formulae] = process.argv.slice(2);
+fs.appendFileSync(process.env.STUB_LOG, `brew ${cmd} ${formulae.join(" ")} auto_update=${process.env.HOMEBREW_NO_AUTO_UPDATE}\n`);
+const src = path.join(__dirname, "..", "installable");
+const provides = { sox: ["rec"], "whisper-cpp": ["whisper-cli", "whisper-server"] };
+for (const f of formulae) for (const bin of provides[f] ?? []) {
+  const dest = path.join(process.env.STUB_BREW_TARGET, bin);
+  if (!fs.existsSync(dest)) fs.symlinkSync(path.join(src, bin), dest);
+}

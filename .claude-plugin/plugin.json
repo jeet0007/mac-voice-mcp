@@ -1,0 +1,16 @@
+{
+  "name": "mac-voice-mcp",
+  "displayName": "Mac Voice",
+  "version": "0.1.0",
+  "description": "Talk with Claude out loud on your Mac. Speaks, listens for one natural turn, transcribes on-device with whisper.cpp. Run /mcp__voice-mcp__setup once after installing.",
+  "author": { "name": "Jeet" },
+  "homepage": "https://github.com/jeet0007/mac-voice-mcp#readme",
+  "repository": "https://github.com/jeet0007/mac-voice-mcp",
+  "license": "MIT",
+  "mcpServers": {
+    "voice-mcp": {
+      "command": "npx",
+      "args": ["-y", "mac-voice-mcp"]
+    }
+  }
+}

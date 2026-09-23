@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.log
+*.tgz
+.DS_Store
+Claude outputs/
+mcp-publisher
+test-output.log
