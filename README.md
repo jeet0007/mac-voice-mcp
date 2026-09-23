@@ -1,8 +1,30 @@
-# mac-voice-mcp
+<h1 align="center">🎙️ mac-voice-mcp</h1>
 
-[![npm](https://img.shields.io/npm/v/mac-voice-mcp)](https://www.npmjs.com/package/mac-voice-mcp) [![CI](https://github.com/jeet0007/mac-voice-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/jeet0007/mac-voice-mcp/actions/workflows/ci.yml) ![license: MIT](https://img.shields.io/badge/license-MIT-blue)
+<p align="center">
+  <b>Talk with Claude out loud on your Mac.</b><br>
+  Natural turn-taking · on-device speech recognition · no audio leaves your computer
+</p>
 
-Talk with Claude out loud. Claude says something through your Mac's speakers, listens to your answer the way a person would, and gets back what you said as text. Speech recognition runs on your Mac, so no audio leaves your computer.
+<p align="center">
+  <a href="https://www.npmjs.com/package/mac-voice-mcp"><img alt="npm version" src="https://img.shields.io/npm/v/mac-voice-mcp?logo=npm&color=cb3837"></a>
+  <a href="https://www.npmjs.com/package/mac-voice-mcp"><img alt="npm downloads" src="https://img.shields.io/npm/dm/mac-voice-mcp?color=cb3837"></a>
+  <a href="https://github.com/jeet0007/mac-voice-mcp/actions/workflows/ci.yml"><img alt="Tests" src="https://github.com/jeet0007/mac-voice-mcp/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/jeet0007/mac-voice-mcp/actions/workflows/security.yml"><img alt="Security" src="https://github.com/jeet0007/mac-voice-mcp/actions/workflows/security.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/jeet0007/mac-voice-mcp/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://github.com/jeet0007/mac-voice-mcp/actions/workflows/codeql.yml/badge.svg?branch=main"></a>
+</p>
+
+<p align="center">
+  <img alt="Platform: macOS, Apple Silicon" src="https://img.shields.io/badge/platform-macOS%20%C2%B7%20Apple%20Silicon-000000?logo=apple">
+  <a href="https://modelcontextprotocol.io"><img alt="MCP server" src="https://img.shields.io/badge/MCP-server-6f42c1"></a>
+  <img alt="Node.js 18+" src="https://img.shields.io/node/v/mac-voice-mcp?logo=node.js&color=339933">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
+  <a href="SECURITY.md"><img alt="Dependabot enabled" src="https://img.shields.io/badge/Dependabot-enabled-025e8c?logo=dependabot"></a>
+  <a href="#-vibe-coded"><img alt="Vibe-coded with Claude" src="https://img.shields.io/badge/vibe--coded-with%20Claude-d97757"></a>
+</p>
+
+---
+
+Claude says something through your Mac's speakers, listens to your answer the way a person would, and gets back what you said as text. Speech recognition runs on your Mac, so no audio leaves your computer.
 
 ```
 Claude ──speak_and_listen("Tests pass. Open the PR?")──▶  🔊 "Tests pass. Open the PR?"
@@ -12,7 +34,9 @@ Claude ◀──────────────── "Yes, and tag Priya."
 
 It's built for Apple Silicon Macs (M1–M4). Linux works too, with SoX and espeak-ng installed.
 
-> **🤖 Vibe-coded.** This project was designed and written with Claude, in conversation. A human (me) steered it, tried it on a real Mac and checked the test suite, but most of the code was written by AI. It's a **proof of concept**: it works and has tests, but expect rough edges, and read the code before relying on it for anything important. Issues and pull requests are welcome.
+### 🤖 Vibe-coded
+
+> This project was designed and written with Claude, in conversation. A human (me) steered it, tried it on a real Mac and checked the test suite, but most of the code was written by AI. It's a **proof of concept**: it works and has tests, but expect rough edges, and read the code before relying on it for anything important. Issues and pull requests are welcome.
 >
 > It's an independent project, not made or endorsed by Anthropic. It works with any MCP client, including Claude Desktop, Claude Code and Cursor.
 
@@ -201,11 +225,21 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 - **The warm whisper server is local only.** It listens on `127.0.0.1` on a random port, and stops when idle or when this server exits.
 - **Setup can only install known packages.** Its install list is fixed in the code (`sox`, `whisper-cpp`), so nothing Claude says can make it install anything else. It never uninstalls or modifies other software.
 
+## Security
+
+- **Secrets:** every push and pull request is scanned for leaked secrets with [TruffleHog](https://github.com/trufflesecurity/trufflehog), and the whole history is scanned before the first push. GitHub secret scanning with push protection is also on.
+- **Dependencies:** [Dependabot](https://docs.github.com/code-security/dependabot) opens weekly update pull requests. CI fails on high-severity advisories (`npm audit`), and dependency review blocks pull requests that add vulnerable packages.
+- **Code:** [CodeQL](https://codeql.github.com) runs with the `security-extended` queries.
+- **Releases:** releases publish through [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/), with no long-lived npm token and a signed provenance attestation for every version.
+
+To report a vulnerability, see [SECURITY.md](SECURITY.md).
+
 ## Development
 
 ```bash
 npm install
-npm test               # build + 22 tests: unit tests and end-to-end tests over MCP with stub binaries
+npm test               # build + 27 tests: unit tests and end-to-end tests over MCP with stub binaries
+npm run audit          # known-vulnerability and signature checks on dependencies
 npm run setup          # check what's installed; offers to install what's missing
 npm run test:voice     # one real speak → listen → transcribe turn
 npm run inspect        # MCP Inspector
@@ -227,7 +261,7 @@ The package installs two commands: `mac-voice-mcp` (the one `npx -y mac-voice-mc
 ### Releasing
 
 - **First release:** `bash publish.sh`. It asks before each public step and uses your own GitHub and npm logins. It creates the GitHub repo, publishes to npm, and lists the server in the [official MCP Registry](https://registry.modelcontextprotocol.io), which Smithery, Glama, PulseMCP and mcp.so pick up from.
-- **Later releases:** bump `version` in `package.json` and `server.json`, then push a `v<version>` tag. The Publish workflow does the rest. It needs an `NPM_TOKEN` repository secret; the registry login uses GitHub's built-in OIDC, so it needs no secret.
+- **Later releases:** bump `version` in `package.json` and `server.json`, then push a `v<version>` tag. The Publish workflow tests the build, checks that the tag matches both versions, and publishes to npm and the MCP Registry. It needs no secrets: both logins use GitHub's OIDC identity, once you've set the package's *Trusted Publisher* on npmjs.com (`publish.sh` prints the steps).
 
 ## License
 

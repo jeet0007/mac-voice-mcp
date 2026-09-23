@@ -1,30 +1,43 @@
-# Releases after the first one: bump the version in package.json and server.json,
-# commit, then `git tag v0.2.0 && git push origin v0.2.0`.
-# Needs one repository secret: NPM_TOKEN (an npm "automation" access token).
+# Releases: bump "version" in package.json and server.json, commit, then
+#   git tag v0.2.0 && git push origin v0.2.0
+#
+# No secrets needed:
+# - npm: "trusted publishing" (OIDC). One-time setup on npmjs.com → mac-voice-mcp → Settings →
+#   Trusted Publisher → GitHub Actions: your GitHub user, repo mac-voice-mcp, workflow publish.yml.
+#   npm then signs a provenance attestation linking each release to the exact commit and workflow.
+# - MCP Registry: GitHub OIDC.
 name: Publish
 
 on:
   push:
     tags: ["v*"]
 
+permissions:
+  contents: read
+
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write # MCP Registry login via GitHub OIDC — no extra secret
       contents: read
+      id-token: write # OIDC for npm trusted publishing and the MCP Registry
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: "lts/*"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
+      - name: npm with trusted-publishing support (11.5.1+)
+        run: npm install -g npm@latest
       - run: npm ci
       - run: npm test
-      - name: Publish to npm
+      - name: Tag matches package.json and server.json
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          test "$(node -p 'require("./package.json").version')" = "$v"
+          test "$(node -p 'require("./server.json").version')" = "$v"
+      - name: Publish to npm (with provenance)
         run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Install mcp-publisher
         run: |
           curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher

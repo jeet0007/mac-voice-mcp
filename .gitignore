@@ -6,3 +6,4 @@ dist/
 Claude outputs/
 mcp-publisher
 test-output.log
+trufflehog-findings.json

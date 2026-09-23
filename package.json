@@ -24,7 +24,8 @@
     "test:voice": "node dist/index.js test",
     "inspect": "npx -y @modelcontextprotocol/inspector node dist/index.js",
     "prepare": "npm run build",
-    "prepublishOnly": "npm test"
+    "prepublishOnly": "npm test",
+    "audit": "npm audit --omit=dev --audit-level=high && npm audit signatures"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

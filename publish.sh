@@ -23,6 +23,31 @@ confirm() {
   read -r -p "  $1 [y/N] " answer
   [[ "$answer" =~ ^[Yy] ]]
 }
+confirm_yes() { # same, but Enter means yes
+  local answer
+  read -r -p "  $1 [Y/n] " answer
+  [ -z "$answer" ] || [[ "$answer" =~ ^[Yy] ]]
+}
+gh_ready() { command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; }
+
+# GitHub's security features for the repo: secret scanning + push protection, Dependabot alerts
+# and automatic security fixes, private vulnerability reporting. Skipped when already on.
+enable_github_security() {
+  gh_ready || return 0
+  local status
+  status="$(gh api "repos/$REPO" --jq '.security_and_analysis.secret_scanning_push_protection.status' 2>/dev/null || true)"
+  if [ "$status" = "enabled" ]; then
+    ok "GitHub security features already on"
+    return 0
+  fi
+  confirm_yes "Turn on GitHub's security features (secret scanning + push protection, Dependabot alerts and fixes, private vulnerability reporting)?" || return 0
+  printf '%s' '{"security_and_analysis":{"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"}}}' |
+    gh api -X PATCH "repos/$REPO" --input - >/dev/null 2>&1 || info "Couldn't turn on secret scanning — enable it under Settings → Code security."
+  gh api -X PUT "repos/$REPO/vulnerability-alerts" >/dev/null 2>&1 || true
+  gh api -X PUT "repos/$REPO/automated-security-fixes" >/dev/null 2>&1 || true
+  gh api -X PUT "repos/$REPO/private-vulnerability-reporting" >/dev/null 2>&1 || true
+  ok "GitHub security features on"
+}
 [ -t 0 ] || fail "Run this in an interactive Terminal — it asks before each public step."
 
 # --- 1. Your GitHub username → fills in the placeholders ----------------------------------
@@ -46,14 +71,22 @@ else
 fi
 REPO="$GH_USER/$NAME"
 
-# GitHub Actions workflows live in packaging/ until now (Claude can't write into .github/ for you).
-if [ -d packaging/github-workflows ]; then
-  mkdir -p .github/workflows
-  for f in packaging/github-workflows/*.yml; do
-    [ -e ".github/workflows/$(basename "$f")" ] || cp "$f" .github/workflows/
-  done
-  ok "GitHub Actions workflows in place (CI on every push; publishing on version tags)"
-fi
+# GitHub config is kept in packaging/ (Claude can't write into .github/ for you) and synced here.
+# packaging/ is the source of truth: new or changed files are copied over.
+sync_file() { # src dest
+  if [ ! -e "$2" ] || ! cmp -s "$1" "$2"; then
+    mkdir -p "$(dirname "$2")"
+    cp "$1" "$2"
+    return 0
+  fi
+  return 1
+}
+synced=0
+for f in packaging/github-workflows/*.yml; do
+  sync_file "$f" ".github/workflows/$(basename "$f")" && synced=$((synced + 1))
+done
+[ -f packaging/dependabot.yml ] && sync_file packaging/dependabot.yml .github/dependabot.yml && synced=$((synced + 1))
+ok "GitHub config in place: CI, security scans, CodeQL, Dependabot, release workflow$([ "$synced" -gt 0 ] && echo " ($synced file(s) updated)")"
 
 # --- 2. Tests ------------------------------------------------------------------------------
 bold "2/6  Build and test"
@@ -65,6 +98,11 @@ if ! test_output="$(npm test 2>&1)"; then
 fi
 rm -f test-output.log
 ok "All $(printf '%s\n' "$test_output" | sed -nE 's/^(#|ℹ) pass ([0-9]+).*/\2/p' | tail -1) tests pass"
+if ! npm audit --omit=dev --audit-level=high >/dev/null 2>&1; then
+  npm audit --omit=dev --audit-level=high || true
+  fail "A dependency has a known high-severity vulnerability — not publishing. Try 'npm audit fix'."
+fi
+ok "No known vulnerabilities in dependencies"
 
 # --- 3. GitHub -----------------------------------------------------------------------------
 bold "3/6  GitHub (github.com/$REPO)"
@@ -82,16 +120,40 @@ if ! git diff --cached --quiet; then
   git commit -q -m "mac-voice-mcp v$VERSION"
   ok "Committed"
 fi
+
+# Leaked-secret check over the whole history before anything goes public.
+if ! command -v trufflehog >/dev/null 2>&1; then
+  if confirm_yes "Install TruffleHog (Homebrew) to scan for leaked secrets before pushing?"; then
+    HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1 brew install trufflehog
+  fi
+fi
+if command -v trufflehog >/dev/null 2>&1; then
+  rc=0
+  trufflehog git "file://$PWD" --results=verified,unknown --fail --no-update --json 2>/dev/null >trufflehog-findings.json || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    rm -f trufflehog-findings.json
+    ok "No leaked secrets in any commit (TruffleHog)"
+  elif [ "$rc" -eq 183 ]; then # TruffleHog's "found something" exit code
+    fail "TruffleHog found possible secrets — NOT pushing. See trufflehog-findings.json (and tell Claude)."
+  else
+    rm -f trufflehog-findings.json
+    info "TruffleHog couldn't run (exit $rc) — skipping the local scan. CI will still scan every push."
+  fi
+else
+  info "Skipped the local secret scan (TruffleHog not installed). CI will still scan every push."
+fi
+
 if git remote get-url origin >/dev/null 2>&1; then
   if git push -u origin HEAD; then
     ok "Pushed to github.com/$REPO"
   else
     info "Push failed — see the message above. Fix it, then run this script again (npm comes next either way)."
   fi
-  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  if gh_ready; then
     gh repo edit "$REPO" --add-topic mcp-server --add-topic mcp --add-topic voice --add-topic whisper --add-topic macos >/dev/null 2>&1 || true
   fi
-elif command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  enable_github_security
+elif gh_ready; then
   if confirm "Create the PUBLIC repository github.com/$REPO and push?"; then
     if gh repo create "$REPO" --public --source . --push \
       --description "Talk with Claude out loud on your Mac — on-device speech with whisper.cpp. An MCP server." \
@@ -101,6 +163,7 @@ elif command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
       info "The repo may have been created but the push failed — see above. Fix it, then run this script again."
     fi
     gh repo edit "$REPO" --add-topic mcp-server --add-topic mcp --add-topic voice --add-topic whisper --add-topic macos >/dev/null 2>&1 || true
+    enable_github_security
   fi
 else
   info "The GitHub CLI isn't set up, so create the repo in your browser:"
@@ -152,5 +215,9 @@ cat <<EOT
 
   Future releases: bump "version" in package.json and server.json, commit, then
     git tag v<version> && git push origin v<version>
-  (add an NPM_TOKEN secret to the GitHub repo once, and GitHub Actions publishes everything).
+
+  One-time, so future releases need no npm token at all (npm "trusted publishing"):
+    npmjs.com → $NAME → Settings → Trusted Publisher → GitHub Actions
+      user: $GH_USER   repository: $NAME   workflow: publish.yml
+    then under Publishing access choose "Require two-factor authentication and disallow tokens".
 EOT
