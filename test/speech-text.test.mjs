@@ -48,6 +48,18 @@ test("on-screen claim in spoken text appends a voice-mcp note", () => {
   }
 });
 
+test("ordinary uses of above/below/see/printed don't trigger the on-screen note", () => {
+  for (const phrase of [
+    "It's above thirty degrees, and the build came in below budget.",
+    "See the doctor if it still hurts tomorrow.",
+    "The printed report is ready — want me to email it?",
+    "Look at the time, should we stop here?",
+  ]) {
+    const r = prepareSpeech(phrase);
+    assert.equal(r.notes.find((n) => n.includes("NOT visible")), undefined, `False positive for: "${phrase}"`);
+  }
+});
+
 test("plain speech with no on-screen claims does not get the on-screen note", () => {
   const r = prepareSpeech("The build passed. Want me to open the pull request?");
   const onScreenNote = r.notes.find((n) => n.includes("NOT visible"));

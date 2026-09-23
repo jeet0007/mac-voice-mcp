@@ -18,6 +18,22 @@ export interface PrepareOptions {
 }
 
 /**
+ * Phrases that send the user to look at something. Deliberately specific: bare words like
+ * "above", "below" or "see the" also occur in ordinary speech ("above thirty degrees",
+ * "see the doctor") and must not trigger the reminder.
+ */
+const ON_SCREEN_PATTERN = new RegExp(
+  [
+    String.raw`\bon[\s-]?screen\b`,
+    String.raw`\bI(?:['’]ve| have)\s+(?:printed|pasted|put|posted|listed|written|shown|added)\b`,
+    String.raw`\b(?:printed|pasted|posted|listed|shown|written)\s+(?:it\s+|them\s+)?(?:below|above|here)\b`,
+    String.raw`\b(?:see|check|look at|scroll to)\s+(?:the\s+)?(?:screen|chat|reply|message|details|output|table|diff|log)\b`,
+    String.raw`\bin (?:the|my) (?:reply|message|chat)\b`,
+  ].join("|"),
+  "i",
+);
+
+/**
  * Safety net for speakability. The model is asked (tool description, server
  * instructions, voice_mode prompt) to send plain spoken sentences; this catches
  * whatever slips through so the user never hears "backtick backtick backtick"
@@ -112,16 +128,14 @@ export function prepareSpeech(input: string, opts: PrepareOptions = {}): Prepare
       ]
     : [];
 
-  // Detect when the model's spoken text claims content is visible on screen
-  // while it may only exist in tool/Bash output (which the user does not reliably see).
-  // Check the original input so internally-inserted "on screen" phrases don't trigger this.
-  const ON_SCREEN_PATTERN =
-    /\bon[\s-]screen\b|I['']ve printed\b|\bprinted\b|\bbelow\b|\babove\b|\bin the reply\b|\bpasted\b|\bsee the\b|\blook at the\b/i;
+  // When the spoken text points the user at something to look at, remind the model that only
+  // its own assistant message renders — not the speech, and not Bash/tool output (issue #3).
+  // Checked on the original input, so the "The rest is on screen." added above doesn't count.
   if (ON_SCREEN_PATTERN.test(input)) {
     noteList.push(
-      "voice-mcp note: your spoken text says something is on screen. The spoken text is " +
-        "NOT visible, and Bash/tool output is not reliably shown to the user either. Put " +
-        "the content in your own assistant message for this turn, or the user will see nothing.",
+      "voice-mcp reminder: you told the user to look at something. Spoken text and Bash/tool output are " +
+        "NOT visible to them — only your own assistant message is. Make sure those details are written in " +
+        "your reply for this turn.",
     );
   }
 
