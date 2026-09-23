@@ -37,11 +37,24 @@ jobs:
           test "$(node -p 'require("./package.json").version')" = "$v"
           test "$(node -p 'require("./server.json").version')" = "$v"
       - name: Publish to npm (with provenance)
-        run: npm publish --access public
+        # Skipped if this version is already on npm, so "Re-run failed jobs" works after a later step fails.
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          if npm view "mac-voice-mcp@$v" version >/dev/null 2>&1; then
+            echo "mac-voice-mcp@$v is already on npm — skipping."
+          else
+            npm publish --access public
+          fi
       - name: Install mcp-publisher
         run: |
           curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
       - name: Publish to the MCP Registry
         run: |
           ./mcp-publisher login github-oidc
-          ./mcp-publisher publish
+          # The registry checks the package on npm, which can take a few minutes to show a new version.
+          for attempt in 1 2 3 4 5 6; do
+            ./mcp-publisher publish && exit 0
+            echo "Attempt $attempt failed — waiting for npm to catch up…"
+            sleep 60
+          done
+          exit 1
