@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-28
+
 ### Added
 - **Voice conversations stay in voice (Claude Code plugin).** Once you've answered out loud, a plugin hook sends Claude back to reply by voice if it tries to answer in text. It does this at most once per spoken answer, so it can never loop. Voice mode ends when you type, when you don't answer, or when Claude says goodbye with `listen: false`. It's tracked per session and expires after 30 idle minutes. `VOICE_MCP_STAY_IN_VOICE=0` turns the hook off.
 - **`speak_and_listen` with `listen: false`** speaks without opening the microphone, for one-way announcements or a goodbye. It needs only text-to-speech, not the recorder, whisper or a model.
