@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { chime, findRecorder, listenForTurn, MIC_PERMISSION_HINT, RECORDER_MISSING, speak } from "./audio.js";
 import { CONFIG, debug, DEFAULT_LISTEN_SECONDS, MAX_LISTEN_SECONDS, MAX_SPEAK_CHARS } from "./config.js";
+import { acquireMicLock, MicBusyError } from "./lock.js";
 import { ensureModel } from "./model.js";
 import { SetupError } from "./proc.js";
 import { prepareSpeech } from "./speech-text.js";
@@ -22,18 +23,48 @@ async function preflight(): Promise<{ model: string }> {
   return { model: await ensureModel({ download: false }) };
 }
 
-export async function speakAndListen(
+export type Phase = "waiting" | "speaking" | "listening" | "transcribing";
+
+export interface SpeakOptions {
+  /** Upper limit on listening, in seconds. */
+  listenSeconds?: number;
+  /** false: only speak — don't open the mic (announcements, or saying goodbye when leaving voice mode). */
+  listen?: boolean;
+  signal?: AbortSignal;
+  onPhase?: (phase: Phase) => void;
+}
+
+export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {}): Promise<VoiceResult> {
+  const { signal, onPhase } = opts;
+  const listen = opts.listen !== false;
+  const requested = opts.listenSeconds ?? DEFAULT_LISTEN_SECONDS;
+  const seconds = Math.min(MAX_LISTEN_SECONDS, Math.max(1, Number.isFinite(requested) ? requested : DEFAULT_LISTEN_SECONDS));
+  const model = listen ? (await preflight()).model : null;
+  // Load the model into the warm server now, so it's ready when the user finishes (even if we wait below).
+  if (model) prewarm(model);
+
+  // Wait for any other voice session on this Mac to finish with the speaker and mic.
+  let release: () => void;
+  try {
+    release = await acquireMicLock({ signal, onWait: () => onPhase?.("waiting") });
+  } catch (err) {
+    if (err instanceof MicBusyError) return { ok: false, text: err.message, notes: [] };
+    throw err;
+  }
+  try {
+    return await turn(textToSpeak, seconds, model, signal, onPhase);
+  } finally {
+    release();
+  }
+}
+
+async function turn(
   textToSpeak: string,
-  listenSeconds: number,
-  signal?: AbortSignal,
-  onPhase?: (phase: "speaking" | "listening" | "transcribing") => void,
+  seconds: number,
+  model: string | null,
+  signal: AbortSignal | undefined,
+  onPhase: ((phase: Phase) => void) | undefined,
 ): Promise<VoiceResult> {
-  const seconds = Math.min(MAX_LISTEN_SECONDS, Math.max(1, Number.isFinite(listenSeconds) ? listenSeconds : DEFAULT_LISTEN_SECONDS));
-  const { model } = await preflight();
-
-  // Load the model into the warm server while we talk, so it's ready when the user finishes.
-  prewarm(model);
-
   const speech = prepareSpeech(textToSpeak, { maxWords: CONFIG.maxSpeakWords, maxChars: MAX_SPEAK_CHARS });
   const notes = [...speech.notes];
   const tmpDir = await mkdtemp(path.join(os.tmpdir(), "voice-mcp-"));
@@ -43,6 +74,10 @@ export async function speakAndListen(
     onPhase?.("speaking");
     await speak(speech.text, signal);
     const spoke = Date.now() - t0;
+    if (!model) {
+      const text = "(Spoken. The microphone was not opened, because listen was false.)";
+      return { ok: true, text, notes: [...notes, `voice-mcp timing: spoke ${secs(spoke)}`] };
+    }
     await chime("start");
     onPhase?.("listening");
     const tListen = Date.now();
@@ -61,7 +96,10 @@ export async function speakAndListen(
       };
     }
     const waited = Math.min(CONFIG.startTimeoutSeconds, seconds);
-    const noSpeech = `(No speech detected — the user did not reply within ${waited} seconds.)`;
+    const noSpeech =
+      `(No speech detected — the user did not reply within ${waited} seconds. The microphone is now off. ` +
+      "Ask once more out loud. If there's still no answer, stop and say on screen that voice mode is paused " +
+      "and they can type anything to carry on — speaking won't work until you call speak_and_listen again.)";
     if (heard.reason === "no-speech") return { ok: true, text: noSpeech, notes: [...notes, timing()] };
 
     onPhase?.("transcribing");

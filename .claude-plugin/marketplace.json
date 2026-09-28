@@ -1,6 +1,9 @@
 {
   "name": "mac-voice-mcp",
-  "owner": { "name": "Jeet" },
+  "description": "Mac Voice: talk with Claude out loud on your Mac, with on-device speech recognition (whisper.cpp).",
+  "owner": {
+    "name": "Jeet"
+  },
   "plugins": [
     {
       "name": "mac-voice-mcp",

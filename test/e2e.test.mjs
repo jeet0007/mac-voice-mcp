@@ -238,3 +238,77 @@ test("setup reuses a whisper.cpp built from source that isn't on PATH", async ()
     await client.close();
   }
 });
+
+// --- One voice turn at a time across sessions, and speaking without listening ----------------
+
+/** The kinds of audio events in the stub log, in order: speak / rec / transcribe. */
+const audioEvents = (log) =>
+  log
+    .split("\n")
+    .map((l) => (l.startsWith("speak ") ? "speak" : l.startsWith("rec ") ? "rec" : /whisper-server inference/.test(l) ? "transcribe" : null))
+    .filter(Boolean);
+
+test("two sessions on one Mac take turns at the mic instead of talking over each other", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const a = await connect(sb.env());
+  const b = await connect(sb.env());
+  try {
+    const [ra, rb] = await Promise.all([
+      a.client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "From session A." } }),
+      b.client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "From session B." } }),
+    ]);
+    assert.equal(ra.isError, false);
+    assert.equal(rb.isError, false);
+    assert.deepEqual(audioEvents(sb.readLog()), ["speak", "rec", "transcribe", "speak", "rec", "transcribe"]);
+    assert.ok(!existsSync(path.join(sb.home, ".cache", "mac-voice-mcp", "mic.lock")), "the lock is released after the turns");
+  } finally {
+    await a.client.close();
+    await b.client.close();
+  }
+});
+
+test("a lock left behind by a crashed session is taken over", async () => {
+  const sb = sandbox();
+  const cache = path.join(sb.home, ".cache", "mac-voice-mcp");
+  fakeModel(path.join(cache, "models"));
+  writeFileSync(path.join(cache, "mic.lock"), JSON.stringify({ pid: 2 ** 22 + 12345, since: Date.now() })); // no such process
+  const { client } = await connect(sb.env({ VOICE_MCP_LOCK_WAIT_SECONDS: "2" }));
+  try {
+    const r = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Hello?" } });
+    assert.equal(r.isError, false);
+    assert.equal(r.content[0].text, "Stub transcript from the server.");
+  } finally {
+    await client.close();
+  }
+});
+
+test("a session that keeps the mic busy makes the next one give up with a clear message", async () => {
+  const sb = sandbox();
+  const cache = path.join(sb.home, ".cache", "mac-voice-mcp");
+  fakeModel(path.join(cache, "models"));
+  writeFileSync(path.join(cache, "mic.lock"), JSON.stringify({ pid: process.pid, since: Date.now() })); // alive: this test runner
+  const { client } = await connect(sb.env({ VOICE_MCP_LOCK_WAIT_SECONDS: "1" }));
+  try {
+    const r = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Hello?" } });
+    assert.equal(r.isError, true);
+    assert.match(text(r), /Another voice session on this Mac/);
+    assert.deepEqual(audioEvents(sb.readLog()), [], "nothing was spoken or recorded");
+  } finally {
+    await client.close();
+  }
+});
+
+test("listen: false speaks without opening the mic, and needs no speech-to-text setup", async () => {
+  const sb = sandbox({ installed: false }); // no recorder, no whisper, no model
+  const { client } = await connect(sb.env());
+  try {
+    const r = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Voice mode is off. Talk soon!", listen: false } });
+    assert.equal(r.isError, false);
+    assert.match(r.content[0].text, /microphone was not opened/);
+    assert.match(text(r), /voice-mcp timing: spoke [\d.]+ s/);
+    assert.deepEqual(audioEvents(sb.readLog()), ["speak"]);
+  } finally {
+    await client.close();
+  }
+});

@@ -51,7 +51,7 @@ The server has **two tools and two prompts**:
 | `/mcp__voice-mcp__setup` | A guided setup: it checks, asks you, installs, then runs a spoken test. |
 | `/mcp__voice-mcp__voice_mode` | A hands-free session where Claude checks in by voice at natural points. |
 
-**Listening works like a conversation.** A soft chime plays when the mic opens. The server waits for you to start talking and hands back to Claude about a second after you stop. It adjusts to background noise, doesn't cut you off at pauses mid-sentence, and ignores coughs and clicks. If you say nothing for 8 seconds, Claude gets "no speech", which it is told never to treat as a yes.
+**Listening works like a conversation.** A soft chime plays when the mic opens. The server waits for you to start talking and hands back to Claude about a second after you stop. It adjusts to background noise, doesn't cut you off at pauses mid-sentence, and ignores coughs and clicks. If you say nothing for 15 seconds, Claude gets "no speech", which it is told never to treat as a yes.
 
 **Replies come back fast.** whisper.cpp's server keeps the speech model loaded between turns, and the model starts loading while Claude is still talking. You don't wait for a model load on each reply. After 15 idle minutes the server shuts down to free memory. It is stopped automatically even if the MCP server crashes.
 
@@ -76,7 +76,7 @@ You need **Node.js 22 or newer**. Whichever way you install, run setup once afte
   /plugin marketplace add jeet0007/mac-voice-mcp
   /plugin install mac-voice-mcp@mac-voice-mcp
   ```
-  The plugin adds `/mac-voice-mcp:setup` and `/mac-voice-mcp:talk`, plus a skill that teaches Claude how to use voice well and fix common problems. Each plugin version runs the matching npm release.
+  The plugin adds `/mac-voice-mcp:setup` and `/mac-voice-mcp:talk`, a skill that teaches Claude how to use voice well and fix common problems, and a hook that keeps a voice conversation in voice (see [Voice mode](#voice-mode)). Each plugin version runs the matching npm release.
 - **The official MCP Registry.** It's listed as [`io.github.jeet0007/mac-voice-mcp`](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.jeet0007/mac-voice-mcp). Apps and directories that read the registry pick it up from there. In VS Code, open the Extensions view (⇧⌘X), search `@mcp mac-voice`, and click **Install**. Smithery, Glama, PulseMCP and mcp.so copy the registry, so it shows up there too.
 
 ### By hand
@@ -160,12 +160,32 @@ One command does everything above: it builds the project, runs setup (asking bef
 git clone https://github.com/jeet0007/mac-voice-mcp && bash mac-voice-mcp/install.sh
 ```
 
+## Upgrading
+
+- **Claude Code plugin:** run `/plugin marketplace update mac-voice-mcp`, then open `/plugin`, choose mac-voice-mcp under your installed plugins, and update it. Restart Claude Code. If there's no update option, uninstall and reinstall it.
+- **Everything installed with `mac-voice-mcp@latest`** (Claude Desktop, Cursor, VS Code, `claude mcp add`): restart the app. npx fetches the new release when the server starts.
+- **Configs without `@latest`:** change `mac-voice-mcp` to `mac-voice-mcp@latest` in the config, then restart the app. Otherwise npx keeps running the version it cached first.
+
+Check which version you'd get with `npx -y mac-voice-mcp@latest --version`, and see what changed in the [changelog](CHANGELOG.md). Your model, voice and settings carry over.
+
 ## Using it
 
 - **"Work on X and check in with me by voice when you need a decision."** Claude works quietly and only speaks at decision points.
 - **`/mac-voice-mcp:talk fix the flaky login test`** (plugin), or **`/mcp__voice-mcp__voice_mode fix the flaky login test`** (added by hand). Claude reads its plan back to you, then checks in at each checkpoint. Say "stop voice mode" or "I'm back" to end it.
 - **"Read me a 20-second summary of this PR and ask if I should approve it."** Use this for one-off briefings.
 - **Just talk after the chime.** You don't need to hurry or fill silence. If you're still talking at the 30-second safety cap (`listen_seconds`), Claude is told your reply may be cut off and asks you to continue.
+
+### Voice mode
+
+Once you answer out loud, you're in a voice conversation. Claude replies by voice, not in text, until one of these happens:
+
+- **You type something.** You're back at the keyboard.
+- **You say you're done.** Claude says a short goodbye without opening the mic (`speak_and_listen` with `listen: false`).
+- **You don't answer.** After 15 seconds of silence Claude asks once more. If you still don't answer, it pauses and summarizes on screen, and the mic stays off. Type anything, or run `/mac-voice-mcp:talk`, to pick up again.
+
+In Claude Code, the plugin enforces this with a hook. If Claude tries to answer in text mid-conversation, the hook sends it back once to answer by voice. If it stops again, the hook lets it. To turn the hook off, add `"VOICE_MCP_STAY_IN_VOICE": "0"` to the `env` block in `~/.claude/settings.json`. Other apps rely on the instructions alone.
+
+**Several sessions, one mic.** Every mac-voice-mcp on your Mac takes turns: Claude Code windows, Claude Desktop and Cursor. While one is speaking or listening, the others wait for that turn to finish (shown as "waiting for another voice session"). They give up after 2 minutes with a message. If a session crashes, the next one takes the mic over.
 
 ## Getting Claude to sound natural
 
@@ -177,6 +197,7 @@ Guidance reaches Claude through several channels, because each client shows diff
 | Server instructions (when to use voice, how to handle replies, setup) | Claude Code (it reads up to 2 KB) |
 | The `voice_mode` and `setup` prompts | Claude Code (as slash commands), Claude Desktop, Cursor |
 | Server-side rewrite plus a `voice-mcp note` back to Claude | Always on |
+| The plugin's `/mac-voice-mcp:talk`, `voice-help` skill and stay-in-voice hook | Claude Code, with the plugin |
 
 The rules Claude is given:
 
@@ -204,13 +225,14 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 | `VOICE_MCP_RATE` | system rate | Words per minute, e.g. `200`. |
 | `VOICE_MCP_MAX_SPEAK_WORDS` | `120` | Longer text is cut at a sentence boundary ("the rest is on screen"). |
 | `VOICE_MCP_CHIME` | `1` | Set to `0` to turn off the mic open/close sounds. |
+| `VOICE_MCP_LOCK_WAIT_SECONDS` | `120` | How long a turn waits while another session on this Mac is using the mic. |
 
 **Listening**
 
 | Variable | Default | |
 |---|---|---|
 | `VOICE_MCP_END_SILENCE_MS` | `1200` | How long a pause ends your turn. Use `1800` if it cuts you off while you think, `800` for snappier replies. |
-| `VOICE_MCP_START_TIMEOUT_SECONDS` | `8` | How long to wait for you to start talking. |
+| `VOICE_MCP_START_TIMEOUT_SECONDS` | `15` | How long to wait for you to start talking. |
 | `VOICE_MCP_SPEECH_MARGIN_DB` | `12` | How much louder than room noise counts as speech. Raise it in noisy rooms. |
 | `VOICE_MCP_MIN_SPEECH_DB` | `-48` | The quietest level that ever counts as speech (dBFS). |
 | `VOICE_MCP_RECORDER` | `auto` | `sox` or `ffmpeg` (`ffmpeg` is macOS only). |
@@ -229,6 +251,12 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 | `VOICE_MCP_THREADS` | min(8, cores) | Number of whisper.cpp threads. |
 | `VOICE_MCP_CACHE_DIR` | `~/.cache/mac-voice-mcp` | Where models are downloaded or symlinked. |
 | `VOICE_MCP_DEBUG` | `0` | Verbose logs with per-turn timings, written to stderr. |
+
+**Claude Code plugin hook.** Set this in the `env` block of `~/.claude/settings.json`, not in the server's config:
+
+| Variable | Default | |
+|---|---|---|
+| `VOICE_MCP_STAY_IN_VOICE` | `1` | Set to `0` to stop the plugin's hook from sending Claude back to answer by voice. |
 
 **Models** (whisper.cpp names):
 
@@ -253,6 +281,8 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 | It garbles names or jargon | Set `VOICE_MCP_WHISPER_PROMPT="Priya, Postgres, Kubernetes"`, or switch to `small.en`. |
 | The voice sounds robotic | Download a Premium voice (see [Get a better voice](#then-set-up-and-allow-the-mic)). It's used automatically. |
 | It asks for approval every turn | Add the tool to Claude Code's allow list: see [Allow voice turns without prompts](#allow-voice-turns-without-prompts). |
+| "Another voice session on this Mac…" | Another Claude window, Claude Desktop or Cursor held the speaker and mic for over 2 minutes, which means one very long turn. End that conversation, then try again. |
+| Claude keeps answering by voice after I'm done | Type anything, or say "stop voice mode". To switch the plugin's hook off entirely, see [Voice mode](#voice-mode). |
 | Turns feel slow | Each result ends with a timing line, e.g. `spoke 3.1 s · listened 4.0 s · transcribed 0.3 s`. Ask Claude what it says. Transcribing should take well under a second. |
 
 ## Known limitations
@@ -260,7 +290,7 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 - **You can't interrupt it.** It finishes speaking, then listens. Barge-in would mean listening while the speakers play, which needs headphones or echo cancellation.
 - **It's macOS-first.** Linux works with SoX and espeak-ng. Windows is untested.
 - **Turn-taking is based on loudness, not a speech model.** It adapts to background noise, but very noisy rooms, music or TV can confuse it. A headset helps, and so do the listening settings above.
-- **One conversation at a time.** There's one speaker and one microphone, so calls are queued.
+- **One conversation at a time.** There's one speaker and one microphone, so turns from every session on the Mac are queued.
 
 ## Privacy and safety
 
@@ -297,10 +327,13 @@ npm run inspect        # MCP Inspector
 | `model.ts` | Finding, symlinking or downloading the model |
 | `stt.ts` | The warm `whisper-server` with orphan guard, and the `whisper-cli` fallback |
 | `setup.ts` | Requirement checks and consent-based background installs |
+| `lock.ts` | One voice turn at a time across every session on the Mac |
 | `voice.ts`, `server.ts`, `index.ts` | The round trip, the MCP tools and prompts, and the CLI |
-| `skills/` | The Claude Code plugin's `/mac-voice-mcp:talk` and `:setup` commands and the `voice-help` skill |
+| `skills/`, `hooks/` | The Claude Code plugin's `/mac-voice-mcp:talk` and `:setup` commands, the `voice-help` skill, and the stay-in-voice hook |
 
 The package installs two commands: `mac-voice-mcp` (the one `npx -y mac-voice-mcp` runs), and `voice-mcp`.
+
+**Testing the plugin: don't start Claude Code inside this repo.** In this folder, `npx mac-voice-mcp@<this version>` finds the checkout itself instead of downloading the package, can't run it, and the server fails with `CONNECTION_CLOSED`. Start `claude` in any other folder. To try unreleased plugin files (skills, hooks), swap the marketplace to your checkout: run `/plugin marketplace remove mac-voice-mcp`, then `/plugin marketplace add /path/to/checkout`, and install at user scope. The server still comes from npm, so test server changes with `npm test` and `npm run test:voice`.
 
 ### Releasing
 

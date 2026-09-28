@@ -50,14 +50,28 @@ export function createServer(): McpServer {
             `Upper limit on how long to listen, in seconds (default ${DEFAULT_LISTEN_SECONDS}, max ${MAX_LISTEN_SECONDS}). ` +
               "Listening already stops when the user finishes talking, so you rarely need this.",
           ),
+        listen: z
+          .boolean()
+          .optional()
+          .describe(
+            "Default true. false: only speak, without opening the microphone — for a one-way announcement, " +
+              "or to say goodbye when the user ends voice mode.",
+          ),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
-    async ({ text_to_speak, listen_seconds }, extra): Promise<CallToolResult> => {
+    async ({ text_to_speak, listen_seconds, listen }, extra): Promise<CallToolResult> => {
       const progress = progressReporter(extra);
+      const phaseMessage = (phase: string) =>
+        phase === "waiting" ? "waiting for another voice session on this Mac to finish" : phase;
       try {
         const result = await exclusive(() =>
-          speakAndListen(text_to_speak, listen_seconds ?? DEFAULT_LISTEN_SECONDS, extra.signal, (phase) => progress?.(phase)),
+          speakAndListen(text_to_speak, {
+            listenSeconds: listen_seconds ?? DEFAULT_LISTEN_SECONDS,
+            listen,
+            signal: extra.signal,
+            onPhase: (phase) => progress?.(phaseMessage(phase)),
+          }),
         );
         return {
           content: [{ type: "text", text: result.text }, ...result.notes.map((note) => ({ type: "text" as const, text: `\n\n${note}` }))],
