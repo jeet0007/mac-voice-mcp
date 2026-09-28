@@ -5,6 +5,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- **Voice conversations stay in voice (Claude Code plugin).** Once you've answered out loud, a plugin hook sends Claude back to reply by voice if it tries to answer in text. It does this at most once per spoken answer, so it can never loop. Voice mode ends when you type, when you don't answer, or when Claude says goodbye with `listen: false`. It's tracked per session and expires after 30 idle minutes. `VOICE_MCP_STAY_IN_VOICE=0` turns the hook off.
+- **`speak_and_listen` with `listen: false`** speaks without opening the microphone, for one-way announcements or a goodbye. It needs only text-to-speech, not the recorder, whisper or a model.
+- **One voice turn at a time across the whole Mac.** Claude Code windows, Claude Desktop and Cursor take turns at the speaker and mic, one turn at a time, so they never talk over each other. A waiting turn reports "waiting for another voice session" and gives up after `VOICE_MCP_LOCK_WAIT_SECONDS` (120) with a clear message. A lock left by a crashed session is taken over. If the cache folder isn't writable, turns go ahead without the lock.
+- **README: an Upgrading section and a Voice mode section, plus a note on testing the plugin from a checkout.**
+
+### Changed
+- **Claude waits longer for you to start talking: 15 seconds, up from 8** (`VOICE_MCP_START_TIMEOUT_SECONDS`), so reading or thinking doesn't end the conversation.
+- **When you don't answer, Claude asks once more, then pauses cleanly.** The "no speech" result now tells Claude that the mic is off, so it tells you to type to carry on rather than to speak.
+
+### Removed
+- The unused `packaging/` folder. `.github/` is the only copy of the workflows.
+
 ## [0.2.0] - 2026-09-28
 
 ### Added

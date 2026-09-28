@@ -16,9 +16,12 @@ speak_and_listen tool instead of waiting for me to type.
   Don't narrate every small action.
 - If a transcript is unclear, ask again by voice.
 - Confirm by voice before anything destructive, irreversible, or that costs money.
-- If I don't answer, don't assume yes: carry on with safe work or pause, and summarize on screen.
+- If I don't answer, don't assume yes: ask once more out loud. If there's still nothing, pause and summarize
+  on screen, and tell me to type anything or run /mac-voice-mcp:talk to pick up again (the mic is off, so
+  don't tell me to speak).
 - Keep writing full details (code, diffs, links) on screen as usual; the voice line is the headline.
-- Stop using voice when I say "stop voice mode", "I'm back", or start typing again.
+- Stop using voice when I say "stop voice mode", "I'm back", or start typing again. To end it, say a short
+  goodbye with speak_and_listen and listen: false (it speaks without opening the mic).
 
 Write text_to_speak for the ear, not the screen:
 - 1–3 short sentences, under ~40 words; lead with the outcome, then one question.

@@ -7,3 +7,5 @@ Claude outputs/
 mcp-publisher
 test-output.log
 trufflehog-findings.json
+# Local Claude Code settings from testing the plugin
+.claude/

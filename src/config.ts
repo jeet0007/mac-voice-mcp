@@ -38,6 +38,11 @@ const CACHE_ROOT =
   path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache"), "mac-voice-mcp");
 
 export const CONFIG = {
+  /** Models, the mic lock and hook state live here. */
+  cacheDir: CACHE_ROOT,
+  /** How long a voice turn waits for another session to finish with the mic. */
+  lockWaitSeconds: Math.max(1, envNum("VOICE_MCP_LOCK_WAIT_SECONDS", 120)),
+
   // --- Speaking
   /**
    * macOS voice name, e.g. "Ava (Premium)" (`say -v '?'` lists them). Unset: the most natural
@@ -55,7 +60,7 @@ export const CONFIG = {
   /** End of turn: stop listening after this much silence once the user has spoken. */
   endSilenceMs: Math.max(300, envNum("VOICE_MCP_END_SILENCE_MS", 1200)),
   /** Give up if the user hasn't started talking within this many seconds. */
-  startTimeoutSeconds: Math.max(1, envNum("VOICE_MCP_START_TIMEOUT_SECONDS", 8)),
+  startTimeoutSeconds: Math.max(1, envNum("VOICE_MCP_START_TIMEOUT_SECONDS", 15)),
   /** Speech must be this many dB above the room's background noise. Lower = more sensitive. */
   speechMarginDb: envNum("VOICE_MCP_SPEECH_MARGIN_DB", 12),
   /** …and never quieter than this absolute level (dBFS). */

@@ -87,9 +87,10 @@ async function runSetupCli(args: string[]): Promise<number> {
 async function runTestCli(text?: string): Promise<number> {
   const prompt = text || "Voice bridge test. Say something after the chime, and I'll print what I heard.";
   try {
-    const result = await speakAndListen(prompt, envNum("VOICE_MCP_TEST_SECONDS", DEFAULT_LISTEN_SECONDS), undefined, (p) =>
-      console.error(`  … ${p}`),
-    );
+    const result = await speakAndListen(prompt, {
+      listenSeconds: envNum("VOICE_MCP_TEST_SECONDS", DEFAULT_LISTEN_SECONDS),
+      onPhase: (p) => console.error(`  … ${p}`),
+    });
     process.stdout.write(result.text + "\n");
     for (const note of result.notes) console.error(note);
     return result.ok ? 0 : 1;
