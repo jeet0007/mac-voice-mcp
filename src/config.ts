@@ -39,7 +39,10 @@ const CACHE_ROOT =
 
 export const CONFIG = {
   // --- Speaking
-  /** macOS voice name, e.g. "Samantha" (`say -v '?'` lists them). */
+  /**
+   * macOS voice name, e.g. "Ava (Premium)" (`say -v '?'` lists them). Unset: the most natural
+   * installed voice for the language (Premium, then Enhanced), else the system voice. "default": always the system voice.
+   */
   voice: process.env.VOICE_MCP_VOICE?.trim() || undefined,
   /** Speech rate in words per minute (macOS `say -r`). */
   rate: process.env.VOICE_MCP_RATE?.trim() || undefined,

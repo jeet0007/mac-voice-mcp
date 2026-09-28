@@ -201,11 +201,11 @@ bold "6/6  Done — how people install it"
 cat <<EOT
   Claude Code (plugin):   /plugin marketplace add $REPO
                           /plugin install $NAME@$NAME
-  Claude Code (direct):   claude mcp add voice-mcp -s user -- npx -y $NAME
+  Claude Code (direct):   claude mcp add voice-mcp -s user -- npx -y $NAME@latest
   Claude Desktop/Cursor:  see the README on github.com/$REPO
 
-  Future releases: bump "version" in package.json and server.json, commit, then
-    git tag v<version> && git push origin v<version>
+  Future releases: add the version's section to CHANGELOG.md, then
+    npm version patch|minor|major && git push --follow-tags
 
   One-time, so future releases need no npm token at all (npm "trusted publishing"):
     npmjs.com → $NAME → Settings → Trusted Publisher → GitHub Actions

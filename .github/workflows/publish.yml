@@ -1,11 +1,16 @@
-# Releases: bump "version" in package.json and server.json, commit, then
-#   git tag v0.2.0 && git push origin v0.2.0
+# Releases (see "Releasing" in the README):
+#   1. add the version's section to CHANGELOG.md
+#   2. npm version patch|minor|major   (bumps package.json, server.json and the plugin; commits; tags)
+#   3. git push --follow-tags          (this workflow runs on the v* tag)
 #
 # No secrets needed:
 # - npm: "trusted publishing" (OIDC). One-time setup on npmjs.com → mac-voice-mcp → Settings →
 #   Trusted Publisher → GitHub Actions: your GitHub user, repo mac-voice-mcp, workflow publish.yml.
 #   npm then signs a provenance attestation linking each release to the exact commit and workflow.
 # - MCP Registry: GitHub OIDC.
+# - GitHub Release: the workflow's own token, in a separate job that alone can write.
+#
+# Every step is safe to re-run: "Re-run failed jobs" skips whatever already finished.
 name: Publish
 
 on:
@@ -23,6 +28,8 @@ jobs:
       id-token: write # OIDC for npm trusted publishing and the MCP Registry
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -32,6 +39,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - name: Tag matches package.json and server.json
+        # (npm test also checks the plugin's version and the CHANGELOG.md entry.)
         run: |
           v="${GITHUB_REF_NAME#v}"
           test "$(node -p 'require("./package.json").version')" = "$v"
@@ -50,6 +58,12 @@ jobs:
           curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
       - name: Publish to the MCP Registry
         run: |
+          v="${GITHUB_REF_NAME#v}"
+          name="$(node -p 'require("./server.json").name')"
+          if curl -fsS "https://registry.modelcontextprotocol.io/v0.1/servers/${name/\//%2F}/versions" | grep -q "\"version\":\"$v\""; then
+            echo "$name $v is already in the MCP Registry — skipping."
+            exit 0
+          fi
           ./mcp-publisher login github-oidc
           # The registry checks the package on npm, which can take a few minutes to show a new version.
           for attempt in 1 2 3 4 5 6; do
@@ -58,3 +72,27 @@ jobs:
             sleep 60
           done
           exit 1
+
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub Release
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: GitHub Release from CHANGELOG.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          v="${TAG#v}"
+          # This version's section: from "## [x.y.z]" to the next section or the link references.
+          awk -v v="$v" 'index($0, "## [" v "]") == 1 { on = 1; next } on && (/^## \[/ || /^\[[^]]+\]: /) { exit } on { print }' CHANGELOG.md > notes.md
+          grep -q '[^[:space:]]' notes.md || { echo "CHANGELOG.md has no section for $v"; exit 1; }
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "v$v" --notes-file notes.md
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "v$v" --notes-file notes.md --verify-tag
+          fi

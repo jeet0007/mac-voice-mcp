@@ -64,9 +64,9 @@ You need **Node.js 22 or newer**. Whichever way you install, run setup once afte
 ### One click
 
 <p>
-  <a href="https://cursor.com/en/install-mcp?name=voice-mcp&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIm1hYy12b2ljZS1tY3AiXX0%3D"><img alt="Add to Cursor" src="https://cursor.com/deeplink/mcp-install-dark.svg" height="32"></a>
-  <a href="https://insiders.vscode.dev/redirect/mcp/install?name=voice-mcp&config=%7B%22type%22%3A%22stdio%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22mac-voice-mcp%22%5D%7D"><img alt="Install in VS Code" src="https://img.shields.io/badge/VS_Code-Install_Server-0098FF?style=for-the-badge&logo=visualstudiocode&logoColor=white" height="32"></a>
-  <a href="https://insiders.vscode.dev/redirect/mcp/install?name=voice-mcp&config=%7B%22type%22%3A%22stdio%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22mac-voice-mcp%22%5D%7D&quality=insiders"><img alt="Install in VS Code Insiders" src="https://img.shields.io/badge/VS_Code_Insiders-Install_Server-24bfa5?style=for-the-badge&logo=visualstudiocode&logoColor=white" height="32"></a>
+  <a href="https://cursor.com/en/install-mcp?name=voice-mcp&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIm1hYy12b2ljZS1tY3BAbGF0ZXN0Il19"><img alt="Add to Cursor" src="https://cursor.com/deeplink/mcp-install-dark.svg" height="32"></a>
+  <a href="https://insiders.vscode.dev/redirect/mcp/install?name=voice-mcp&config=%7B%22type%22%3A%22stdio%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22mac-voice-mcp%40latest%22%5D%7D"><img alt="Install in VS Code" src="https://img.shields.io/badge/VS_Code-Install_Server-0098FF?style=for-the-badge&logo=visualstudiocode&logoColor=white" height="32"></a>
+  <a href="https://insiders.vscode.dev/redirect/mcp/install?name=voice-mcp&config=%7B%22type%22%3A%22stdio%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22mac-voice-mcp%40latest%22%5D%7D&quality=insiders"><img alt="Install in VS Code Insiders" src="https://img.shields.io/badge/VS_Code_Insiders-Install_Server-24bfa5?style=for-the-badge&logo=visualstudiocode&logoColor=white" height="32"></a>
 </p>
 
 ### From a marketplace
@@ -76,6 +76,7 @@ You need **Node.js 22 or newer**. Whichever way you install, run setup once afte
   /plugin marketplace add jeet0007/mac-voice-mcp
   /plugin install mac-voice-mcp@mac-voice-mcp
   ```
+  The plugin adds `/mac-voice-mcp:setup` and `/mac-voice-mcp:talk`, plus a skill that teaches Claude how to use voice well and fix common problems. Each plugin version runs the matching npm release.
 - **The official MCP Registry.** It's listed as [`io.github.jeet0007/mac-voice-mcp`](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.jeet0007/mac-voice-mcp). Apps and directories that read the registry pick it up from there. In VS Code, open the Extensions view (⇧⌘X), search `@mcp mac-voice`, and click **Install**. Smithery, Glama, PulseMCP and mcp.so copy the registry, so it shows up there too.
 
 ### By hand
@@ -83,7 +84,7 @@ You need **Node.js 22 or newer**. Whichever way you install, run setup once afte
 **Claude Code**
 
 ```bash
-claude mcp add voice-mcp -s user -- npx -y mac-voice-mcp
+claude mcp add voice-mcp -s user -- npx -y mac-voice-mcp@latest
 ```
 
 **Claude Desktop.** Add this to `~/Library/Application Support/Claude/claude_desktop_config.json`, then quit (⌘Q) and reopen the app:
@@ -93,11 +94,13 @@ claude mcp add voice-mcp -s user -- npx -y mac-voice-mcp
   "mcpServers": {
     "voice-mcp": {
       "command": "npx",
-      "args": ["-y", "mac-voice-mcp"]
+      "args": ["-y", "mac-voice-mcp@latest"]
     }
   }
 }
 ```
+
+`@latest` makes npx check for a new release each time the app starts. Without it, npx keeps running whichever version it cached first.
 
 If you get `spawn npx ENOENT`, use the full path from `which npx`, e.g. `"command": "/opt/homebrew/bin/npx"`.
 
@@ -106,20 +109,20 @@ If you get `spawn npx ENOENT`, use the full path from `which npx`, e.g. `"comman
 **VS Code.** Run **MCP: Add Server** from the Command Palette, or:
 
 ```bash
-code --add-mcp '{"name":"voice-mcp","command":"npx","args":["-y","mac-voice-mcp"]}'
+code --add-mcp '{"name":"voice-mcp","command":"npx","args":["-y","mac-voice-mcp@latest"]}'
 ```
 
-**Any other MCP client.** Run `npx -y mac-voice-mcp` as a stdio server.
+**Any other MCP client.** Run `npx -y mac-voice-mcp@latest` as a stdio server.
 
 ### Then: set up and allow the mic
 
-**Run setup once.** Ask Claude to *"set up voice"*. In Claude Code you can also run `/mcp__voice-mcp__setup`, or from a terminal run `npx -y mac-voice-mcp setup`.
+**Run setup once.** Ask Claude to *"set up voice"*. In Claude Code you can also run `/mac-voice-mcp:setup` (plugin) or `/mcp__voice-mcp__setup` (added by hand), or from a terminal run `npx -y mac-voice-mcp@latest setup`.
 
 Setup checks what's already there before it changes anything:
 
 | Needed | Provided by | If it's missing |
 |---|---|---|
-| Voice | macOS `say` | Nothing to do. It's part of macOS. |
+| Voice | macOS `say`, using the most natural voice installed | Nothing to do. For a far better voice, add a free Premium one (see below). |
 | Microphone capture | SoX (`rec`) | `brew install sox` |
 | Speech-to-text | whisper.cpp (`whisper-cli` and `whisper-server`, Metal-accelerated) | `brew install whisper-cpp` |
 | Speech model | `base.en`, ~140 MB | Downloaded once to `~/.cache/mac-voice-mcp/models/` |
@@ -129,6 +132,25 @@ Setup checks what's already there before it changes anything:
 - **Slow installs don't time out.** If `brew install whisper-cpp` takes a while, setup reports INSTALLING. The install carries on in the background, and the next check picks up the result.
 
 **Allow the microphone.** The first time Claude listens, macOS asks whether Claude (or Cursor, or your terminal) can use the microphone. Click Allow.
+
+**Get a better voice (recommended).** macOS includes free Premium voices that sound far more natural than the default. Open **System Settings → Accessibility → Spoken Content → System Voice → Manage Voices…**, and download one, for example English → *Ava (Premium)* or *Zoe (Premium)*. The next voice turn uses it automatically. To choose a specific voice, or keep the system voice, see `VOICE_MCP_VOICE` under [Configuration](#configuration).
+
+### Allow voice turns without prompts
+
+By default, Claude Code asks for approval every time Claude wants to speak, which breaks the flow of a conversation. To allow voice turns, add the tool to the `permissions.allow` list in `~/.claude/settings.json`. Use the name that matches how you installed it:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "mcp__plugin_mac-voice-mcp_voice-mcp__speak_and_listen",
+      "mcp__voice-mcp__speak_and_listen"
+    ]
+  }
+}
+```
+
+The first name is for the plugin, the second for `claude mcp add voice-mcp …`. Leave `voice_setup` out, so installs still ask you first. While `/mac-voice-mcp:talk` runs, voice turns are already allowed.
 
 ### Installing from a clone
 
@@ -141,7 +163,7 @@ git clone https://github.com/jeet0007/mac-voice-mcp && bash mac-voice-mcp/instal
 ## Using it
 
 - **"Work on X and check in with me by voice when you need a decision."** Claude works quietly and only speaks at decision points.
-- **`/mcp__voice-mcp__voice_mode fix the flaky login test`.** Claude reads its plan back to you, then checks in at each checkpoint. Say "stop voice mode" or "I'm back" to end it.
+- **`/mac-voice-mcp:talk fix the flaky login test`** (plugin), or **`/mcp__voice-mcp__voice_mode fix the flaky login test`** (added by hand). Claude reads its plan back to you, then checks in at each checkpoint. Say "stop voice mode" or "I'm back" to end it.
 - **"Read me a 20-second summary of this PR and ask if I should approve it."** Use this for one-off briefings.
 - **Just talk after the chime.** You don't need to hurry or fill silence. If you're still talking at the 30-second safety cap (`listen_seconds`), Claude is told your reply may be cut off and asks you to continue.
 
@@ -178,7 +200,7 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 
 | Variable | Default | |
 |---|---|---|
-| `VOICE_MCP_VOICE` | system voice | macOS voice, e.g. `Samantha`, `Daniel`, `Kanya`. List them with `say -v '?'`. |
+| `VOICE_MCP_VOICE` | most natural installed | Unset: the best Premium or Enhanced voice installed for the language, else the system voice. Set a name, e.g. `Ava (Premium)`, `Daniel`, `Kanya` (list them with `say -v '?'`), or `default` to always use the system voice. |
 | `VOICE_MCP_RATE` | system rate | Words per minute, e.g. `200`. |
 | `VOICE_MCP_MAX_SPEAK_WORDS` | `120` | Longer text is cut at a sentence boundary ("the rest is on screen"). |
 | `VOICE_MCP_CHIME` | `1` | Set to `0` to turn off the mic open/close sounds. |
@@ -221,7 +243,7 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 
 | Symptom | Fix |
 |---|---|
-| "voice-mcp is not set up yet" | Ask Claude to *set up voice*, or run `npx -y mac-voice-mcp setup`. |
+| "voice-mcp is not set up yet" | Ask Claude to *set up voice*, or run `npx -y mac-voice-mcp@latest setup`. |
 | "microphone returned pure digital silence" | macOS is blocking the mic for the host app. Go to **System Settings → Privacy & Security → Microphone**, enable Claude / Cursor / your terminal, then restart that app. |
 | No permission prompt ever appears | Run `tccutil reset Microphone <bundle id>` and restart the app. Running `test` in Terminal only gives permission to Terminal, not to Claude Desktop. |
 | It cuts me off while I'm thinking | Set `VOICE_MCP_END_SILENCE_MS=1800` (or up to `2500`). |
@@ -229,6 +251,9 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 | It hears its own voice | Use headphones, or turn the speaker volume down. It only listens after it finishes speaking, but echo can linger. |
 | "Homebrew: not installed" | Install it from [brew.sh](https://brew.sh). It needs your password, so it can't run from Claude. Then run setup again. |
 | It garbles names or jargon | Set `VOICE_MCP_WHISPER_PROMPT="Priya, Postgres, Kubernetes"`, or switch to `small.en`. |
+| The voice sounds robotic | Download a Premium voice (see [Get a better voice](#then-set-up-and-allow-the-mic)). It's used automatically. |
+| It asks for approval every turn | Add the tool to Claude Code's allow list: see [Allow voice turns without prompts](#allow-voice-turns-without-prompts). |
+| Turns feel slow | Each result ends with a timing line, e.g. `spoke 3.1 s · listened 4.0 s · transcribed 0.3 s`. Ask Claude what it says. Transcribing should take well under a second. |
 
 ## Known limitations
 
@@ -256,7 +281,7 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ```bash
 npm install
-npm test               # build + 27 tests: unit tests and end-to-end tests over MCP with stub binaries
+npm test               # build + unit tests, end-to-end tests over MCP with stub binaries, and release-metadata checks
 npm run audit          # known-vulnerability and signature checks on dependencies
 npm run setup          # check what's installed; offers to install what's missing
 npm run test:voice     # one real speak → listen → transcribe turn
@@ -273,13 +298,19 @@ npm run inspect        # MCP Inspector
 | `stt.ts` | The warm `whisper-server` with orphan guard, and the `whisper-cli` fallback |
 | `setup.ts` | Requirement checks and consent-based background installs |
 | `voice.ts`, `server.ts`, `index.ts` | The round trip, the MCP tools and prompts, and the CLI |
+| `skills/` | The Claude Code plugin's `/mac-voice-mcp:talk` and `:setup` commands and the `voice-help` skill |
 
 The package installs two commands: `mac-voice-mcp` (the one `npx -y mac-voice-mcp` runs), and `voice-mcp`.
 
 ### Releasing
 
 - **First release:** `bash publish.sh`. It asks before each public step and uses your own GitHub and npm logins. It creates the GitHub repo, publishes to npm, and lists the server in the [official MCP Registry](https://registry.modelcontextprotocol.io), which Smithery, Glama, PulseMCP and mcp.so pick up from.
-- **Later releases:** bump `version` in `package.json` and `server.json`, then push a `v<version>` tag. The Publish workflow tests the build, checks that the tag matches both versions, and publishes to npm and the MCP Registry. It needs no secrets: both logins use GitHub's OIDC identity, once you've set the package's *Trusted Publisher* on npmjs.com (`publish.sh` prints the steps).
+- **Later releases:**
+  1. Add a section to `CHANGELOG.md` for the new version, in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format, dated today.
+  2. Run `npm version patch` (bug fixes), `npm version minor` (new features) or `npm version major` (breaking changes), per [semver](https://semver.org). It updates `package.json`, `package-lock.json`, `server.json` and the plugin (including the npm version the plugin runs), commits, and tags `v<version>`.
+  3. Run `git push --follow-tags`.
+
+  The Publish workflow then runs the tests, which also check that every version and the changelog entry match. It publishes to npm with provenance, lists the release in the MCP Registry, and creates a GitHub Release from the changelog section. It needs no secrets: npm and the registry both use GitHub's OIDC identity, once you've set the package's *Trusted Publisher* on npmjs.com (`publish.sh` prints the steps). If a step fails, fix the cause and use **Re-run failed jobs**. Steps that already finished are skipped.
 
 ## License
 

@@ -90,6 +90,7 @@ test("a full turn: rewrites markdown for speech, transcribes via the warm server
     assert.equal(r1.isError, false);
     assert.equal(r1.content[0].text, "Stub transcript from the server.");
     assert.match(text(r1), /voice-mcp note: .*file paths/);
+    assert.match(text(r1), /voice-mcp timing: spoke [\d.]+ s · listened [\d.]+ s \(user talked [\d.]+ s\) · transcribed [\d.]+ s/);
     const r2 = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Anything else?" } });
     assert.equal(r2.content[0].text, "Stub transcript from the server.");
 

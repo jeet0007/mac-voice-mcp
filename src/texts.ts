@@ -53,6 +53,7 @@ export const SPEAK_TOOL_DESCRIPTION = [
   "Once the user is talking with you by voice, keep the conversation in voice: answer each transcript with",
   "another speak_and_listen call (not a text reply) until they say stop or start typing.",
   'A reply of "(No speech detected …)" means the user did not answer — never treat it as consent.',
+  'The "voice-mcp timing" line at the end is diagnostics: ignore it unless the user asks why things feel slow.',
   "If it reports that voice-mcp is not set up, call voice_setup.",
 ].join("\n");
 

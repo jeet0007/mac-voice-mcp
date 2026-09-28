@@ -42,12 +42,16 @@ export async function speakAndListen(
     const t0 = Date.now();
     onPhase?.("speaking");
     await speak(speech.text, signal);
+    const spoke = Date.now() - t0;
     await chime("start");
     onPhase?.("listening");
+    const tListen = Date.now();
     const heard = await listenForTurn(seconds, wav, signal);
     void chime("stop");
     const t1 = Date.now();
     debug("listen:", heard);
+    const timing = (transcribedMs?: number) =>
+      timingNote({ spokeMs: spoke, listenedMs: t1 - tListen, talkedSeconds: heard.speechSeconds, transcribedMs });
 
     if (heard.digitalSilence) {
       return {
@@ -58,12 +62,12 @@ export async function speakAndListen(
     }
     const waited = Math.min(CONFIG.startTimeoutSeconds, seconds);
     const noSpeech = `(No speech detected — the user did not reply within ${waited} seconds.)`;
-    if (heard.reason === "no-speech") return { ok: true, text: noSpeech, notes };
+    if (heard.reason === "no-speech") return { ok: true, text: noSpeech, notes: [...notes, timing()] };
 
     onPhase?.("transcribing");
     const transcript = await transcribe(wav, model, signal);
-    debug(`timing: speak+listen ${t1 - t0} ms, transcribe ${Date.now() - t1} ms`);
-    if (!transcript) return { ok: true, text: noSpeech, notes };
+    const transcribed = Date.now() - t1;
+    if (!transcript) return { ok: true, text: noSpeech, notes: [...notes, timing(transcribed)] };
     if (heard.reason === "max-duration") {
       const l = heard.levels;
       const f = (n: number) => (Number.isFinite(n) ? n.toFixed(0) : "?");
@@ -74,10 +78,22 @@ export async function speakAndListen(
           `last second ${f(l.recentDb)} ± ${l.recentSpreadDb.toFixed(1)} dB.)`,
       );
     }
-    return { ok: true, text: transcript, notes };
+    return { ok: true, text: transcript, notes: [...notes, timing(transcribed)] };
   } finally {
     await rm(tmpDir, { recursive: true, force: true });
   }
+}
+
+const secs = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+
+/** One compact line per turn, so "why did that feel slow?" has an answer. */
+export function timingNote(t: { spokeMs: number; listenedMs: number; talkedSeconds: number; transcribedMs?: number }): string {
+  const parts = [
+    `spoke ${secs(t.spokeMs)}`,
+    `listened ${secs(t.listenedMs)}` + (t.talkedSeconds > 0 ? ` (user talked ${t.talkedSeconds.toFixed(1)} s)` : " (no speech)"),
+  ];
+  if (t.transcribedMs !== undefined) parts.push(`transcribed ${secs(t.transcribedMs)}`);
+  return `voice-mcp timing: ${parts.join(" · ")}`;
 }
 
 /** Serialize calls: there is one speaker and one microphone. */

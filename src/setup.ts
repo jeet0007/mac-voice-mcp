@@ -7,7 +7,7 @@
  * the result. A slow `brew install` can never time the client out.
  */
 import { statSync } from "node:fs";
-import { describeRecorder, findRecorder, findTts } from "./audio.js";
+import { chooseVoice, describeRecorder, findRecorder, findTts, resetVoiceChoice, VOICE_UPGRADE_HINT } from "./audio.js";
 import { CONFIG, IS_MAC, IS_WIN, log } from "./config.js";
 import { ensureModel, isModelDownloading, locateModel, modelSource, MODEL_SIZES_MB } from "./model.js";
 import { isExecutable, resetWhichCache, run, sleep, tail, which } from "./proc.js";
@@ -106,6 +106,15 @@ async function checkRequirements(): Promise<Check[]> {
       ? { label: "Text-to-speech", status: "ok", detail: IS_MAC ? "macOS `say` (built in)" : tts }
       : { label: "Text-to-speech", status: "missing", detail: "no engine found — install espeak-ng (`sudo apt install espeak-ng`)" },
   );
+  if (tts && IS_MAC) {
+    resetVoiceChoice(); // pick up a voice downloaded since the last check
+    const choice = await chooseVoice();
+    checks.push(
+      choice.canUpgrade
+        ? { label: "Voice", status: "optional", detail: `${choice.label} — ${VOICE_UPGRADE_HINT}` }
+        : { label: "Voice", status: "ok", detail: choice.label },
+    );
+  }
 
   const rec = findRecorder();
   checks.push(
@@ -208,6 +217,9 @@ export async function runSetupFlow(install: boolean, onProgress?: (message: stri
   lines.push("");
   if (ready) {
     lines.push("Next: everything is in place — speak_and_listen is ready to use.");
+    if (checks.some((c) => c.label === "Voice" && c.status === "optional")) {
+      lines.push("Mention the optional voice tip (•) to the user once — it makes the voice sound far more natural. Nothing else to do.");
+    }
   } else if (installing) {
     lines.push("Next: installation is still running in the background. Tell the user, wait about a minute, then call voice_setup again (install=false) to check.");
   } else if (!install && (toInstall.length || needsModel) && (findBrew() || !toInstall.length)) {

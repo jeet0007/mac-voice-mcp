@@ -16,6 +16,83 @@ export function findTts(): string | null {
   return which("espeak-ng") ?? which("espeak") ?? which("spd-say");
 }
 
+// --- Which voice (macOS) ---------------------------------------------------------------------
+
+export interface SayVoice {
+  name: string;
+  locale: string;
+  /** 3 = Premium, 2 = Enhanced, 1 = standard. */
+  quality: number;
+}
+
+/** Parse `say -v '?'` lines such as "Ava (Premium)       en_US    # Hello! My name is Ava." */
+export function parseSayVoices(output: string): SayVoice[] {
+  const voices: SayVoice[] = [];
+  for (const line of output.split("\n")) {
+    const m = /^(.+?)\s+([a-z]{2,3}_[A-Za-z0-9]+)\s+#/.exec(line.trimEnd());
+    if (!m) continue;
+    const name = m[1]!.trim();
+    const quality = /\(Premium\)/i.test(name) ? 3 : /\(Enhanced\)/i.test(name) ? 2 : 1;
+    voices.push({ name, locale: m[2]!, quality });
+  }
+  return voices;
+}
+
+/**
+ * The most natural installed voice for the language: Premium first, then Enhanced, preferring
+ * the system's region (en_US over en_GB on a US Mac). null = none installed; keep the system voice.
+ */
+export function pickVoice(voices: SayVoice[], language: string, systemLocale: string): SayVoice | null {
+  const lang = (language && language !== "auto" ? language : systemLocale).toLowerCase().split(/[-_]/)[0] ?? "en";
+  const region = (systemLocale.split(/[-_]/)[1] ?? "").toUpperCase();
+  const inRegion = (v: SayVoice) => (region && v.locale.toUpperCase().endsWith(`_${region}`) ? 1 : 0);
+  const candidates = voices.filter((v) => v.quality >= 2 && v.locale.toLowerCase().startsWith(`${lang}_`));
+  candidates.sort((a, b) => b.quality - a.quality || inRegion(b) - inRegion(a) || a.name.localeCompare(b.name));
+  return candidates[0] ?? null;
+}
+
+export interface VoiceChoice {
+  /** Passed to `say -v`; undefined = the system voice. */
+  voice?: string;
+  /** For voice_setup's report. */
+  label: string;
+  /** No Premium/Enhanced voice is installed, so a download would sound much better. */
+  canUpgrade: boolean;
+}
+
+export const VOICE_UPGRADE_HINT =
+  "for a much more natural voice, download a Premium one: System Settings → Accessibility → Spoken Content → " +
+  "System Voice → Manage Voices… (for example English → Ava (Premium) or Zoe (Premium)). It's used automatically — no restart needed.";
+
+let voiceChoice: Promise<VoiceChoice> | undefined;
+
+/** Forget the choice, so a voice downloaded meanwhile is picked up (voice_setup calls this). */
+export function resetVoiceChoice(): void {
+  voiceChoice = undefined;
+}
+
+export function chooseVoice(): Promise<VoiceChoice> {
+  voiceChoice ??= (async (): Promise<VoiceChoice> => {
+    if (CONFIG.voice) {
+      return CONFIG.voice.toLowerCase() === "default"
+        ? { label: "the system voice (VOICE_MCP_VOICE=default)", canUpgrade: false }
+        : { voice: CONFIG.voice, label: `${CONFIG.voice} (set by VOICE_MCP_VOICE)`, canUpgrade: false };
+    }
+    const bin = IS_MAC ? findTts() : null;
+    if (!bin) return { label: "the system voice", canUpgrade: false };
+    try {
+      const r = await run(bin, ["-v", "?"], { timeoutMs: 10_000 });
+      const locale = Intl.DateTimeFormat().resolvedOptions().locale;
+      const best = pickVoice(parseSayVoices(r.stdout), CONFIG.language, locale);
+      if (best) return { voice: best.name, label: `${best.name} — the most natural voice installed`, canUpgrade: false };
+    } catch {
+      /* fall back to the system voice */
+    }
+    return { label: "the system voice", canUpgrade: true };
+  })();
+  return voiceChoice;
+}
+
 export async function speak(text: string, signal?: AbortSignal): Promise<void> {
   if (!text) return;
   const bin = findTts();
@@ -24,7 +101,8 @@ export async function speak(text: string, signal?: AbortSignal): Promise<void> {
   let result: RunResult;
   if (IS_MAC) {
     const args: string[] = [];
-    if (CONFIG.voice) args.push("-v", CONFIG.voice);
+    const { voice } = await chooseVoice();
+    if (voice) args.push("-v", voice);
     if (CONFIG.rate) args.push("-r", CONFIG.rate);
     args.push("-f", "-"); // read from stdin: no argv length limits, no flag injection
     result = await run(bin, args, { input: text, signal, timeoutMs: 180_000 });

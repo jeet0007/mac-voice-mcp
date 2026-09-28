@@ -1,6 +1,14 @@
 #!/usr/bin/env node
-// Stub TTS: records what would have been spoken.
+// Stub TTS: records what would have been spoken. `say -v ?` lists voices from STUB_SAY_VOICES.
 const fs = require("fs");
+const args = process.argv.slice(2);
+if (args[0] === "-v" && args[1] === "?") {
+  process.stdout.write(process.env.STUB_SAY_VOICES ?? "Samantha            en_US    # Hello! My name is Samantha.\n");
+  process.exit(0);
+}
+const voice = args[0] === "-v" ? args[1] : null;
 let text = "";
 process.stdin.on("data", (d) => (text += d));
-process.stdin.on("end", () => fs.appendFileSync(process.env.STUB_LOG, `speak ${JSON.stringify(text)}\n`));
+process.stdin.on("end", () =>
+  fs.appendFileSync(process.env.STUB_LOG, `speak ${JSON.stringify(text)}${voice ? ` voice=${JSON.stringify(voice)}` : ""}\n`),
+);

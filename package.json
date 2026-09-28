@@ -1,7 +1,7 @@
 {
   "name": "mac-voice-mcp",
   "mcpName": "io.github.jeet0007/mac-voice-mcp",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Talk with Claude out loud on your Mac: speaks with macOS `say`, listens for one natural conversational turn, and transcribes on-device with whisper.cpp. An MCP server.",
   "type": "module",
   "bin": {
@@ -26,7 +26,9 @@
     "inspect": "npx -y @modelcontextprotocol/inspector node dist/index.js",
     "prepare": "npm run build",
     "prepublishOnly": "npm test",
-    "audit": "npm audit --omit=dev --audit-level=high && npm audit signatures"
+    "audit": "npm audit --omit=dev --audit-level=high && npm audit signatures",
+    "preversion": "npm test",
+    "version": "node scripts/sync-version.mjs && git add server.json .claude-plugin/plugin.json"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
