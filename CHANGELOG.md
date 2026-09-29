@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-29
+
 ### Fixed
 - **Recording broke on Macs without SoX when Bluetooth headphones were connected** ([#6](https://github.com/jeet0007/mac-voice-mcp/issues/6)). Every turn failed with "pure digital silence".
   - The ffmpeg fallback now records from the input chosen in System Settings (`:default`) instead of device number 0. `VOICE_MCP_FFMPEG_DEVICE` still overrides it.
