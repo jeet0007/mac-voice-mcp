@@ -312,3 +312,76 @@ test("listen: false speaks without opening the mic, and needs no speech-to-text 
     await client.close();
   }
 });
+
+// --- Recorder: SoX preferred, ffmpeg only as a fallback that follows the chosen input -------------
+
+test("setup notices tools installed outside it (e.g. brew install sox in a terminal) without a restart", async () => {
+  const sb = sandbox({ installed: false });
+  for (const bin of ["whisper-cli", "whisper-server"]) symlinkSync(path.join(FIXTURES, "installable", bin), path.join(sb.dir, "brew-bin", bin));
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env());
+  try {
+    assert.match(text(await client.callTool({ name: "voice_setup", arguments: {} })), /✘ Recorder/);
+    symlinkSync(path.join(FIXTURES, "installable", "rec"), path.join(sb.dir, "brew-bin", "rec")); // installed by hand
+    const again = text(await client.callTool({ name: "voice_setup", arguments: {} }));
+    assert.match(again, /✔ Recorder: SoX/);
+    assert.match(again, /READY/);
+  } finally {
+    await client.close();
+  }
+});
+
+/** A stub ffmpeg that logs its arguments and streams the stub recorder's audio (STUB_SCENARIO). */
+function addFfmpegStub(sb) {
+  const file = path.join(sb.dir, "brew-bin", "ffmpeg");
+  writeFileSync(
+    file,
+    [
+      "#!/usr/bin/env node",
+      'require("fs").appendFileSync(process.env.STUB_LOG, `ffmpeg ${process.argv.slice(2).join(" ")}\\n`);',
+      `require(${JSON.stringify(path.join(FIXTURES, "installable", "rec"))});`,
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+}
+
+test("ffmpeg-only Macs: setup recommends SoX, installs it with consent, and ffmpeg follows the default input", { skip: process.platform !== "darwin" && "the ffmpeg fallback is macOS-only" }, async () => {
+  const sb = sandbox({ installed: false });
+  for (const bin of ["whisper-cli", "whisper-server"]) symlinkSync(path.join(FIXTURES, "installable", bin), path.join(sb.dir, "brew-bin", bin));
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  addFfmpegStub(sb);
+  const { client } = await connect(sb.env({ VOICE_MCP_RECORDER: "auto" }));
+  try {
+    const check = text(await client.callTool({ name: "voice_setup", arguments: {} }));
+    assert.match(check, /READY/);
+    assert.match(check, /• Recorder: ffmpeg .*fallback.*→ brew install sox/);
+    assert.match(check, /Recommended: ask the user whether to brew install sox/);
+
+    const r = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Hi" } });
+    assert.equal(r.isError, false);
+    assert.match(sb.readLog(), /^ffmpeg .*-f avfoundation -i :default /m, "records from the system's chosen input, not device 0");
+
+    const installed = text(await client.callTool({ name: "voice_setup", arguments: { install: true } }));
+    assert.match(sb.readLog(), /^brew install sox auto_update=1$/m);
+    assert.match(installed, /✔ Recorder: SoX/);
+  } finally {
+    await client.close();
+  }
+});
+
+test("silence through ffmpeg blames the device and suggests SoX, not just permissions", { skip: process.platform !== "darwin" && "the ffmpeg fallback is macOS-only" }, async () => {
+  const sb = sandbox({ installed: false });
+  for (const bin of ["whisper-cli", "whisper-server"]) symlinkSync(path.join(FIXTURES, "installable", bin), path.join(sb.dir, "brew-bin", bin));
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  addFfmpegStub(sb);
+  const { client } = await connect(sb.env({ VOICE_MCP_RECORDER: "auto", STUB_SCENARIO: "zero", VOICE_MCP_START_TIMEOUT_SECONDS: "3" }));
+  try {
+    const r = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Hello?" } });
+    assert.equal(r.isError, true);
+    assert.match(text(r), /^The microphone returned pure digital silence\. voice-mcp is recording with ffmpeg/);
+    assert.match(text(r), /brew install sox/);
+  } finally {
+    await client.close();
+  }
+});

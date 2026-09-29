@@ -67,8 +67,8 @@ export const CONFIG = {
   minSpeechDb: envNum("VOICE_MCP_MIN_SPEECH_DB", -48),
   /** Recorder: auto (SoX, else ffmpeg) | sox | ffmpeg. */
   recorder: (process.env.VOICE_MCP_RECORDER?.trim().toLowerCase() || "auto") as "auto" | "sox" | "ffmpeg",
-  /** ffmpeg avfoundation audio input (macOS fallback recorder). */
-  ffmpegDevice: process.env.VOICE_MCP_FFMPEG_DEVICE?.trim() || ":0",
+  /** ffmpeg avfoundation audio input (macOS fallback recorder). ":default" follows the input chosen in System Settings. */
+  ffmpegDevice: process.env.VOICE_MCP_FFMPEG_DEVICE?.trim() || ":default",
 
   // --- Speech-to-text
   /** whisper.cpp model name (tiny.en, base.en, small.en, large-v3-turbo-q5_0, ...). */

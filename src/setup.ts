@@ -117,11 +117,19 @@ async function checkRequirements(): Promise<Check[]> {
   }
 
   const rec = findRecorder();
-  checks.push(
-    rec
-      ? { label: "Recorder", status: "ok", detail: describeRecorder(rec) }
-      : { label: "Recorder", status: brewing ? "installing" : "missing", detail: "SoX is not installed", brew: IS_WIN ? undefined : "sox" },
-  );
+  if (!rec) {
+    checks.push({ label: "Recorder", status: brewing ? "installing" : "missing", detail: "SoX is not installed", brew: IS_WIN ? undefined : "sox" });
+  } else if (rec.kind === "ffmpeg" && CONFIG.recorder === "auto") {
+    // Works, but it's the fragile path: recommend SoX, which is what the turn-taking is tuned on.
+    checks.push({
+      label: "Recorder",
+      status: brewing ? "installing" : "optional",
+      detail: `${describeRecorder(rec)}, as a fallback. SoX is recommended: it's more reliable with Bluetooth headsets and other audio devices`,
+      brew: "sox",
+    });
+  } else {
+    checks.push({ label: "Recorder", status: "ok", detail: describeRecorder(rec) });
+  }
 
   const cli = findWhisperCli();
   const server = findWhisperServer();
@@ -178,10 +186,12 @@ async function checkRequirements(): Promise<Check[]> {
  * @param onProgress optional heartbeat while waiting (used for MCP progress notifications).
  */
 export async function runSetupFlow(install: boolean, onProgress?: (message: string) => void): Promise<SetupOutcome> {
+  resetWhichCache(); // see anything installed since the last check (e.g. `brew install sox` in a terminal)
   let checks = await checkRequirements();
 
   if (install) {
-    const formulae = [...new Set(checks.filter((c) => c.status === "missing" && c.brew).map((c) => c.brew!))];
+    // Missing pieces, plus recommended ones (SoX when only ffmpeg is there): the user agreed to install.
+    const formulae = [...new Set(checks.filter((c) => (c.status === "missing" || c.status === "optional") && c.brew).map((c) => c.brew!))];
     const brew = findBrew();
     if (formulae.length && brew && !running(brewJob)) brewJob = startBrewInstall(brew, formulae);
     if (checks.some((c) => c.model && c.status === "missing") && !running(modelJob)) modelJob = startModelDownload();
@@ -206,7 +216,7 @@ export async function runSetupFlow(install: boolean, onProgress?: (message: stri
   const lines = [
     `voice-mcp setup — ${ready ? "READY" : installing ? "INSTALLING" : "NOT READY"}`,
     "",
-    ...checks.map((c) => `${icon[c.status]} ${c.label}: ${c.detail}${c.brew && c.status === "missing" ? ` → brew install ${c.brew}` : ""}`),
+    ...checks.map((c) => `${icon[c.status]} ${c.label}: ${c.detail}${c.brew && c.status !== "ok" && c.status !== "installing" ? ` → brew install ${c.brew}` : ""}`),
     IS_MAC ? "• Microphone: macOS asks for permission the first time speak_and_listen listens — click Allow." : "",
   ];
   if (done.length) lines.push("", "What was done:", ...done.map((d) => `- ${d}`));
@@ -217,6 +227,13 @@ export async function runSetupFlow(install: boolean, onProgress?: (message: stri
   lines.push("");
   if (ready) {
     lines.push("Next: everything is in place — speak_and_listen is ready to use.");
+    const recommended = [...new Set(checks.filter((c) => c.status === "optional" && c.brew).map((c) => c.brew!))];
+    if (recommended.length && !install && findBrew()) {
+      lines.push(
+        `Recommended: ask the user whether to brew install ${recommended.join(" ")} (see • above). ` +
+          "Only if they agree, call voice_setup with install=true.",
+      );
+    }
     if (checks.some((c) => c.label === "Voice" && c.status === "optional")) {
       lines.push("Mention the optional voice tip (•) to the user once — it makes the voice sound far more natural. Nothing else to do.");
     }

@@ -32,7 +32,7 @@ anything unspeakable and says so in a "voice-mcp note"; follow those notes.
 
 | Symptom | Cause and fix |
 |---|---|
-| "microphone returned pure digital silence" | The app running the server lacks mic access: System Settings → Privacy & Security → Microphone, allow it, then restart that app. |
+| "microphone returned pure digital silence" | Usually the app running the server lacks mic access: System Settings → Privacy & Security → Microphone, allow it, then restart that app. If the message says it's recording with ffmpeg, suggest `brew install sox` first. |
 | "voice-mcp is not set up" | Call voice_setup (check only), tell the user what's missing, install only after they agree. |
 | Reply cut off ("may be cut off" note) | They hit the listening limit. Ask them to continue; for long dictation pass a larger `listen_seconds`. |
 | Turn ends while they're still thinking | Set `VOICE_MCP_END_SILENCE_MS` higher (default 1200) in the server's environment. |
