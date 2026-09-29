@@ -6,7 +6,7 @@ import { chime, findRecorder, listenForTurn, MIC_PERMISSION_HINT, RECORDER_MISSI
 import { CONFIG, debug, DEFAULT_LISTEN_SECONDS, MAX_LISTEN_SECONDS, MAX_SPEAK_CHARS } from "./config.js";
 import { acquireMicLock, MicBusyError } from "./lock.js";
 import { ensureModel } from "./model.js";
-import { SetupError } from "./proc.js";
+import { resetWhichCache, SetupError } from "./proc.js";
 import { prepareSpeech } from "./speech-text.js";
 import { findWhisperCli, findWhisperServer, prewarm, STT_MISSING, transcribe } from "./stt.js";
 
@@ -89,9 +89,16 @@ async function turn(
       timingNote({ spokeMs: spoke, listenedMs: t1 - tListen, talkedSeconds: heard.speechSeconds, transcribedMs });
 
     if (heard.digitalSilence) {
+      resetWhichCache(); // if the user fixes it by installing SoX, the next turn picks it up
+      const viaFfmpeg = findRecorder()?.kind === "ffmpeg";
       return {
         ok: false,
-        text: `The microphone returned pure digital silence, which usually means microphone access is blocked. ${MIC_PERMISSION_HINT}`,
+        text: viaFfmpeg
+          ? "The microphone returned pure digital silence. voice-mcp is recording with ffmpeg because SoX isn't installed, " +
+            "and ffmpeg may be using a silent or wrong input device (for example after connecting Bluetooth headphones). " +
+            "Suggest `brew install sox` (or call voice_setup), then try again. If that doesn't help: " +
+            MIC_PERMISSION_HINT
+          : `The microphone returned pure digital silence, which usually means microphone access is blocked. ${MIC_PERMISSION_HINT}`,
         notes,
       };
     }

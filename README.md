@@ -123,7 +123,7 @@ Setup checks what's already there before it changes anything:
 | Needed | Provided by | If it's missing |
 |---|---|---|
 | Voice | macOS `say`, using the most natural voice installed | Nothing to do. For a far better voice, add a free Premium one (see below). |
-| Microphone capture | SoX (`rec`) | `brew install sox` |
+| Microphone capture | SoX (`rec`). ffmpeg works as a fallback, but setup recommends SoX | `brew install sox` |
 | Speech-to-text | whisper.cpp (`whisper-cli` and `whisper-server`, Metal-accelerated) | `brew install whisper-cpp` |
 | Speech model | `base.en`, ~140 MB | Downloaded once to `~/.cache/mac-voice-mcp/models/` |
 
@@ -235,7 +235,8 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 | `VOICE_MCP_START_TIMEOUT_SECONDS` | `15` | How long to wait for you to start talking. |
 | `VOICE_MCP_SPEECH_MARGIN_DB` | `12` | How much louder than room noise counts as speech. Raise it in noisy rooms. |
 | `VOICE_MCP_MIN_SPEECH_DB` | `-48` | The quietest level that ever counts as speech (dBFS). |
-| `VOICE_MCP_RECORDER` | `auto` | `sox` or `ffmpeg` (`ffmpeg` is macOS only). |
+| `VOICE_MCP_RECORDER` | `auto` | `sox` or `ffmpeg` (`ffmpeg` is macOS only). `auto` uses SoX, falling back to ffmpeg. |
+| `VOICE_MCP_FFMPEG_DEVICE` | `:default` | Which input ffmpeg records from. `:default` follows System Settings; `:1` picks device 1 (list them with `ffmpeg -f avfoundation -list_devices true -i ""`). |
 
 **Speech-to-text**
 
@@ -272,7 +273,7 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 | Symptom | Fix |
 |---|---|
 | "voice-mcp is not set up yet" | Ask Claude to *set up voice*, or run `npx -y mac-voice-mcp@latest setup`. |
-| "microphone returned pure digital silence" | macOS is blocking the mic for the host app. Go to **System Settings → Privacy & Security → Microphone**, enable Claude / Cursor / your terminal, then restart that app. |
+| "microphone returned pure digital silence" | macOS is blocking the mic for the host app. Go to **System Settings → Privacy & Security → Microphone**, enable Claude / Cursor / your terminal, then restart that app. If the message says it's recording with ffmpeg, the input device is the likelier cause: run `brew install sox`. |
 | No permission prompt ever appears | Run `tccutil reset Microphone <bundle id>` and restart the app. Running `test` in Terminal only gives permission to Terminal, not to Claude Desktop. |
 | It cuts me off while I'm thinking | Set `VOICE_MCP_END_SILENCE_MS=1800` (or up to `2500`). |
 | It never stops listening | The room is too noisy for the defaults. Set `VOICE_MCP_SPEECH_MARGIN_DB=18`, or use a headset. |
