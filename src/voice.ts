@@ -2,7 +2,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { chime, findRecorder, listenForTurn, MIC_PERMISSION_HINT, RECORDER_MISSING, speak } from "./audio.js";
+import { chime, findRecorder, listenForTurn, MIC_PERMISSION_HINT, RECORDER_MISSING, speak, type Spoken } from "./audio.js";
 import { CONFIG, debug, DEFAULT_LISTEN_SECONDS, MAX_LISTEN_SECONDS, MAX_SPEAK_CHARS } from "./config.js";
 import { acquireMicLock, MicBusyError } from "./lock.js";
 import { ensureModel } from "./model.js";
@@ -72,11 +72,13 @@ async function turn(
   try {
     const t0 = Date.now();
     onPhase?.("speaking");
-    await speak(speech.text, signal);
+    const spoken = await speak(speech.text, signal);
     const spoke = Date.now() - t0;
+    const fallback = fallbackNote(spoken);
+    if (fallback) notes.push(fallback);
     if (!model) {
       const text = "(Spoken. The microphone was not opened, because listen was false.)";
-      return { ok: true, text, notes: [...notes, `voice-mcp timing: spoke ${secs(spoke)}`] };
+      return { ok: true, text, notes: [...notes, timingNote({ spokeMs: spoke, spoken })] };
     }
     await chime("start");
     onPhase?.("listening");
@@ -86,7 +88,7 @@ async function turn(
     const t1 = Date.now();
     debug("listen:", heard);
     const timing = (transcribedMs?: number) =>
-      timingNote({ spokeMs: spoke, listenedMs: t1 - tListen, talkedSeconds: heard.speechSeconds, transcribedMs });
+      timingNote({ spokeMs: spoke, spoken, listenedMs: t1 - tListen, talkedSeconds: heard.speechSeconds, transcribedMs });
 
     if (heard.digitalSilence) {
       resetWhichCache(); // if the user fixes it by installing SoX, the next turn picks it up
@@ -131,12 +133,32 @@ async function turn(
 
 const secs = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 
+/** Kokoro failures already reported in this session: say each once, not on every turn. */
+const reportedFallbacks = new Set<string>();
+
+function fallbackNote(spoken: Spoken): string | null {
+  if (!spoken.fallback || reportedFallbacks.has(spoken.fallback)) return null;
+  reportedFallbacks.add(spoken.fallback);
+  return (
+    `voice-mcp note: the Kokoro voice didn't work (${spoken.fallback}), so the built-in voice spoke instead. ` +
+    "Mention it to the user once; voice_setup shows what's wrong."
+  );
+}
+
 /** One compact line per turn, so "why did that feel slow?" has an answer. */
-export function timingNote(t: { spokeMs: number; listenedMs: number; talkedSeconds: number; transcribedMs?: number }): string {
-  const parts = [
-    `spoke ${secs(t.spokeMs)}`,
-    `listened ${secs(t.listenedMs)}` + (t.talkedSeconds > 0 ? ` (user talked ${t.talkedSeconds.toFixed(1)} s)` : " (no speech)"),
-  ];
+export function timingNote(t: {
+  spokeMs: number;
+  spoken?: Spoken;
+  listenedMs?: number;
+  talkedSeconds?: number;
+  transcribedMs?: number;
+}): string {
+  const k = t.spoken?.engine === "kokoro" && t.spoken.firstAudioMs !== undefined ? t.spoken : null;
+  const parts = [`spoke ${secs(t.spokeMs)}` + (k ? ` (Kokoro, first sound after ${secs(k.firstAudioMs!)}${k.coldStart ? ", voice loaded" : ""})` : "")];
+  if (t.listenedMs !== undefined) {
+    const talked = t.talkedSeconds ?? 0;
+    parts.push(`listened ${secs(t.listenedMs)}` + (talked > 0 ? ` (user talked ${talked.toFixed(1)} s)` : " (no speech)"));
+  }
   if (t.transcribedMs !== undefined) parts.push(`transcribed ${secs(t.transcribedMs)}`);
   return `voice-mcp timing: ${parts.join(" · ")}`;
 }

@@ -45,6 +45,21 @@ export const CONFIG = {
 
   // --- Speaking
   /**
+   * Which voice engine: auto (default: the Kokoro voice once it's installed, else the built-in one) |
+   * say (always the built-in voice: macOS `say`, espeak-ng elsewhere) | kokoro (Kokoro; voice_setup offers to install it).
+   */
+  tts: (["say", "kokoro"].includes(process.env.VOICE_MCP_TTS?.trim().toLowerCase() ?? "")
+    ? process.env.VOICE_MCP_TTS!.trim().toLowerCase()
+    : "auto") as "auto" | "say" | "kokoro",
+  /** Kokoro voice, American (a…) or British (b…) English: af_heart (default), af_bella, am_michael, bf_emma, … */
+  kokoroVoice: process.env.VOICE_MCP_KOKORO_VOICE?.trim() || "af_heart",
+  /** Kokoro speaking speed (1 = normal, 0.5–2). */
+  kokoroSpeed: Math.min(2, Math.max(0.5, envNum("VOICE_MCP_KOKORO_SPEED", 1))),
+  /** Kokoro model precision: fp32 (default: about twice as fast on a CPU, ~330 MB) or q8 (~90 MB, slower). */
+  kokoroDtype: (process.env.VOICE_MCP_KOKORO_DTYPE?.trim().toLowerCase() === "q8" ? "q8" : "fp32") as "fp32" | "q8",
+  /** Where the optional Kokoro voice (kokoro-js and its model) is installed. */
+  kokoroDir: process.env.VOICE_MCP_KOKORO_DIR?.trim() || path.join(CACHE_ROOT, "kokoro"),
+  /**
    * macOS voice name, e.g. "Ava (Premium)" (`say -v '?'` lists them). Unset: the most natural
    * installed voice for the language (Premium, then Enhanced), else the system voice. "default": always the system voice.
    */

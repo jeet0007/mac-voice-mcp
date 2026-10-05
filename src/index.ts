@@ -23,6 +23,10 @@
  *   speech-text.ts  screen text → ear text; transcript clean-up        (pure)
  *   endpointer.ts   turn-taking voice-activity detection               (pure)
  *   audio.ts        TTS, chimes, streaming microphone capture
+ *   kokoro.ts       the optional Kokoro voice: install, warm worker, streaming playback
+ *   kokoro-worker.ts  the process that runs the Kokoro model
+ *   kokoro-text.ts  pronunciation fixes and sentence chunks for Kokoro (pure)
+ *   pcm.ts          PCM conversion and resampling (pure)
  *   model.ts        find / symlink / download the whisper model
  *   stt.ts          warm whisper-server + whisper-cli fallback
  *   setup.ts        requirement checks and consent-based installs
@@ -37,6 +41,7 @@ import { createInterface } from "node:readline/promises";
 import { DEFAULT_LISTEN_SECONDS, envNum, log, PKG } from "./config.js";
 import { startServer } from "./server.js";
 import { runDoctor } from "./doctor.js";
+import { stopKokoro } from "./kokoro.js";
 import { runSetupFlow } from "./setup.js";
 import { stopWhisperServer } from "./stt.js";
 import { speakAndListen } from "./voice.js";
@@ -48,6 +53,7 @@ Usage:
   npx -y ${PKG.name}                  Start the MCP server on stdio (what MCP clients run)
   npx -y ${PKG.name} setup            Check what's installed; offers to install what's missing
   npx -y ${PKG.name} setup --install  Install what's missing without asking (brew + model download)
+  npx -y ${PKG.name} setup --kokoro   Install the optional Kokoro voice (about 1 GB on disk)
   npx -y ${PKG.name} test ["text"]    Speak, listen for one turn and print the transcript
   npx -y ${PKG.name} doctor           Self-check: setup, voice → transcript, speakers → mic (PASS/WARN/FAIL)
   npx -y ${PKG.name} doctor --no-loopback   …without playing sound through the speakers
@@ -60,6 +66,9 @@ Environment variables (all optional):
   VOICE_MCP_LANGUAGE               spoken language: en, th, de, … or auto
   VOICE_MCP_WHISPER_PROMPT         words to bias recognition toward (names, jargon)
   VOICE_MCP_VOICE / _RATE          macOS say voice and words-per-minute
+  VOICE_MCP_TTS                    auto (Kokoro once installed) | say | kokoro
+  VOICE_MCP_KOKORO_VOICE           Kokoro voice (default af_heart; e.g. af_bella, am_michael, bf_emma)
+  VOICE_MCP_KOKORO_SPEED           Kokoro speed, 0.5–2 (default 1)
   VOICE_MCP_END_SILENCE_MS         pause length that ends your turn (default 1200)
   VOICE_MCP_START_TIMEOUT_SECONDS  wait this long for you to start talking (default 15)
   VOICE_MCP_SPEECH_MARGIN_DB       how far above room noise counts as speech (default 12)
@@ -72,7 +81,9 @@ Environment variables (all optional):
 async function runSetupCli(args: string[]): Promise<number> {
   console.error(`${PKG.name} v${PKG.version} on ${process.platform}/${process.arch}, Node ${process.version}\n`);
   const force = args.includes("--install") || args.includes("-y");
-  let outcome = await runSetupFlow(force, (m) => console.error(`  … ${m}`));
+  const kokoro = args.includes("--kokoro");
+  const onProgress = (m: string) => console.error(`  … ${m}`);
+  let outcome = await runSetupFlow({ install: force, kokoro, onProgress });
 
   // Interactive terminal: offer to install right away.
   if (!force && !outcome.ready && !outcome.installing && process.stdin.isTTY && /ask the user whether/.test(outcome.report)) {
@@ -81,10 +92,10 @@ async function runSetupCli(args: string[]): Promise<number> {
     const answer = (await rl.question("\nInstall the missing pieces now? [Y/n] ")).trim().toLowerCase();
     rl.close();
     if (answer !== "" && !answer.startsWith("y")) return 1;
-    outcome = await runSetupFlow(true, (m) => console.error(`  … ${m}`));
+    outcome = await runSetupFlow({ install: true, onProgress });
   }
   // In a terminal we can simply wait for background installs to finish.
-  while (outcome.installing) outcome = await runSetupFlow(false, (m) => console.error(`  … ${m}`));
+  while (outcome.installing) outcome = await runSetupFlow({ onProgress });
 
   console.error(outcome.report);
   return outcome.ready ? 0 : 1;
@@ -116,6 +127,7 @@ async function runTestCli(text?: string): Promise<number> {
     return 1;
   } finally {
     stopWhisperServer();
+    stopKokoro();
   }
 }
 

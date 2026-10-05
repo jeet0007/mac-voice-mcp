@@ -135,6 +135,14 @@ Setup checks what's already there before it changes anything:
 
 **Get a better voice (recommended).** macOS includes free Premium voices that sound far more natural than the default. Open **System Settings → Accessibility → Spoken Content → System Voice → Manage Voices…**, and download one, for example English → *Ava (Premium)* or *Zoe (Premium)*. The next voice turn uses it automatically. To choose a specific voice, or keep the system voice, see `VOICE_MCP_VOICE` under [Configuration](#configuration).
 
+**Or try the Kokoro voice (optional).** [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) is a small neural voice that sounds close to a person and runs entirely on your Mac. Ask Claude to *"install the Kokoro voice"*, or run `npx -y mac-voice-mcp@latest setup --kokoro`.
+
+- **What it installs:** [kokoro-js](https://github.com/hexgrad/kokoro) with npm into `~/.cache/mac-voice-mcp/kokoro/`, and the model from Hugging Face, once. That's about 1 GB on disk, and nothing is bundled with this package.
+- **How it's used:** once it's installed, every turn uses it, starting with `af_heart`. Pick another voice with `VOICE_MCP_KOKORO_VOICE` (see [Configuration](#configuration)). It speaks sentence by sentence, so it starts talking before the whole reply is generated. Each turn's timing line shows how soon the first sound came.
+- **It can't leave you without a voice.** If Kokoro fails for any reason, the built-in voice takes over mid-sentence, and Claude tells you once.
+- **To stop using it:** set `VOICE_MCP_TTS=say`, or delete `~/.cache/mac-voice-mcp/kokoro/`.
+- **Limits:** English only (American and British voices). It speaks with its own pronunciation rules, which handle common developer words (JSON, `index.ts`, version numbers).
+
 ### Allow voice turns without prompts
 
 By default, Claude Code asks for approval every time Claude wants to speak, which breaks the flow of a conversation. To allow voice turns, add the tool to the `permissions.allow` list in `~/.claude/settings.json`. Use the name that matches how you installed it:
@@ -222,7 +230,12 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 | Variable | Default | |
 |---|---|---|
 | `VOICE_MCP_VOICE` | most natural installed | Unset: the best Premium or Enhanced voice installed for the language, else the system voice. Set a name, e.g. `Ava (Premium)`, `Daniel`, `Kanya` (list them with `say -v '?'`), or `default` to always use the system voice. |
-| `VOICE_MCP_RATE` | system rate | Words per minute, e.g. `200`. |
+| `VOICE_MCP_RATE` | system rate | Words per minute, e.g. `200` (macOS voices). |
+| `VOICE_MCP_TTS` | `auto` | `auto`: the [Kokoro voice](#then-set-up-and-allow-the-mic) once it's installed, else the built-in voice. `say`: always the built-in voice. `kokoro`: Kokoro, and setup offers to install it. |
+| `VOICE_MCP_KOKORO_VOICE` | `af_heart` | Kokoro voice. American English starts with `a`, British with `b`, e.g. `af_bella`, `am_michael`, `bf_emma`, `bm_george`. |
+| `VOICE_MCP_KOKORO_SPEED` | `1` | Kokoro speaking speed, `0.5` to `2`. |
+| `VOICE_MCP_KOKORO_DTYPE` | `fp32` | `q8`: a smaller model (~90 MB instead of ~330 MB) that's about half as fast. |
+| `VOICE_MCP_KOKORO_DIR` | `~/.cache/mac-voice-mcp/kokoro` | Where the Kokoro voice is installed. |
 | `VOICE_MCP_MAX_SPEAK_WORDS` | `120` | Longer text is cut at a sentence boundary ("the rest is on screen"). |
 | `VOICE_MCP_CHIME` | `1` | Set to `0` to turn off the mic open/close sounds. |
 | `VOICE_MCP_LOCK_WAIT_SECONDS` | `120` | How long a turn waits while another session on this Mac is using the mic. |
@@ -281,7 +294,8 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 | It hears its own voice | Use headphones, or turn the speaker volume down. It only listens after it finishes speaking, but echo can linger. |
 | "Homebrew: not installed" | Install it from [brew.sh](https://brew.sh). It needs your password, so it can't run from Claude. Then run setup again. |
 | It garbles names or jargon | Set `VOICE_MCP_WHISPER_PROMPT="Priya, Postgres, Kubernetes"`, or switch to `small.en`. |
-| The voice sounds robotic | Download a Premium voice (see [Get a better voice](#then-set-up-and-allow-the-mic)). It's used automatically. |
+| The voice sounds robotic | Download a Premium voice, or install the Kokoro voice (see [Get a better voice](#then-set-up-and-allow-the-mic)). Either is used automatically. |
+| "The Kokoro voice didn't work" | The built-in voice spoke instead. Ask Claude to *check voice setup*, or run `npx -y mac-voice-mcp@latest setup`. To reinstall it, delete `~/.cache/mac-voice-mcp/kokoro/` and run `setup --kokoro`. |
 | It asks for approval every turn | Add the tool to Claude Code's allow list: see [Allow voice turns without prompts](#allow-voice-turns-without-prompts). |
 | "Another voice session on this Mac…" | Another Claude window, Claude Desktop or Cursor held the speaker and mic for over 2 minutes, which means one very long turn. End that conversation, then try again. |
 | Claude keeps answering by voice after I'm done | Type anything, or say "stop voice mode". To switch the plugin's hook off entirely, see [Voice mode](#voice-mode). |
@@ -296,9 +310,10 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 
 ## Privacy and safety
 
-- **Audio stays on your machine.** Recordings go to a temporary file that's deleted after each turn. The only network use is the one-time model download from Hugging Face.
+- **Audio stays on your machine.** Recordings go to a temporary file that's deleted after each turn. The only network use is the one-time model download from Hugging Face, plus npm and Hugging Face once more if you install the Kokoro voice. Speaking never downloads anything.
 - **The warm whisper server is local only.** It listens on `127.0.0.1` on a random port, and stops when idle or when this server exits.
-- **Setup can only install known packages.** Its install list is fixed in the code (`sox`, `whisper-cpp`), so nothing Claude says can make it install anything else. It never uninstalls or modifies other software.
+- **Setup can only install known packages.** Its install list is fixed in the code (`sox`, `whisper-cpp`, and `kokoro-js@1.2.1` for the optional voice), so nothing Claude says can make it install anything else. It never uninstalls or modifies other software.
+- **Licenses of the optional Kokoro voice.** The Kokoro model and kokoro-js are Apache-2.0. kokoro-js turns text into sounds with a WebAssembly build of espeak-ng (GPL-3.0), through the `phonemizer` package. None of this is part of mac-voice-mcp (MIT). It's installed on your Mac only if you ask for it.
 
 ## Security
 
@@ -328,6 +343,8 @@ npm run inspect        # MCP Inspector
 | `speech-text.ts` | Rewriting screen text for speech, cleaning up transcripts (pure, unit-tested) |
 | `endpointer.ts` | Turn-taking voice-activity detection (pure, unit-tested) |
 | `audio.ts` | Text-to-speech, chimes, streaming mic capture |
+| `kokoro.ts`, `kokoro-worker.ts` | The optional Kokoro voice: install, a warm worker process, sentence-by-sentence playback, fallback |
+| `kokoro-text.ts`, `pcm.ts` | Pronunciation fixes and sentence chunks for Kokoro, PCM conversion (pure, unit-tested) |
 | `model.ts` | Finding, symlinking or downloading the model |
 | `stt.ts` | The warm `whisper-server` with orphan guard, and the `whisper-cli` fallback |
 | `setup.ts` | Requirement checks and consent-based background installs |
@@ -340,7 +357,7 @@ The package installs two commands: `mac-voice-mcp` (the one `npx -y mac-voice-mc
 **Testing changes.** Three layers; none of them depend on anyone's ears.
 
 1. **`npm test`** runs everywhere, with stub binaries. It covers the MCP tools, turn-taking, setup, the mic lock, the plugin hook and the release metadata.
-2. **The "Speech round trip" CI job** runs on a real Mac. Our own `setup --install` puts in SoX, whisper.cpp and the model. Then `doctor --no-loopback` runs, and `test/roundtrip.test.mjs` speaks known sentences with the real voice and transcribes them with the real whisper.cpp. The build fails if too many words come back wrong or transcription is too slow. GitHub's Macs have only basic voices and no GPU for whisper.cpp, so the limits there are looser: it guards against breakage, and doctor on a real Mac is the quality bar. The numbers are kept as a build artifact.
+2. **The "Speech round trip" CI job** runs on a real Mac. Our own `setup --install` puts in SoX, whisper.cpp and the model. Then `doctor --no-loopback` runs, and `test/roundtrip.test.mjs` speaks known sentences with the real voice and transcribes them with the real whisper.cpp. The build fails if too many words come back wrong or transcription is too slow. The same job then installs the Kokoro voice with `setup --kokoro` and repeats the round trip with it, which also checks how soon Kokoro starts talking. GitHub's Macs have only basic voices and no GPU for whisper.cpp, so the limits there are looser: it guards against breakage, and doctor on a real Mac is the quality bar. The numbers are kept as a build artifact.
 3. **`npm run doctor`** on your own Mac adds the one thing CI can't test, your speakers and microphone. It plays a sentence through the speakers, records it and transcribes it. Each stage gets PASS, WARN or FAIL against fixed limits, and the report is saved under `~/.cache/mac-voice-mcp/doctor/`.
 
 **Trying the plugin from a checkout:** run `npm run dev:plugin`, then the `claude --plugin-dir …` command it prints. This loads a throwaway plugin, "mac-voice-mcp-dev", that runs this checkout's build with `node`. Its own name means it doesn't clash with an installed mac-voice-mcp. It also works inside this repo, where `npx mac-voice-mcp@<this version>` would find the checkout instead of the package and fail with `CONNECTION_CLOSED`.

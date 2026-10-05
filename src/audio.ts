@@ -2,8 +2,9 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { CONFIG, debug, IS_MAC, IS_WIN } from "./config.js";
+import { CONFIG, debug, IS_MAC, IS_WIN, log } from "./config.js";
 import { Endpointer, FRAME_BYTES, wavHeader, type EndReason, type EndpointerDiagnostics } from "./endpointer.js";
+import { KokoroError, kokoroEnabled, speakKokoro, synthesizeKokoroToFile } from "./kokoro.js";
 import { activeChildren, CancelledError, run, SetupError, tail, which, type RunResult } from "./proc.js";
 
 // ---------------------------------------------------------------------------
@@ -93,8 +94,40 @@ export function chooseVoice(): Promise<VoiceChoice> {
   return voiceChoice;
 }
 
-export async function speak(text: string, signal?: AbortSignal): Promise<void> {
-  if (!text) return;
+export interface Spoken {
+  engine: "kokoro" | "built-in";
+  /** Kokoro: from the call to the first sound. */
+  firstAudioMs?: number;
+  /** Kokoro: the model was loaded for this turn. */
+  coldStart?: boolean;
+  /** Kokoro was wanted but failed, so the built-in voice spoke instead (why). */
+  fallback?: string;
+}
+
+/**
+ * Speak `text` out loud: with the Kokoro voice when it's installed (or VOICE_MCP_TTS=kokoro),
+ * otherwise the built-in voice. If Kokoro fails, the built-in voice says whatever it hadn't said yet.
+ */
+export async function speak(text: string, signal?: AbortSignal): Promise<Spoken> {
+  if (!text) return { engine: "built-in" };
+  if (kokoroEnabled()) {
+    try {
+      return { engine: "kokoro", ...(await speakKokoro(text, signal)) };
+    } catch (err) {
+      if (err instanceof CancelledError) throw err;
+      const reason = err instanceof Error ? err.message : String(err);
+      log(`The Kokoro voice failed, so the built-in voice is speaking instead: ${reason}`);
+      const rest = err instanceof KokoroError ? err.unspoken.join(" ") : text;
+      if (rest) await speakBuiltIn(rest, signal);
+      return { engine: "built-in", fallback: reason };
+    }
+  }
+  await speakBuiltIn(text, signal);
+  return { engine: "built-in" };
+}
+
+/** macOS `say`, espeak-ng, or Windows SAPI. */
+async function speakBuiltIn(text: string, signal?: AbortSignal): Promise<void> {
   const bin = findTts();
   if (!bin) throw new SetupError("No text-to-speech engine found. Install espeak-ng (e.g. `sudo apt install espeak-ng`).");
 
@@ -124,9 +157,10 @@ export async function speak(text: string, signal?: AbortSignal): Promise<void> {
 
 /**
  * Speak `text` into a 16 kHz mono 16-bit WAV instead of the speakers, with the same voice
- * `speak` uses. For `doctor` and the round-trip tests.
+ * `speak` uses. For `doctor` and the round-trip tests. A Kokoro failure is an error here, not a fallback.
  */
-export async function synthesizeToFile(text: string, outFile: string): Promise<void> {
+export async function synthesizeToFile(text: string, outFile: string): Promise<Spoken> {
+  if (kokoroEnabled()) return { engine: "kokoro", ...(await synthesizeKokoroToFile(text, outFile)) };
   const bin = findTts();
   if (!bin) throw new SetupError("No text-to-speech engine found.");
   let result: RunResult;
@@ -140,6 +174,7 @@ export async function synthesizeToFile(text: string, outFile: string): Promise<v
     throw new SetupError("Writing speech to a file needs macOS `say` or espeak-ng.");
   }
   if (result.code !== 0) throw new Error(`Text-to-speech to file failed (exit ${result.code}): ${tail(result.stderr) || "no output"}`);
+  return { engine: "built-in" };
 }
 
 /** A short, quiet cue that the mic just opened ("start") or closed ("stop"). macOS only. */

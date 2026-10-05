@@ -31,7 +31,7 @@ jobs:
   speech-roundtrip:
     name: Speech round trip (real say + whisper.cpp)
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
         with:
@@ -64,6 +64,28 @@ jobs:
           VOICE_MCP_ROUNDTRIP_REPORT: roundtrip-report.json
           # Calibrated from the first runs on GitHub's runners (basic voice, CPU-only whisper).
           VOICE_MCP_ROUNDTRIP_LIMITS: '{"plainEach":0.35,"plainOverall":0.2,"jargonEach":0.6,"warmTranscribeMs":10000}'
+      # The same round trip with the optional Kokoro voice, installed by our own setup:
+      # can whisper understand it, and how soon does it start talking?
+      - name: Cache the Kokoro voice
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/mac-voice-mcp/kokoro
+          key: kokoro-js-1.2.1-fp32-v1
+      - name: Install the Kokoro voice with our own setup
+        run: node dist/index.js setup --kokoro
+      - name: Doctor with Kokoro
+        run: node dist/index.js doctor --no-loopback
+        continue-on-error: true
+        env:
+          VOICE_MCP_TTS: kokoro
+      - name: Round trip with Kokoro
+        run: node --test test/roundtrip.test.mjs
+        env:
+          VOICE_MCP_TTS: kokoro
+          VOICE_MCP_ROUNDTRIP: "1"
+          VOICE_MCP_ROUNDTRIP_REPORT: roundtrip-kokoro-report.json
+          # First sound on a 3-core CI VM without a GPU; a real Mac's limit is 1500 ms.
+          VOICE_MCP_ROUNDTRIP_LIMITS: '{"plainEach":0.35,"plainOverall":0.2,"jargonEach":0.6,"warmTranscribeMs":10000,"firstSoundMs":5000}'
       - name: Keep the numbers
         if: always()
         uses: actions/upload-artifact@v7
@@ -71,5 +93,6 @@ jobs:
           name: speech-roundtrip-report
           path: |
             roundtrip-report.json
+            roundtrip-kokoro-report.json
             ~/.cache/mac-voice-mcp/doctor/*.json
           if-no-files-found: ignore

@@ -1,0 +1,6 @@
+#!/usr/bin/env node
+// Stub SoX `play`: counts the raw audio it was sent instead of playing it.
+const fs = require("fs");
+let bytes = 0;
+process.stdin.on("data", (d) => (bytes += d.length));
+process.stdin.on("end", () => fs.appendFileSync(process.env.STUB_LOG, `play ${process.argv.slice(2).join(" ")} bytes=${bytes}\n`));
