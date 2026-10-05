@@ -22,7 +22,19 @@ const JARGON = [
   "The API returned a 404 error from the GitHub endpoint.",
   "Should I merge the pull request into main and tag the new version?",
 ];
-const LIMITS = { plainEach: 0.25, plainOverall: 0.1, jargonEach: 0.5, warmTranscribeMs: 3000 };
+/**
+ * Defaults are for a real Mac. GitHub's Mac runners have no GPU for whisper.cpp and only the basic
+ * voices, so CI passes looser limits through VOICE_MCP_ROUNDTRIP_LIMITS (JSON). There the test is a
+ * regression guard — a broken voice or transcriber scores near 100% wrong — while `doctor` on a real
+ * Mac is the quality bar.
+ */
+const LIMITS = {
+  plainEach: 0.25,
+  plainOverall: 0.1,
+  jargonEach: 0.5,
+  warmTranscribeMs: 3000,
+  ...JSON.parse(process.env.VOICE_MCP_ROUNDTRIP_LIMITS || "{}"),
+};
 
 test("speech round trip: voice → file → whisper.cpp stays accurate and fast", { skip: !enabled && "macOS + VOICE_MCP_ROUNDTRIP=1 only" }, async () => {
   const { synthesizeToFile, chooseVoice } = await import("../dist/audio.js");

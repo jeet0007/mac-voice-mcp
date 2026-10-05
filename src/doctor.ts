@@ -8,13 +8,14 @@
  *   1. Setup          everything speak_and_listen needs is installed.
  *   2. Speech → text  the voice speaks a known sentence into a file and whisper transcribes it.
  *                     Checks the voice and the transcriber without involving the room.
- *   3. Speaker → mic  the same sentence is played through the speakers while the mic records,
- *                     then transcribed. Checks the real hardware path (skipped with --no-loopback).
+ *   3. Speaker → mic  the same sentence is spoken live through the speakers (exactly as in a
+ *                     conversation) while the mic records, then transcribed. Checks the real
+ *                     hardware path (skipped with --no-loopback).
  */
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { chooseVoice, describeRecorder, findRecorder, recordForSeconds, synthesizeToFile } from "./audio.js";
+import { chooseVoice, describeRecorder, findRecorder, recordForSeconds, speak, synthesizeToFile } from "./audio.js";
 import { CONFIG, IS_MAC, PKG } from "./config.js";
 import { ensureModel } from "./model.js";
 import { run } from "./proc.js";
@@ -133,7 +134,8 @@ export async function runDoctor(opts: { loopback?: boolean; reportDir?: string; 
       const seconds = (await wavSeconds(spoken)) + 1.5;
       let player: Promise<unknown> | undefined;
       const rec = await recordForSeconds(seconds, recorded, () => {
-        player ??= new Promise((r) => setTimeout(r, 300)).then(() => run("/usr/bin/afplay", [spoken], { timeoutMs: 60_000 }));
+        // The live voice at full quality, the way speak_and_listen speaks — not the 16 kHz test file.
+        player ??= new Promise((r) => setTimeout(r, 300)).then(() => speak(DOCTOR_SENTENCE));
       });
       await player;
       if (rec.digitalSilence) {
