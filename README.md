@@ -272,6 +272,7 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 
 | Symptom | Fix |
 |---|---|
+| Not sure what's wrong | Run `npx -y mac-voice-mcp@latest doctor`. It checks setup, the voice and transcription, and your speakers and mic, and says which part fails. |
 | "voice-mcp is not set up yet" | Ask Claude to *set up voice*, or run `npx -y mac-voice-mcp@latest setup`. |
 | "microphone returned pure digital silence" | macOS is blocking the mic for the host app. Go to **System Settings → Privacy & Security → Microphone**, enable Claude / Cursor / your terminal, then restart that app. If the message says it's recording with ffmpeg, the input device is the likelier cause: run `brew install sox`. |
 | No permission prompt ever appears | Run `tccutil reset Microphone <bundle id>` and restart the app. Running `test` in Terminal only gives permission to Terminal, not to Claude Desktop. |
@@ -316,6 +317,8 @@ npm test               # build + unit tests, end-to-end tests over MCP with stub
 npm run audit          # known-vulnerability and signature checks on dependencies
 npm run setup          # check what's installed; offers to install what's missing
 npm run test:voice     # one real speak → listen → transcribe turn
+npm run doctor         # objective self-check on this Mac: PASS / WARN / FAIL per stage, JSON report
+npm run dev:plugin     # try this checkout in Claude Code as the "mac-voice-mcp-dev" plugin
 npm run inspect        # MCP Inspector
 ```
 
@@ -334,7 +337,13 @@ npm run inspect        # MCP Inspector
 
 The package installs two commands: `mac-voice-mcp` (the one `npx -y mac-voice-mcp` runs), and `voice-mcp`.
 
-**Testing the plugin: don't start Claude Code inside this repo.** In this folder, `npx mac-voice-mcp@<this version>` finds the checkout itself instead of downloading the package, can't run it, and the server fails with `CONNECTION_CLOSED`. Start `claude` in any other folder. To try unreleased plugin files (skills, hooks), swap the marketplace to your checkout: run `/plugin marketplace remove mac-voice-mcp`, then `/plugin marketplace add /path/to/checkout`, and install at user scope. The server still comes from npm, so test server changes with `npm test` and `npm run test:voice`.
+**Testing changes.** Three layers; none of them depend on anyone's ears.
+
+1. **`npm test`** runs everywhere, with stub binaries. It covers the MCP tools, turn-taking, setup, the mic lock, the plugin hook and the release metadata.
+2. **The "Speech round trip" CI job** runs on a real Mac. Our own `setup --install` puts in SoX, whisper.cpp and the model. Then `doctor --no-loopback` runs, and `test/roundtrip.test.mjs` speaks known sentences with the real voice and transcribes them with the real whisper.cpp. The build fails if too many words come back wrong or transcription is too slow. The numbers are kept as a build artifact.
+3. **`npm run doctor`** on your own Mac adds the one thing CI can't test, your speakers and microphone. It plays a sentence through the speakers, records it and transcribes it. Each stage gets PASS, WARN or FAIL against fixed limits, and the report is saved under `~/.cache/mac-voice-mcp/doctor/`.
+
+**Trying the plugin from a checkout:** run `npm run dev:plugin`, then the `claude --plugin-dir …` command it prints. This loads a throwaway plugin, "mac-voice-mcp-dev", that runs this checkout's build with `node`. Its own name means it doesn't clash with an installed mac-voice-mcp. It also works inside this repo, where `npx mac-voice-mcp@<this version>` would find the checkout instead of the package and fail with `CONNECTION_CLOSED`.
 
 ### Releasing
 

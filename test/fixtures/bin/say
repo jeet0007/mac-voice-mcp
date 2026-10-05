@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Stub TTS: records what would have been spoken. `say -v ?` lists voices from STUB_SAY_VOICES.
+// With -o FILE, writes 1 s of 16 kHz WAV instead of "speaking".
 const fs = require("fs");
 const args = process.argv.slice(2);
 if (args[0] === "-v" && args[1] === "?") {
@@ -7,8 +8,21 @@ if (args[0] === "-v" && args[1] === "?") {
   process.exit(0);
 }
 const voice = args[0] === "-v" ? args[1] : null;
+const out = args.includes("-o") ? args[args.indexOf("-o") + 1] : null;
 let text = "";
 process.stdin.on("data", (d) => (text += d));
-process.stdin.on("end", () =>
-  fs.appendFileSync(process.env.STUB_LOG, `speak ${JSON.stringify(text)}${voice ? ` voice=${JSON.stringify(voice)}` : ""}\n`),
-);
+process.stdin.on("end", () => {
+  const tag = voice ? ` voice=${JSON.stringify(voice)}` : "";
+  if (out) {
+    const pcm = Buffer.alloc(32000);
+    for (let i = 0; i < 16000; i++) pcm.writeInt16LE(Math.round(6000 * Math.sin((2 * Math.PI * 220 * i) / 16000)), i * 2);
+    const h = Buffer.alloc(44);
+    h.write("RIFF", 0); h.writeUInt32LE(36 + pcm.length, 4); h.write("WAVE", 8); h.write("fmt ", 12);
+    h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(16000, 24);
+    h.writeUInt32LE(32000, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write("data", 36); h.writeUInt32LE(pcm.length, 40);
+    fs.writeFileSync(out, Buffer.concat([h, pcm]));
+    fs.appendFileSync(process.env.STUB_LOG, `speak-to-file ${JSON.stringify(text)}${tag}\n`);
+  } else {
+    fs.appendFileSync(process.env.STUB_LOG, `speak ${JSON.stringify(text)}${tag}\n`);
+  }
+});

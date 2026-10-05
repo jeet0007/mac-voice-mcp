@@ -26,13 +26,17 @@
  *   model.ts        find / symlink / download the whisper model
  *   stt.ts          warm whisper-server + whisper-cli fallback
  *   setup.ts        requirement checks and consent-based installs
+ *   lock.ts         one voice turn at a time across every session on the Mac
  *   voice.ts        the speak → listen → transcribe round trip
+ *   wer.ts          word error rate (pure)
+ *   doctor.ts       objective self-check with PASS / WARN / FAIL
  *   texts.ts        everything the model reads (rules, instructions, prompts)
  *   server.ts       MCP tools and prompts
  */
 import { createInterface } from "node:readline/promises";
 import { DEFAULT_LISTEN_SECONDS, envNum, log, PKG } from "./config.js";
 import { startServer } from "./server.js";
+import { runDoctor } from "./doctor.js";
 import { runSetupFlow } from "./setup.js";
 import { stopWhisperServer } from "./stt.js";
 import { speakAndListen } from "./voice.js";
@@ -45,6 +49,8 @@ Usage:
   npx -y ${PKG.name} setup            Check what's installed; offers to install what's missing
   npx -y ${PKG.name} setup --install  Install what's missing without asking (brew + model download)
   npx -y ${PKG.name} test ["text"]    Speak, listen for one turn and print the transcript
+  npx -y ${PKG.name} doctor           Self-check: setup, voice → transcript, speakers → mic (PASS/WARN/FAIL)
+  npx -y ${PKG.name} doctor --no-loopback   …without playing sound through the speakers
   npx -y ${PKG.name} --version
 
 Environment variables (all optional):
@@ -55,7 +61,7 @@ Environment variables (all optional):
   VOICE_MCP_WHISPER_PROMPT         words to bias recognition toward (names, jargon)
   VOICE_MCP_VOICE / _RATE          macOS say voice and words-per-minute
   VOICE_MCP_END_SILENCE_MS         pause length that ends your turn (default 1200)
-  VOICE_MCP_START_TIMEOUT_SECONDS  wait this long for you to start talking (default 8)
+  VOICE_MCP_START_TIMEOUT_SECONDS  wait this long for you to start talking (default 15)
   VOICE_MCP_SPEECH_MARGIN_DB       how far above room noise counts as speech (default 12)
   VOICE_MCP_WHISPER_SERVER         0 to always use whisper-cli (no warm server)
   VOICE_MCP_SERVER_IDLE_MINUTES    stop the warm server after this idle time (default 15)
@@ -84,6 +90,17 @@ async function runSetupCli(args: string[]): Promise<number> {
   return outcome.ready ? 0 : 1;
 }
 
+async function runDoctorCli(args: string[]): Promise<number> {
+  console.error(`${PKG.name} v${PKG.version} doctor — checking the voice pipeline on this machine\n`);
+  const loopback = !args.includes("--no-loopback");
+  if (loopback) console.error("You'll hear a short sentence from the speakers. Keep the room quiet and don't talk.\n");
+  const report = await runDoctor({ loopback, log: (line) => console.error(line) });
+  console.error(`\n${report.ok ? "All checks passed." : "Some checks failed — see the details above."}`);
+  if (report.reportFile) console.error(`Report saved to ${report.reportFile}`);
+  if (args.includes("--json")) process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+  return report.ok ? 0 : 1;
+}
+
 async function runTestCli(text?: string): Promise<number> {
   const prompt = text || "Voice bridge test. Say something after the chime, and I'll print what I heard.";
   try {
@@ -109,8 +126,9 @@ async function main(): Promise<void> {
     case "serve":
       return startServer();
     case "setup":
-    case "doctor":
       process.exit(await runSetupCli(rest));
+    case "doctor":
+      process.exit(await runDoctorCli(rest));
     case "test":
       process.exit(await runTestCli(rest.join(" ").trim()));
     case "-v":
