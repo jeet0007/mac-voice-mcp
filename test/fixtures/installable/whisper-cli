@@ -5,4 +5,4 @@ const args = process.argv.slice(2);
 const wav = args[args.indexOf("-f") + 1];
 const seconds = (fs.statSync(wav).size - 44) / 32000;
 fs.appendFileSync(process.env.STUB_LOG, `whisper-cli wav=${seconds.toFixed(2)}s ${args.filter((a) => a !== wav).join(" ")}\n`);
-process.stdout.write(" Stub transcript from the CLI.\n [BLANK_AUDIO]\n");
+process.stdout.write(` ${process.env.STUB_TRANSCRIPT ?? "Stub transcript from the CLI."}\n [BLANK_AUDIO]\n`);

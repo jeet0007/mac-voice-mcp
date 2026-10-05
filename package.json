@@ -23,6 +23,8 @@
     "test": "npm run build && node --test test/*.test.mjs",
     "setup": "node dist/index.js setup",
     "test:voice": "node dist/index.js test",
+    "doctor": "node dist/index.js doctor",
+    "dev:plugin": "node scripts/dev-plugin.mjs",
     "inspect": "npx -y @modelcontextprotocol/inspector node dist/index.js",
     "prepare": "npm run build",
     "prepublishOnly": "npm test",

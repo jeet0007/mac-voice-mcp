@@ -122,6 +122,26 @@ export async function speak(text: string, signal?: AbortSignal): Promise<void> {
   }
 }
 
+/**
+ * Speak `text` into a 16 kHz mono 16-bit WAV instead of the speakers, with the same voice
+ * `speak` uses. For `doctor` and the round-trip tests.
+ */
+export async function synthesizeToFile(text: string, outFile: string): Promise<void> {
+  const bin = findTts();
+  if (!bin) throw new SetupError("No text-to-speech engine found.");
+  let result: RunResult;
+  if (IS_MAC) {
+    const { voice } = await chooseVoice();
+    const args = [...(voice ? ["-v", voice] : []), "-o", outFile, "--file-format=WAVE", "--data-format=LEI16@16000", "-f", "-"];
+    result = await run(bin, args, { input: text, timeoutMs: 60_000 });
+  } else if (/espeak/.test(bin)) {
+    result = await run(bin, ["-w", outFile, "--stdin"], { input: text, timeoutMs: 60_000 });
+  } else {
+    throw new SetupError("Writing speech to a file needs macOS `say` or espeak-ng.");
+  }
+  if (result.code !== 0) throw new Error(`Text-to-speech to file failed (exit ${result.code}): ${tail(result.stderr) || "no output"}`);
+}
+
 /** A short, quiet cue that the mic just opened ("start") or closed ("stop"). macOS only. */
 export async function chime(kind: "start" | "stop"): Promise<void> {
   if (!CONFIG.chime || !IS_MAC) return;
@@ -187,6 +207,66 @@ function recorderArgs(r: Recorder): string[] {
     "-f", "avfoundation", "-i", CONFIG.ffmpegDevice,
     "-ac", "1", "-ar", "16000", "-f", "s16le", "-",
   ];
+}
+
+export interface RecordResult {
+  /** Nothing but exact zeros — a permission block or a dead input device. */
+  digitalSilence: boolean;
+  /** Loudest 30 ms frame, in dBFS. */
+  peakDb: number;
+}
+
+/**
+ * Record exactly `seconds` from the microphone into `outFile` (16 kHz mono WAV), no turn-taking.
+ * `onStarted` fires once audio is actually flowing, so a caller can start playback in sync.
+ */
+export async function recordForSeconds(seconds: number, outFile: string, onStarted?: () => void): Promise<RecordResult> {
+  const recorder = findRecorder();
+  if (!recorder) throw new SetupError(RECORDER_MISSING);
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  let stderr = "";
+  const wanted = Math.round(seconds * 16000) * 2;
+  const child = spawn(recorder.bin, recorderArgs(recorder), { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+  activeChildren.add(child);
+  await new Promise<void>((resolve, reject) => {
+    const stop = () => child.exitCode === null && child.kill("SIGTERM");
+    const safety = setTimeout(stop, (seconds + 10) * 1000);
+    child.stderr!.setEncoding("utf8").on("data", (d: string) => (stderr = (stderr + d).slice(-4000)));
+    child.stdout!.on("data", (chunk: Buffer) => {
+      if (bytes === 0) onStarted?.();
+      if (bytes >= wanted) return;
+      chunks.push(chunk);
+      bytes += chunk.length;
+      if (bytes >= wanted) stop();
+    });
+    child.on("error", (e) => {
+      clearTimeout(safety);
+      activeChildren.delete(child);
+      reject(e);
+    });
+    child.on("close", () => {
+      clearTimeout(safety);
+      activeChildren.delete(child);
+      resolve();
+    });
+  });
+  const pcm = Buffer.concat(chunks).subarray(0, wanted - (wanted % 2));
+  if (!pcm.length) throw new Error(`Recording failed (${describeRecorder(recorder)}). ${tail(stderr)}`.trim());
+  await writeFile(outFile, Buffer.concat([wavHeader(pcm.length), pcm]));
+
+  let peak = 0;
+  let anyNonZero = false;
+  for (let off = 0; off + FRAME_BYTES <= pcm.length; off += FRAME_BYTES) {
+    let sum = 0;
+    for (let i = off; i < off + FRAME_BYTES; i += 2) {
+      const v = pcm.readInt16LE(i);
+      if (v !== 0) anyNonZero = true;
+      sum += v * v;
+    }
+    peak = Math.max(peak, sum / (FRAME_BYTES / 2));
+  }
+  return { digitalSilence: !anyNonZero, peakDb: peak > 0 ? 10 * Math.log10(peak / 32768 ** 2) : -Infinity };
 }
 
 /**

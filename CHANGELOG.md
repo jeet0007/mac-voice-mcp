@@ -5,6 +5,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- **`doctor`: an objective self-check** (`npx mac-voice-mcp doctor`). It checks the whole pipeline on your Mac and marks each stage PASS, WARN or FAIL against fixed limits:
+  - **Setup:** everything is installed.
+  - **Speech → text:** the voice speaks a known sentence into a file, and whisper must get the words right.
+  - **Speaker → mic:** the same sentence is played aloud and recorded. It catches mic permission problems, the wrong input device and headphones.
+
+  Reports are saved as JSON under `~/.cache/mac-voice-mcp/doctor/`. Use `--no-loopback` to skip the speakers, and `--json` for machine-readable output.
+- **A "Speech round trip" CI job on a real Mac.** It installs everything with our own `setup --install`, runs `doctor`, then speaks known sentences (everyday and developer jargon) with the real voice and transcribes them with the real whisper.cpp. The build fails on too many wrong words or slow transcription.
+- **`npm run dev:plugin`** loads this checkout into Claude Code as a separate "mac-voice-mcp-dev" plugin. It runs the local build with `node`, with no npx and no clash with the installed plugin.
+
 ## [0.3.1] - 2026-09-29
 
 ### Fixed
