@@ -385,3 +385,143 @@ test("silence through ffmpeg blames the device and suggests SoX, not just permis
     await client.close();
   }
 });
+
+// --- The optional Kokoro voice (a fake kokoro-js stands in for the real ~330 MB install) ---------
+
+/** Put the fake kokoro-js where installKokoro would put the real one. */
+function fakeKokoro(sb, { model = true } = {}) {
+  const dir = path.join(sb.home, ".cache", "mac-voice-mcp", "kokoro");
+  mkdirSync(path.join(dir, "node_modules", "kokoro-js"), { recursive: true });
+  writeFileSync(path.join(dir, "node_modules", "kokoro-js", "package.json"), '{"name":"kokoro-js","version":"1.2.1"}\n');
+  writeFileSync(path.join(dir, "entry.mjs"), readFileSync(path.join(FIXTURES, "kokoro", "entry.mjs")));
+  if (model) {
+    const onnx = path.join(dir, "models", "onnx-community", "Kokoro-82M-v1.0-ONNX", "onnx");
+    mkdirSync(onnx, { recursive: true });
+    writeFileSync(path.join(onnx, "model.onnx"), "fake");
+  }
+  return dir;
+}
+
+const lines = (log, prefix) => log.split("\n").filter((l) => l.startsWith(prefix));
+
+test("Kokoro, once installed, speaks sentence by sentence through play, kept warm between turns", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  fakeKokoro(sb);
+  const { client } = await connect(sb.env({ VOICE_MCP_KOKORO_VOICE: "bf_emma" }));
+  try {
+    const r1 = await client.callTool({
+      name: "speak_and_listen",
+      arguments: { text_to_speak: "The build passed and all tests are green. I updated package.json too. Should I open the pull request now?" },
+    });
+    assert.equal(r1.content[0].text, "Stub transcript from the server.");
+    assert.match(text(r1), /voice-mcp timing: spoke [\d.]+ s \(Kokoro, first sound after [\d.]+ s, voice loaded\) · listened/);
+    const r2 = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Anything else?" } });
+    assert.match(text(r2), /\(Kokoro, first sound after [\d.]+ s\) · listened/, "warm: no load the second time");
+
+    const log = sb.readLog();
+    assert.equal(lines(log, "kokoro-load").length, 1, "the model is loaded once and reused");
+    assert.match(log, /kokoro-load onnx-community\/Kokoro-82M-v1.0-ONNX dtype=fp32 download=false cache=true/, "never downloads while speaking");
+    assert.deepEqual(lines(log, "kokoro-generate"), [
+      'kokoro-generate "The build passed and all tests are green." voice=bf_emma speed=1',
+      'kokoro-generate "I updated package dot jay-son too. Should I open the pull request now?" voice=bf_emma speed=1',
+      'kokoro-generate "Anything else?" voice=bf_emma speed=1',
+    ]);
+    const plays = lines(log, "play ");
+    assert.equal(plays.length, 2, "one gapless player per turn");
+    assert.match(plays[0], /^play -q -t raw -r 24000 -e signed-integer -b 16 -c 1 - bytes=\d+$/);
+    assert.ok(Number(plays[0].split("bytes=")[1]) > 24000 * 2 * 4, "the turn's audio all reached the player");
+    assert.equal(lines(log, "speak ").length, 0, "the built-in voice wasn't used");
+  } finally {
+    await client.close();
+  }
+});
+
+test("a broken Kokoro falls back to the built-in voice, and says so once", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  fakeKokoro(sb);
+  const { client } = await connect(sb.env({ FAKE_KOKORO: "broken-load" }));
+  try {
+    const r1 = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Hello there." } });
+    assert.equal(r1.isError, false);
+    assert.equal(r1.content[0].text, "Stub transcript from the server.");
+    assert.match(text(r1), /voice-mcp note: the Kokoro voice didn't work \(fake load failure\), so the built-in voice spoke instead/);
+    const r2 = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Still there?" } });
+    assert.doesNotMatch(text(r2), /Kokoro voice didn't work/, "not repeated every turn");
+    assert.deepEqual(lines(sb.readLog(), "speak ").map((l) => l.replace(/ voice=.*/, "")), ['speak "Hello there."', 'speak "Still there?"']);
+  } finally {
+    await client.close();
+  }
+});
+
+test("if Kokoro fails partway, the built-in voice says only what wasn't said yet", async () => {
+  const sb = sandbox();
+  fakeKokoro(sb);
+  const { client } = await connect(sb.env({ FAKE_KOKORO: "broken-generate" }));
+  try {
+    const r = await client.callTool({
+      name: "speak_and_listen",
+      arguments: { text_to_speak: "The first sentence is spoken by Kokoro. The second one is not.", listen: false },
+    });
+    assert.equal(r.isError, false);
+    assert.match(text(r), /fake generate failure/);
+    assert.equal(lines(sb.readLog(), "kokoro-generate").length, 2);
+    assert.deepEqual(lines(sb.readLog(), "speak ").map((l) => l.replace(/ voice=.*/, "")), ['speak "The second one is not."']);
+  } finally {
+    await client.close();
+  }
+});
+
+test("VOICE_MCP_TTS=say keeps the built-in voice even with Kokoro installed; an unknown Kokoro voice falls back to af_heart", async () => {
+  const sb = sandbox();
+  fakeKokoro(sb);
+  let c = await connect(sb.env({ VOICE_MCP_TTS: "say" }));
+  try {
+    await c.client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Built in.", listen: false } });
+    assert.doesNotMatch(sb.readLog(), /kokoro-/);
+    assert.equal(lines(sb.readLog(), "speak ").length, 1);
+  } finally {
+    await c.client.close();
+  }
+  c = await connect(sb.env({ VOICE_MCP_KOKORO_VOICE: "zz_nobody" }));
+  try {
+    await c.client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Kokoro.", listen: false } });
+    assert.match(sb.readLog(), /kokoro-generate "Kokoro." voice=af_heart/);
+  } finally {
+    await c.client.close();
+  }
+});
+
+test("setup: Kokoro is offered only when asked for, and an installed one is reported", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  let c = await connect(sb.env());
+  try {
+    const plain = text(await c.client.callTool({ name: "voice_setup", arguments: {} }));
+    assert.doesNotMatch(plain, /Kokoro voice:/, "not pushed on anyone who didn't ask");
+  } finally {
+    await c.client.close();
+  }
+  c = await connect(sb.env({ VOICE_MCP_TTS: "kokoro" }));
+  try {
+    const asked = text(await c.client.callTool({ name: "voice_setup", arguments: {} }));
+    assert.match(asked, /setup — READY/);
+    assert.match(asked, /• Kokoro voice: VOICE_MCP_TTS=kokoro, but it isn't installed/);
+    assert.match(asked, /ask the user whether to install the Kokoro voice .*call voice_setup with kokoro=true/);
+    // Until it's installed, speaking still works with the built-in voice.
+    const r = await c.client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Still talking.", listen: false } });
+    assert.match(text(r), /Kokoro voice didn't work \(the Kokoro voice isn't installed/);
+    assert.equal(lines(sb.readLog(), "speak ").length, 1);
+  } finally {
+    await c.client.close();
+  }
+  fakeKokoro(sb);
+  c = await connect(sb.env());
+  try {
+    const installed = text(await c.client.callTool({ name: "voice_setup", arguments: {} }));
+    assert.match(installed, /✔ Kokoro voice: Kokoro af_heart \(fp32\)/);
+  } finally {
+    await c.client.close();
+  }
+});

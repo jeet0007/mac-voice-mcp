@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [Unreleased]
 
 ### Added
+- **An optional natural voice: Kokoro.** [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) is a small neural voice that runs on your Mac and sounds much closer to a person than `say`.
+  - **Install it only if you want it:** `voice_setup` with `kokoro=true` (Claude asks first), or `npx mac-voice-mcp setup --kokoro`. It installs `kokoro-js@1.2.1` with npm into `~/.cache/mac-voice-mcp/kokoro/` and downloads the model once, about 1 GB on disk. Nothing is bundled, and speaking never downloads anything.
+  - **Once installed it's used automatically**, with the `af_heart` voice. It runs in its own warm process and speaks sentence by sentence, so the first sentence plays while the rest is generated. The timing line shows how soon the first sound came.
+  - **It can't leave you without a voice.** If Kokoro fails, the built-in voice says whatever hadn't been said yet, and Claude is told once.
+  - **Settings:** `VOICE_MCP_TTS` (`auto`, `say` or `kokoro`), `VOICE_MCP_KOKORO_VOICE`, `VOICE_MCP_KOKORO_SPEED`, `VOICE_MCP_KOKORO_DTYPE` and `VOICE_MCP_KOKORO_DIR`.
+  - **`doctor` and the CI round trip cover Kokoro too:** whisper must understand it, and the first sound must come quickly.
 - **`doctor`: an objective self-check** (`npx mac-voice-mcp doctor`). It checks the whole pipeline on your Mac and marks each stage PASS, WARN or FAIL against fixed limits:
   - **Setup:** everything is installed.
   - **Speech → text:** the voice speaks a known sentence into a file, and whisper must get the words right.

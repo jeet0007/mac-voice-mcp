@@ -5,6 +5,7 @@ import type { CallToolResult, ServerNotification, ServerRequest } from "@modelco
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { z } from "zod";
 import { CONFIG, DEFAULT_LISTEN_SECONDS, log, MAX_LISTEN_SECONDS, PKG } from "./config.js";
+import { stopKokoro } from "./kokoro.js";
 import { locateModel } from "./model.js";
 import { activeChildren, SetupError } from "./proc.js";
 import { runSetupFlow } from "./setup.js";
@@ -96,12 +97,21 @@ export function createServer(): McpServer {
           .boolean()
           .optional()
           .describe("false (default): only check. true: brew install missing packages and download the model. Ask the user first."),
+        kokoro: z
+          .boolean()
+          .optional()
+          .describe(
+            "true: install the optional Kokoro voice — a natural-sounding neural voice that runs on this Mac " +
+              "(kokoro-js via npm and a one-time model download, about 1 GB on disk). Ask the user first.",
+          ),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ install }, extra): Promise<CallToolResult> => {
+    async ({ install, kokoro }, extra): Promise<CallToolResult> => {
       try {
-        const outcome = await exclusive(() => runSetupFlow(install === true, progressReporter(extra)));
+        const outcome = await exclusive(() =>
+          runSetupFlow({ install: install === true, kokoro: kokoro === true, onProgress: progressReporter(extra) }),
+        );
         return { content: [{ type: "text", text: outcome.report }] };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -145,6 +155,7 @@ export async function startServer(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     stopWhisperServer();
+    stopKokoro();
     for (const child of activeChildren) child.kill("SIGTERM");
     try {
       await server.close();

@@ -66,6 +66,8 @@ export const SETUP_TOOL_DESCRIPTION = [
   "Call it with install=false (the default) first and tell the user what is missing.",
   "Only call it with install=true after the user agrees: it runs `brew install` for the missing packages",
   "and downloads the speech model once. It never uninstalls or changes anything else.",
+  "kokoro=true (also only after the user agrees) installs the optional Kokoro voice: more natural than the built-in one,",
+  "runs on this Mac, about 1 GB on disk. Once installed it's used automatically; the built-in voice stays as the fallback.",
   'If it reports INSTALLING, the install continues in the background — wait a minute and call it again to check.',
 ].join("\n");
 

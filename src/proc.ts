@@ -69,6 +69,7 @@ export interface RunOptions {
   timeoutMs?: number;
   killSignal?: NodeJS.Signals;
   env?: NodeJS.ProcessEnv;
+  cwd?: string;
 }
 
 /** Every child we start, so shutdown can stop them all. */
@@ -82,6 +83,7 @@ export function run(cmd: string, args: string[], opts: RunOptions = {}): Promise
     const child = spawn(cmd, args, {
       stdio: [opts.input !== undefined ? "pipe" : "ignore", "pipe", "pipe"],
       windowsHide: true,
+      cwd: opts.cwd,
       env: opts.env ? { ...process.env, ...opts.env } : process.env,
     });
     activeChildren.add(child);

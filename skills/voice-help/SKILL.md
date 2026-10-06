@@ -38,7 +38,9 @@ anything unspeakable and says so in a "voice-mcp note"; follow those notes.
 | Reply cut off ("may be cut off" note) | They hit the listening limit. Ask them to continue; for long dictation pass a larger `listen_seconds`. |
 | Turn ends while they're still thinking | Set `VOICE_MCP_END_SILENCE_MS` higher (default 1200) in the server's environment. |
 | Wrong words, names or jargon | Set `VOICE_MCP_WHISPER_PROMPT` to the names and terms, or use a bigger model (`VOICE_MCP_WHISPER_MODEL=small.en`, then voice_setup to download it). |
-| Voice sounds robotic | Download a Premium voice: System Settings → Accessibility → Spoken Content → System Voice → Manage Voices. It's picked up automatically. `VOICE_MCP_VOICE` picks a specific one. |
+| Voice sounds robotic | Download a Premium voice: System Settings → Accessibility → Spoken Content → System Voice → Manage Voices. It's picked up automatically. `VOICE_MCP_VOICE` picks a specific one. Or offer the Kokoro voice: a natural neural voice that runs on the Mac (about 1 GB on disk). With the user's OK, call `voice_setup` with `kokoro=true`. |
+| "The Kokoro voice didn't work" | The built-in voice spoke instead, so nothing was lost. Call `voice_setup` to see what's wrong. To reinstall, the user deletes `~/.cache/mac-voice-mcp/kokoro/` and you call `voice_setup` with `kokoro=true`. `VOICE_MCP_TTS=say` turns Kokoro off. |
+| Change the Kokoro voice | Set `VOICE_MCP_KOKORO_VOICE` (e.g. `af_bella`, `am_michael`, `bf_emma`) in the MCP server's env, or in Claude Code's `settings.json` `env` block for the plugin, then restart. |
 | Other languages | `VOICE_MCP_WHISPER_MODEL=base` (multilingual) and `VOICE_MCP_LANGUAGE=auto` or a code such as `th`. |
 | Slow turns | Read the timing line: "spoke" is the speech length, "transcribed" should be well under a second with the warm server. |
 | "Another voice session on this Mac…" | Another Claude window, Claude Desktop or Cursor held the speaker and mic for over 2 minutes (`VOICE_MCP_LOCK_WAIT_SECONDS`). Tell the user on screen, and try again once that conversation is over. |

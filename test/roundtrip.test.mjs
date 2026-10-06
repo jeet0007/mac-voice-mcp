@@ -33,11 +33,14 @@ const LIMITS = {
   plainOverall: 0.1,
   jargonEach: 0.5,
   warmTranscribeMs: 3000,
+  /** Kokoro only (VOICE_MCP_TTS=kokoro), voice loaded: from "speak" to the first sound. */
+  firstSoundMs: 1500,
   ...JSON.parse(process.env.VOICE_MCP_ROUNDTRIP_LIMITS || "{}"),
 };
 
 test("speech round trip: voice → file → whisper.cpp stays accurate and fast", { skip: !enabled && "macOS + VOICE_MCP_ROUNDTRIP=1 only" }, async () => {
   const { synthesizeToFile, chooseVoice } = await import("../dist/audio.js");
+  const { kokoroEnabled, kokoroVoiceLabel, stopKokoro } = await import("../dist/kokoro.js");
   const { transcribe, stopWhisperServer, describeStt } = await import("../dist/stt.js");
   const { ensureModel } = await import("../dist/model.js");
   const { wordErrorRate } = await import("../dist/wer.js");
@@ -49,22 +52,38 @@ test("speech round trip: voice → file → whisper.cpp stays accurate and fast"
       for (const [i, sentence] of sentences.entries()) {
         const wav = path.join(tmp, `${kind}-${i}.wav`);
         let t = Date.now();
-        await synthesizeToFile(sentence, wav);
+        const spoken = await synthesizeToFile(sentence, wav);
         const synthMs = Date.now() - t;
         await transcribe(wav, model); // warm up (first call loads the model)
         t = Date.now();
         const heard = await transcribe(wav, model);
         const transcribeMs = Date.now() - t;
-        rows.push({ kind, sentence, heard, ...wordErrorRate(sentence, heard), synthMs, transcribeMs });
+        rows.push({
+          kind,
+          sentence,
+          heard,
+          ...wordErrorRate(sentence, heard),
+          engine: spoken.engine,
+          synthMs,
+          firstSoundMs: spoken.firstAudioMs,
+          coldStart: spoken.coldStart,
+          transcribeMs,
+        });
       }
     }
   } finally {
     stopWhisperServer();
+    stopKokoro();
   }
 
-  const report = { voice: (await chooseVoice()).label, stt: describeStt(), model, limits: LIMITS, rows };
+  const kokoro = kokoroEnabled();
+  if (kokoro) assert.ok(rows.every((r) => r.engine === "kokoro"), "VOICE_MCP_TTS=kokoro, but another voice spoke");
+  const report = { voice: kokoro ? kokoroVoiceLabel() : (await chooseVoice()).label, stt: describeStt(), model, limits: LIMITS, rows };
   writeFileSync(process.env.VOICE_MCP_ROUNDTRIP_REPORT ?? path.join(tmp, "roundtrip-report.json"), JSON.stringify(report, null, 2));
-  for (const r of rows) console.log(`${r.kind.padEnd(6)} WER ${(r.wer * 100).toFixed(0).padStart(3)}%  ${r.transcribeMs} ms  "${r.sentence}" → "${r.heard}"`);
+  for (const r of rows) {
+    const first = r.firstSoundMs !== undefined ? `  first sound ${r.firstSoundMs} ms${r.coldStart ? " (cold)" : ""}` : "";
+    console.log(`${r.kind.padEnd(6)} WER ${(r.wer * 100).toFixed(0).padStart(3)}%  ${r.transcribeMs} ms${first}  "${r.sentence}" → "${r.heard}"`);
+  }
 
   const plain = rows.filter((r) => r.kind === "plain");
   const overall = plain.reduce((s, r) => s + r.errors, 0) / plain.reduce((s, r) => s + r.words, 0);
@@ -74,4 +93,7 @@ test("speech round trip: voice → file → whisper.cpp stays accurate and fast"
     assert.ok(r.wer <= LIMITS.jargonEach, `jargon badly misheard (${r.wer}): "${r.sentence}" → "${r.heard}"`);
   }
   for (const r of rows) assert.ok(r.transcribeMs <= LIMITS.warmTranscribeMs, `transcribing took ${r.transcribeMs} ms: "${r.sentence}"`);
+  for (const r of rows.filter((x) => x.engine === "kokoro" && !x.coldStart)) {
+    assert.ok(r.firstSoundMs <= LIMITS.firstSoundMs, `Kokoro took ${r.firstSoundMs} ms to the first sound: "${r.sentence}"`);
+  }
 });

@@ -17,6 +17,7 @@ import os from "node:os";
 import path from "node:path";
 import { chooseVoice, describeRecorder, findRecorder, recordForSeconds, speak, synthesizeToFile } from "./audio.js";
 import { CONFIG, IS_MAC, PKG } from "./config.js";
+import { kokoroEnabled, kokoroVoiceLabel, stopKokoro } from "./kokoro.js";
 import { ensureModel } from "./model.js";
 import { run } from "./proc.js";
 import { runSetupFlow } from "./setup.js";
@@ -32,6 +33,9 @@ export const LIMITS = {
   /** Through the air, room noise and a laptop mic make it harder. */
   loopback: [0.3, 0.5],
 } as const;
+
+/** Kokoro, model loaded: milliseconds from "speak" to the first sound, [PASS at or below, WARN at or below]. */
+export const FIRST_SOUND_MS = [1500, 3000] as const;
 
 export type Status = "PASS" | "WARN" | "FAIL" | "SKIP";
 
@@ -93,13 +97,14 @@ export async function runDoctor(opts: { loopback?: boolean; reportDir?: string; 
 
   try {
     // 1. Setup
-    const setup = await runSetupFlow(false);
+    const setup = await runSetupFlow();
     add({ name: "Setup", status: setup.ready ? "PASS" : "FAIL", detail: setup.ready ? "everything is installed" : "something is missing — run `setup`" });
     if (!setup.ready) throw new StopChecks();
     const voice = await chooseVoice();
     const recorder = findRecorder();
+    const kokoro = kokoroEnabled();
     Object.assign(report.machine, {
-      voice: voice.label,
+      voice: kokoro ? `${kokoroVoiceLabel()}, built-in fallback: ${voice.label}` : voice.label,
       recorder: recorder ? describeRecorder(recorder) : "none",
       stt: describeStt(),
       model: CONFIG.modelPath ?? CONFIG.modelName,
@@ -109,8 +114,21 @@ export async function runDoctor(opts: { loopback?: boolean; reportDir?: string; 
     // 2. Speech → text, straight from a file
     const spoken = path.join(tmp, "spoken.wav");
     let t = Date.now();
-    await synthesizeToFile(DOCTOR_SENTENCE, spoken);
+    const cold = await synthesizeToFile(DOCTOR_SENTENCE, spoken);
     const synthMs = Date.now() - t;
+
+    if (cold.engine === "kokoro") {
+      // Again with the voice loaded: how long a normal turn waits before the first sound.
+      const warm = await synthesizeToFile(DOCTOR_SENTENCE, spoken);
+      const ms = warm.firstAudioMs ?? 0;
+      const [pass, warn] = FIRST_SOUND_MS;
+      add({
+        name: "Kokoro voice",
+        status: ms <= pass ? "PASS" : ms <= warn ? "WARN" : "FAIL",
+        detail: `first sound after ${ms} ms (${cold.firstAudioMs ?? 0} ms when the voice had to load first)`,
+        metrics: { firstSoundMs: ms, firstSoundColdMs: cold.firstAudioMs ?? 0 },
+      });
+    }
     t = Date.now();
     const heardColdText = await transcribe(spoken, model);
     const coldMs = Date.now() - t;
@@ -123,7 +141,7 @@ export async function runDoctor(opts: { loopback?: boolean; reportDir?: string; 
       name: "Speech → text",
       status: fileStatus,
       detail: `${pct(1 - fileScore.wer)} of words right (heard: "${heard}") — voice ${synthMs} ms, transcribe ${warmMs} ms (first ${coldMs} ms)`,
-      metrics: { wer: fileScore.wer, synthMs, transcribeColdMs: coldMs, transcribeWarmMs: warmMs, audioSeconds: await wavSeconds(spoken) },
+      metrics: { wer: fileScore.wer, engine: cold.engine, synthMs, transcribeColdMs: coldMs, transcribeWarmMs: warmMs, audioSeconds: await wavSeconds(spoken) },
     });
 
     // 3. Speaker → mic, through the air
@@ -171,6 +189,7 @@ export async function runDoctor(opts: { loopback?: boolean; reportDir?: string; 
     }
   } finally {
     stopWhisperServer();
+    stopKokoro();
     await rm(tmp, { recursive: true, force: true });
   }
 
