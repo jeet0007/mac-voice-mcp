@@ -1,7 +1,7 @@
 {
   "name": "mac-voice-mcp",
   "mcpName": "io.github.jeet0007/mac-voice-mcp",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Talk with Claude out loud on your Mac: speaks with macOS `say`, listens for one natural conversational turn, and transcribes on-device with whisper.cpp. An MCP server.",
   "type": "module",
   "bin": {
