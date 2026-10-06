@@ -24,7 +24,7 @@
 
 ---
 
-Claude says something through your Mac's speakers, listens to your answer the way a person would, and gets back what you said as text. Speech recognition runs on your Mac, so no audio leaves your computer.
+Claude speaks through your Mac's speakers, listens to your answer the way a person would, and gets back what you said as text. Speech recognition runs on your Mac, so no audio leaves your computer.
 
 ```
 Claude ──speak_and_listen("Tests pass. Open the PR?")──▶  🔊 "Tests pass. Open the PR?"
@@ -32,120 +32,47 @@ Claude ──speak_and_listen("Tests pass. Open the PR?")──▶  🔊 "Tests 
 Claude ◀──────────────── "Yes, and tag Priya." ─────────  whisper.cpp on your Mac
 ```
 
-It's built for Apple Silicon Macs (M1–M4). Linux works too, with SoX and espeak-ng installed.
+**Perfect for:**
 
-### 🤖 Vibe-coded
+- Long tasks: Claude works quietly and checks in out loud when it needs a decision, so you can step away from the screen.
+- Quick reviews: a 20-second summary of a pull request, then "approve it?"
+- Resting your eyes, or your wrists, after a long day at the keyboard.
+- Thinking out loud: talking a problem through instead of typing it.
 
-> This project was designed and written with Claude, in conversation. A human (me) steered it, tried it on a real Mac and checked the test suite, but most of the code was written by AI. It's a **proof of concept**: it works and has tests, but expect rough edges, and read the code before relying on it for anything important. Issues and pull requests are welcome.
->
-> It's an independent project, not made or endorsed by Anthropic. It works with any MCP client, including Claude Desktop, Claude Code and Cursor.
+## Features
 
-## How it works
+- 🔒 **On-device.** whisper.cpp transcribes on your Mac. Recordings are deleted after each turn.
+- 💬 **Natural turn-taking.** A soft chime, then it waits for you to start, and hands back about a second after you stop. No push-to-talk.
+- ⚡ **Fast replies.** A warm whisper.cpp server keeps the model loaded, so transcribing takes a fraction of a second on Apple Silicon.
+- 🗣️ **A natural voice, if you want one.** Uses your best macOS voice, or the optional [Kokoro](docs/voices.md#the-kokoro-voice-optional) neural voice.
+- ✋ **Asks before installing anything.** Setup checks what you already have and reuses it.
+- 🪟 **One mic, many windows.** Claude Code, Claude Desktop and Cursor take turns instead of talking over each other.
+- 📏 **Measured, not guessed.** `doctor` checks the whole pipeline on your Mac and scores it PASS, WARN or FAIL.
 
-The server has **two tools and two prompts**:
+## Quick start
 
-| | What it does |
-|---|---|
-| `speak_and_listen` | Speaks a short message, listens for one conversational turn and returns the transcript. |
-| `voice_setup` | Checks what's installed. After you agree, it installs only what's missing. |
-| `/mcp__voice-mcp__setup` | A guided setup: it checks, asks you, installs, then runs a spoken test. |
-| `/mcp__voice-mcp__voice_mode` | A hands-free session where Claude checks in by voice at natural points. |
+You need a Mac (Apple Silicon recommended) and **Node.js 22 or newer**.
 
-**Listening works like a conversation.** A soft chime plays when the mic opens. The server waits for you to start talking and hands back to Claude about a second after you stop. It adjusts to background noise, doesn't cut you off at pauses mid-sentence, and ignores coughs and clicks. If you say nothing for 15 seconds, Claude gets "no speech", which it is told never to treat as a yes.
+**1. Install.**
 
-**Replies come back fast.** whisper.cpp's server keeps the speech model loaded between turns, and the model starts loading while Claude is still talking. You don't wait for a model load on each reply. After 15 idle minutes the server shuts down to free memory. It is stopped automatically even if the MCP server crashes.
-
-**Claude sends text meant to be heard.** The tool description gives Claude rules for writing short spoken sentences. If code, paths, links or markdown still get through, the server rewrites them before speaking and tells Claude, so the next message is cleaner. See [below](#getting-claude-to-sound-natural).
-
-## Install
-
-You need **Node.js 22 or newer**. Whichever way you install, run setup once afterwards (see *Then*, below).
-
-### One click
-
-<p>
-  <a href="https://cursor.com/en/install-mcp?name=voice-mcp&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIm1hYy12b2ljZS1tY3BAbGF0ZXN0Il19"><img alt="Add to Cursor" src="https://cursor.com/deeplink/mcp-install-dark.svg" height="32"></a>
-  <a href="https://insiders.vscode.dev/redirect/mcp/install?name=voice-mcp&config=%7B%22type%22%3A%22stdio%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22mac-voice-mcp%40latest%22%5D%7D"><img alt="Install in VS Code" src="https://img.shields.io/badge/VS_Code-Install_Server-0098FF?style=for-the-badge&logo=visualstudiocode&logoColor=white" height="32"></a>
-  <a href="https://insiders.vscode.dev/redirect/mcp/install?name=voice-mcp&config=%7B%22type%22%3A%22stdio%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22mac-voice-mcp%40latest%22%5D%7D&quality=insiders"><img alt="Install in VS Code Insiders" src="https://img.shields.io/badge/VS_Code_Insiders-Install_Server-24bfa5?style=for-the-badge&logo=visualstudiocode&logoColor=white" height="32"></a>
-</p>
-
-### From a marketplace
-
-- **Claude Code plugin marketplace.** This repo is its own marketplace:
+- **Claude Code** (recommended). Install the plugin:
   ```
   /plugin marketplace add jeet0007/mac-voice-mcp
   /plugin install mac-voice-mcp@mac-voice-mcp
   ```
-  The plugin adds `/mac-voice-mcp:setup` and `/mac-voice-mcp:talk`, a skill that teaches Claude how to use voice well and fix common problems, and a hook that keeps a voice conversation in voice (see [Voice mode](#voice-mode)). Each plugin version runs the matching npm release.
-- **The official MCP Registry.** It's listed as [`io.github.jeet0007/mac-voice-mcp`](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.jeet0007/mac-voice-mcp). Apps and directories that read the registry pick it up from there. In VS Code, open the Extensions view (⇧⌘X), search `@mcp mac-voice`, and click **Install**. Smithery, Glama, PulseMCP and mcp.so copy the registry, so it shows up there too.
+- **Cursor or VS Code:** <a href="https://cursor.com/en/install-mcp?name=voice-mcp&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIm1hYy12b2ljZS1tY3BAbGF0ZXN0Il19"><img alt="Add to Cursor" src="https://cursor.com/deeplink/mcp-install-dark.svg" height="24"></a> <a href="https://insiders.vscode.dev/redirect/mcp/install?name=voice-mcp&config=%7B%22type%22%3A%22stdio%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22mac-voice-mcp%40latest%22%5D%7D"><img alt="Install in VS Code" src="https://img.shields.io/badge/VS_Code-Install_Server-0098FF?style=for-the-badge&logo=visualstudiocode&logoColor=white" height="24"></a>
 
-### By hand
+- **Claude Desktop and other apps:** add `npx -y mac-voice-mcp@latest` as a stdio MCP server. See [Install](docs/install.md#by-hand) for each app.
 
-**Claude Code**
+**2. Set up.** Ask Claude to *"set up voice"* (or run `/mac-voice-mcp:setup`). It checks for SoX, whisper.cpp and a speech model, shows you what's missing, and installs it only after you say yes.
 
-```bash
-claude mcp add voice-mcp -s user -- npx -y mac-voice-mcp@latest
-```
+**3. Allow the microphone.** The first time Claude listens, macOS asks. Click **Allow**.
 
-**Claude Desktop.** Add this to `~/Library/Application Support/Claude/claude_desktop_config.json`, then quit (⌘Q) and reopen the app:
-
-```json
-{
-  "mcpServers": {
-    "voice-mcp": {
-      "command": "npx",
-      "args": ["-y", "mac-voice-mcp@latest"]
-    }
-  }
-}
-```
-
-`@latest` makes npx check for a new release each time the app starts. Without it, npx keeps running whichever version it cached first.
-
-If you get `spawn npx ENOENT`, use the full path from `which npx`, e.g. `"command": "/opt/homebrew/bin/npx"`.
-
-**Cursor.** Add the same `mcpServers` block to `~/.cursor/mcp.json`.
-
-**VS Code.** Run **MCP: Add Server** from the Command Palette, or:
-
-```bash
-code --add-mcp '{"name":"voice-mcp","command":"npx","args":["-y","mac-voice-mcp@latest"]}'
-```
-
-**Any other MCP client.** Run `npx -y mac-voice-mcp@latest` as a stdio server.
-
-### Then: set up and allow the mic
-
-**Run setup once.** Ask Claude to *"set up voice"*. In Claude Code you can also run `/mac-voice-mcp:setup` (plugin) or `/mcp__voice-mcp__setup` (added by hand), or from a terminal run `npx -y mac-voice-mcp@latest setup`.
-
-Setup checks what's already there before it changes anything:
-
-| Needed | Provided by | If it's missing |
-|---|---|---|
-| Voice | macOS `say`, using the most natural voice installed | Nothing to do. For a far better voice, add a free Premium one (see below). |
-| Microphone capture | SoX (`rec`). ffmpeg works as a fallback, but setup recommends SoX | `brew install sox` |
-| Speech-to-text | whisper.cpp (`whisper-cli` and `whisper-server`, Metal-accelerated) | `brew install whisper-cpp` |
-| Speech model | `base.en`, ~140 MB | Downloaded once to `~/.cache/mac-voice-mcp/models/` |
-
-- **Nothing is redone.** Tools already on your PATH are used as they are. If the model is already somewhere on disk (a whisper.cpp checkout, Homebrew's share folder, another tool's cache, or anything Spotlight can find), it's **symlinked**, not downloaded again. `brew install` runs only for the missing formulae.
-- **Nothing happens without your OK.** Claude calls `voice_setup` to check first, shows you the checklist, and asks before calling it with `install=true`.
-- **Slow installs don't time out.** If `brew install whisper-cpp` takes a while, setup reports INSTALLING. The install carries on in the background, and the next check picks up the result.
-
-**Allow the microphone.** The first time Claude listens, macOS asks whether Claude (or Cursor, or your terminal) can use the microphone. Click Allow.
-
-**Get a better voice (recommended).** macOS includes free Premium voices that sound far more natural than the default. Open **System Settings → Accessibility → Spoken Content → System Voice → Manage Voices…**, and download one, for example English → *Ava (Premium)* or *Zoe (Premium)*. The next voice turn uses it automatically. To choose a specific voice, or keep the system voice, see `VOICE_MCP_VOICE` under [Configuration](#configuration).
-
-**Or try the Kokoro voice (optional).** [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) is a small neural voice that sounds close to a person and runs entirely on your Mac. Ask Claude to *"install the Kokoro voice"*, or run `npx -y mac-voice-mcp@latest setup --kokoro`.
-
-- **What it installs:** [kokoro-js](https://github.com/hexgrad/kokoro) with npm into `~/.cache/mac-voice-mcp/kokoro/`, and the model from Hugging Face, once. That's about 1 GB on disk, and nothing is bundled with this package.
-- **How it's used:** once it's installed, every turn uses it, starting with `af_heart`. Pick another voice with `VOICE_MCP_KOKORO_VOICE` (see [Configuration](#configuration)). It speaks sentence by sentence, so it starts talking before the whole reply is generated. Each turn's timing line shows how soon the first sound came.
-- **It can't leave you without a voice.** If Kokoro fails for any reason, the built-in voice takes over mid-sentence, and Claude tells you once.
-- **To stop using it:** set `VOICE_MCP_TTS=say`, or delete `~/.cache/mac-voice-mcp/kokoro/`.
-- **Limits:** English only (American and British voices). It speaks with its own pronunciation rules, which handle common developer words (JSON, `index.ts`, version numbers).
+**4. Talk.** Run `/mac-voice-mcp:talk fix the flaky login test`, or ask Claude to *"check in with me by voice when you need a decision"*. Reply after the chime.
 
 ### Allow voice turns without prompts
 
-By default, Claude Code asks for approval every time Claude wants to speak, which breaks the flow of a conversation. To allow voice turns, add the tool to the `permissions.allow` list in `~/.claude/settings.json`. Use the name that matches how you installed it:
+Claude Code asks for approval every time Claude wants to speak, which breaks the flow of a conversation. To allow voice turns, add the tool to `permissions.allow` in `~/.claude/settings.json`:
 
 ```json
 {
@@ -158,220 +85,75 @@ By default, Claude Code asks for approval every time Claude wants to speak, whic
 }
 ```
 
-The first name is for the plugin, the second for `claude mcp add voice-mcp …`. Leave `voice_setup` out, so installs still ask you first. While `/mac-voice-mcp:talk` runs, voice turns are already allowed.
+The first name is for the plugin, the second for `claude mcp add voice-mcp …`. Leave `voice_setup` out, so installs still ask you first.
 
-### Installing from a clone
+## How it works
 
-One command does everything above: it builds the project, runs setup (asking before installing anything), adds voice-mcp to Claude Desktop (backing up your config first) and to Claude Code, and offers a spoken test. It's safe to re-run, because each step checks first and skips anything already done.
+The server has two tools and two prompts:
 
-```bash
-git clone https://github.com/jeet0007/mac-voice-mcp && bash mac-voice-mcp/install.sh
-```
-
-## Upgrading
-
-- **Claude Code plugin:** run `/plugin marketplace update mac-voice-mcp`, then open `/plugin`, choose mac-voice-mcp under your installed plugins, and update it. Restart Claude Code. If there's no update option, uninstall and reinstall it.
-- **Everything installed with `mac-voice-mcp@latest`** (Claude Desktop, Cursor, VS Code, `claude mcp add`): restart the app. npx fetches the new release when the server starts.
-- **Configs without `@latest`:** change `mac-voice-mcp` to `mac-voice-mcp@latest` in the config, then restart the app. Otherwise npx keeps running the version it cached first.
-
-Check which version you'd get with `npx -y mac-voice-mcp@latest --version`, and see what changed in the [changelog](CHANGELOG.md). Your model, voice and settings carry over.
-
-## Using it
-
-- **"Work on X and check in with me by voice when you need a decision."** Claude works quietly and only speaks at decision points.
-- **`/mac-voice-mcp:talk fix the flaky login test`** (plugin), or **`/mcp__voice-mcp__voice_mode fix the flaky login test`** (added by hand). Claude reads its plan back to you, then checks in at each checkpoint. Say "stop voice mode" or "I'm back" to end it.
-- **"Read me a 20-second summary of this PR and ask if I should approve it."** Use this for one-off briefings.
-- **Just talk after the chime.** You don't need to hurry or fill silence. If you're still talking at the 30-second safety cap (`listen_seconds`), Claude is told your reply may be cut off and asks you to continue.
-
-### Voice mode
-
-Once you answer out loud, you're in a voice conversation. Claude replies by voice, not in text, until one of these happens:
-
-- **You type something.** You're back at the keyboard.
-- **You say you're done.** Claude says a short goodbye without opening the mic (`speak_and_listen` with `listen: false`).
-- **You don't answer.** After 15 seconds of silence Claude asks once more. If you still don't answer, it pauses and summarizes on screen, and the mic stays off. Type anything, or run `/mac-voice-mcp:talk`, to pick up again.
-
-In Claude Code, the plugin enforces this with a hook. If Claude tries to answer in text mid-conversation, the hook sends it back once to answer by voice. If it stops again, the hook lets it. To turn the hook off, add `"VOICE_MCP_STAY_IN_VOICE": "0"` to the `env` block in `~/.claude/settings.json`. Other apps rely on the instructions alone.
-
-**Several sessions, one mic.** Every mac-voice-mcp on your Mac takes turns: Claude Code windows, Claude Desktop and Cursor. While one is speaking or listening, the others wait for that turn to finish (shown as "waiting for another voice session"). They give up after 2 minutes with a message. If a session crashes, the next one takes the mic over.
-
-## Getting Claude to sound natural
-
-Guidance reaches Claude through several channels, because each client shows different ones:
-
-| Channel | Who sees it |
+| | What it does |
 |---|---|
-| Tool description (rules plus a good and a bad example) | Every client |
-| Server instructions (when to use voice, how to handle replies, setup) | Claude Code (it reads up to 2 KB) |
-| The `voice_mode` and `setup` prompts | Claude Code (as slash commands), Claude Desktop, Cursor |
-| Server-side rewrite plus a `voice-mcp note` back to Claude | Always on |
-| The plugin's `/mac-voice-mcp:talk`, `voice-help` skill and stay-in-voice hook | Claude Code, with the plugin |
+| `speak_and_listen` | Speaks a short message, listens for one conversational turn and returns the transcript. |
+| `voice_setup` | Checks what's installed. After you agree, it installs only what's missing. |
+| `setup` prompt | A guided setup: it checks, asks you, installs, then runs a spoken test. |
+| `voice_mode` prompt | A hands-free session where Claude checks in by voice at natural points. |
 
-The rules Claude is given:
-
-```
-- 1–3 short sentences, under ~40 words; lead with the outcome, then one question.
-- Plain words only: no markdown, bullets, emoji, code, file paths, URLs, stack traces or tables.
-- Describe code instead of reading it, say file names not paths, round numbers, spell out symbols.
-- Ask one question at a time, answerable in a few words.
-- Put the details (diffs, logs, links) in the on-screen reply, and say so out loud.
-```
-
-The safety net turns `## Results\n- \`npm test\` ✅ 42/42\n- see /Users/x/repo/src/index.ts:120` into *"Results. npm test 42 of 42. see index.ts."*
-
-Claude Desktop ignores server instructions. To make the rules stick there, paste [`examples/CLAUDE.md`](examples/CLAUDE.md) into *Settings → Profile → personal preferences* or into a Project's instructions. For Claude Code, add it to `CLAUDE.md`. For Cursor, copy [`examples/voice-mcp.mdc`](examples/voice-mcp.mdc) to `.cursor/rules/`.
-
-## Configuration
-
-Everything is optional. Set these in your client config's `"env": { … }` block, or with `-e NAME=value` in `claude mcp add`.
-
-**Speaking**
-
-| Variable | Default | |
-|---|---|---|
-| `VOICE_MCP_VOICE` | most natural installed | Unset: the best Premium or Enhanced voice installed for the language, else the system voice. Set a name, e.g. `Ava (Premium)`, `Daniel`, `Kanya` (list them with `say -v '?'`), or `default` to always use the system voice. |
-| `VOICE_MCP_RATE` | system rate | Words per minute, e.g. `200` (macOS voices). |
-| `VOICE_MCP_TTS` | `auto` | `auto`: the [Kokoro voice](#then-set-up-and-allow-the-mic) once it's installed, else the built-in voice. `say`: always the built-in voice. `kokoro`: Kokoro, and setup offers to install it. |
-| `VOICE_MCP_KOKORO_VOICE` | `af_heart` | Kokoro voice. American English starts with `a`, British with `b`, e.g. `af_bella`, `am_michael`, `bf_emma`, `bm_george`. |
-| `VOICE_MCP_KOKORO_SPEED` | `1` | Kokoro speaking speed, `0.5` to `2`. |
-| `VOICE_MCP_KOKORO_DTYPE` | `fp32` | `q8`: a smaller model (~90 MB instead of ~330 MB) that's about half as fast. |
-| `VOICE_MCP_KOKORO_DIR` | `~/.cache/mac-voice-mcp/kokoro` | Where the Kokoro voice is installed. |
-| `VOICE_MCP_MAX_SPEAK_WORDS` | `120` | Longer text is cut at a sentence boundary ("the rest is on screen"). |
-| `VOICE_MCP_CHIME` | `1` | Set to `0` to turn off the mic open/close sounds. |
-| `VOICE_MCP_LOCK_WAIT_SECONDS` | `120` | How long a turn waits while another session on this Mac is using the mic. |
-
-**Listening**
-
-| Variable | Default | |
-|---|---|---|
-| `VOICE_MCP_END_SILENCE_MS` | `1200` | How long a pause ends your turn. Use `1800` if it cuts you off while you think, `800` for snappier replies. |
-| `VOICE_MCP_START_TIMEOUT_SECONDS` | `15` | How long to wait for you to start talking. |
-| `VOICE_MCP_SPEECH_MARGIN_DB` | `12` | How much louder than room noise counts as speech. Raise it in noisy rooms. |
-| `VOICE_MCP_MIN_SPEECH_DB` | `-48` | The quietest level that ever counts as speech (dBFS). |
-| `VOICE_MCP_RECORDER` | `auto` | `sox` or `ffmpeg` (`ffmpeg` is macOS only). `auto` uses SoX, falling back to ffmpeg. |
-| `VOICE_MCP_FFMPEG_DEVICE` | `:default` | Which input ffmpeg records from. `:default` follows System Settings; `:1` picks device 1 (list them with `ffmpeg -f avfoundation -list_devices true -i ""`). |
-
-**Speech-to-text**
-
-| Variable | Default | |
-|---|---|---|
-| `VOICE_MCP_WHISPER_MODEL` | `base.en` | Which model to use (see the table below). |
-| `VOICE_MCP_LANGUAGE` | `en` for `*.en` models, otherwise `auto` | `en`, `th`, `ja`, `de`, … |
-| `VOICE_MCP_WHISPER_PROMPT` | — | Words to bias toward: names, product terms, jargon. |
-| `VOICE_MCP_WHISPER_MODEL_PATH` | — | Use this exact `ggml-*.bin` file. |
-| `VOICE_MCP_MODEL_SEARCH_PATHS` | — | Extra folders to check for an existing model (`:`-separated). |
-| `VOICE_MCP_WHISPER_SERVER` | `1` | Set to `0` to always use `whisper-cli`, with no warm server. |
-| `VOICE_MCP_SERVER_IDLE_MINUTES` | `15` | How long the warm server stays up without use. |
-| `VOICE_MCP_THREADS` | min(8, cores) | Number of whisper.cpp threads. |
-| `VOICE_MCP_CACHE_DIR` | `~/.cache/mac-voice-mcp` | Where models are downloaded or symlinked. |
-| `VOICE_MCP_DEBUG` | `0` | Verbose logs with per-turn timings, written to stderr. |
-
-**Claude Code plugin hook.** Set this in the `env` block of `~/.claude/settings.json`, not in the server's config:
-
-| Variable | Default | |
-|---|---|---|
-| `VOICE_MCP_STAY_IN_VOICE` | `1` | Set to `0` to stop the plugin's hook from sending Claude back to answer by voice. |
-
-**Models** (whisper.cpp names):
-
-| Model | Size | Good for |
-|---|---|---|
-| `tiny.en` | 75 MB | Yes/no answers, the lowest latency |
-| `base.en` | 142 MB | **Default.** English conversation. |
-| `small.en` | 466 MB | Noticeably more accurate English |
-| `large-v3-turbo-q5_0` | 547 MB | Other languages, e.g. Thai with `VOICE_MCP_LANGUAGE=th` |
+Claude is told how to write for the ear: short sentences, no markdown, file names instead of paths. If code or links still get through, the server rewrites them before speaking. In Claude Code, the plugin also keeps a voice conversation in voice until you type. More in [Using it](docs/usage.md).
 
 ## Troubleshooting
 
+Run `npx -y mac-voice-mcp@latest doctor` first. It tests setup, the voice and transcription, and your speakers and mic, and tells you which part fails.
+
 | Symptom | Fix |
 |---|---|
-| Not sure what's wrong | Run `npx -y mac-voice-mcp@latest doctor`. It checks setup, the voice and transcription, and your speakers and mic, and says which part fails. |
-| "voice-mcp is not set up yet" | Ask Claude to *set up voice*, or run `npx -y mac-voice-mcp@latest setup`. |
-| "microphone returned pure digital silence" | macOS is blocking the mic for the host app. Go to **System Settings → Privacy & Security → Microphone**, enable Claude / Cursor / your terminal, then restart that app. If the message says it's recording with ffmpeg, the input device is the likelier cause: run `brew install sox`. |
-| No permission prompt ever appears | Run `tccutil reset Microphone <bundle id>` and restart the app. Running `test` in Terminal only gives permission to Terminal, not to Claude Desktop. |
-| It cuts me off while I'm thinking | Set `VOICE_MCP_END_SILENCE_MS=1800` (or up to `2500`). |
-| It never stops listening | The room is too noisy for the defaults. Set `VOICE_MCP_SPEECH_MARGIN_DB=18`, or use a headset. |
-| It hears its own voice | Use headphones, or turn the speaker volume down. It only listens after it finishes speaking, but echo can linger. |
-| "Homebrew: not installed" | Install it from [brew.sh](https://brew.sh). It needs your password, so it can't run from Claude. Then run setup again. |
-| It garbles names or jargon | Set `VOICE_MCP_WHISPER_PROMPT="Priya, Postgres, Kubernetes"`, or switch to `small.en`. |
-| The voice sounds robotic | Download a Premium voice, or install the Kokoro voice (see [Get a better voice](#then-set-up-and-allow-the-mic)). Either is used automatically. |
-| "The Kokoro voice didn't work" | The built-in voice spoke instead. Ask Claude to *check voice setup*, or run `npx -y mac-voice-mcp@latest setup`. To reinstall it, delete `~/.cache/mac-voice-mcp/kokoro/` and run `setup --kokoro`. |
-| It asks for approval every turn | Add the tool to Claude Code's allow list: see [Allow voice turns without prompts](#allow-voice-turns-without-prompts). |
-| "Another voice session on this Mac…" | Another Claude window, Claude Desktop or Cursor held the speaker and mic for over 2 minutes, which means one very long turn. End that conversation, then try again. |
-| Claude keeps answering by voice after I'm done | Type anything, or say "stop voice mode". To switch the plugin's hook off entirely, see [Voice mode](#voice-mode). |
-| Turns feel slow | Each result ends with a timing line, e.g. `spoke 3.1 s · listened 4.0 s · transcribed 0.3 s`. Ask Claude what it says. Transcribing should take well under a second. |
+| "microphone returned pure digital silence" | Allow the mic for the app (Claude, Cursor or your terminal) in **System Settings → Privacy & Security → Microphone**, then restart it. |
+| It cuts me off while I'm thinking | Set `VOICE_MCP_END_SILENCE_MS=1800`. |
+| The voice sounds robotic | Download a Premium macOS voice or install Kokoro. See [Voices](docs/voices.md). |
+| It asks for approval every turn | See [Allow voice turns without prompts](#allow-voice-turns-without-prompts). |
 
-## Known limitations
+More in [Troubleshooting](docs/troubleshooting.md).
 
-- **You can't interrupt it.** It finishes speaking, then listens. Barge-in would mean listening while the speakers play, which needs headphones or echo cancellation.
-- **It's macOS-first.** Linux works with SoX and espeak-ng. Windows is untested.
-- **Turn-taking is based on loudness, not a speech model.** It adapts to background noise, but very noisy rooms, music or TV can confuse it. A headset helps, and so do the listening settings above.
-- **One conversation at a time.** There's one speaker and one microphone, so turns from every session on the Mac are queued.
+## Documentation
 
-## Privacy and safety
+- [Install](docs/install.md): every app, the MCP Registry, installing from a clone, upgrading.
+- [Voices](docs/voices.md): macOS Premium voices and the optional Kokoro voice.
+- [Using it](docs/usage.md): voice mode, several sessions, getting Claude to sound natural.
+- [Configuration](docs/configuration.md): every setting, and the speech models.
+- [Troubleshooting](docs/troubleshooting.md): common problems and known limitations.
+- [Privacy and security](docs/privacy-security.md): what stays on your Mac, and how the project is secured.
+- [Development](docs/development.md): building, testing and releasing.
+- [Changelog](CHANGELOG.md)
 
-- **Audio stays on your machine.** Recordings go to a temporary file that's deleted after each turn. The only network use is the one-time model download from Hugging Face, plus npm and Hugging Face once more if you install the Kokoro voice. Speaking never downloads anything.
-- **The warm whisper server is local only.** It listens on `127.0.0.1` on a random port, and stops when idle or when this server exits.
-- **Setup can only install known packages.** Its install list is fixed in the code (`sox`, `whisper-cpp`, and `kokoro-js@1.2.1` for the optional voice), so nothing Claude says can make it install anything else. It never uninstalls or modifies other software.
-- **Licenses of the optional Kokoro voice.** The Kokoro model and kokoro-js are Apache-2.0. kokoro-js turns text into sounds with a WebAssembly build of espeak-ng (GPL-3.0), through the `phonemizer` package. None of this is part of mac-voice-mcp (MIT). It's installed on your Mac only if you ask for it.
+### 🤖 Vibe-coded
 
-## Security
+> This project was designed and written with Claude, in conversation. A human (me) steered it, tested it on a real Mac and checked the test suite, but most of the code was written by AI. Read the [Disclaimer](#disclaimer) before you rely on it.
 
-- **Secrets:** every push and pull request is scanned for leaked secrets with [TruffleHog](https://github.com/trufflesecurity/trufflehog), and the whole history is scanned before the first push. GitHub secret scanning with push protection is also on.
-- **Dependencies:** [Dependabot](https://docs.github.com/code-security/dependabot) opens weekly update pull requests. CI fails on high-severity advisories (`npm audit`), and dependency review blocks pull requests that add vulnerable packages.
-- **Code:** [CodeQL](https://codeql.github.com) runs with the `security-extended` queries.
-- **Releases:** releases publish through [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/), with no long-lived npm token and a signed provenance attestation for every version.
+## Disclaimer
 
-To report a vulnerability, see [SECURITY.md](SECURITY.md).
+mac-voice-mcp is a free, open-source personal project. It's provided **as is, with no warranty of any kind**, and the authors aren't liable for any damage or loss from using it. See the [LICENSE](LICENSE) for the exact terms. In plain words:
 
-## Development
+- **It turns on your microphone** whenever an AI assistant calls `speak_and_listen`, and plays sound through your speakers.
+- **Speech recognition makes mistakes.** An assistant may act on a misheard word. Check what it heard before you let it do anything you can't undo, like deleting files, pushing code or sending messages.
+- **It installs software on your Mac**, but only after you agree: Homebrew packages, and kokoro-js with npm if you choose the Kokoro voice. Those are separate projects, under their own licenses (below).
+- **There's no guaranteed support.** Issues and pull requests are welcome, and fixed on a best-effort basis.
 
-```bash
-npm install
-npm test               # build + unit tests, end-to-end tests over MCP with stub binaries, and release-metadata checks
-npm run audit          # known-vulnerability and signature checks on dependencies
-npm run setup          # check what's installed; offers to install what's missing
-npm run test:voice     # one real speak → listen → transcribe turn
-npm run doctor         # objective self-check on this Mac: PASS / WARN / FAIL per stage, JSON report
-npm run dev:plugin     # try this checkout in Claude Code as the "mac-voice-mcp-dev" plugin
-npm run inspect        # MCP Inspector
-```
+**Trademarks.** Apple, Mac, macOS and Siri are trademarks of Apple Inc. Claude is a trademark of Anthropic. mac-voice-mcp is an independent project, not affiliated with, sponsored or endorsed by Apple or Anthropic.
 
-| Module | Responsibility |
-|---|---|
-| `config.ts` | Environment settings, logging, the PATH fix-up for GUI apps |
-| `speech-text.ts` | Rewriting screen text for speech, cleaning up transcripts (pure, unit-tested) |
-| `endpointer.ts` | Turn-taking voice-activity detection (pure, unit-tested) |
-| `audio.ts` | Text-to-speech, chimes, streaming mic capture |
-| `kokoro.ts`, `kokoro-worker.ts` | The optional Kokoro voice: install, a warm worker process, sentence-by-sentence playback, fallback |
-| `kokoro-text.ts`, `pcm.ts` | Pronunciation fixes and sentence chunks for Kokoro, PCM conversion (pure, unit-tested) |
-| `model.ts` | Finding, symlinking or downloading the model |
-| `stt.ts` | The warm `whisper-server` with orphan guard, and the `whisper-cli` fallback |
-| `setup.ts` | Requirement checks and consent-based background installs |
-| `lock.ts` | One voice turn at a time across every session on the Mac |
-| `voice.ts`, `server.ts`, `index.ts` | The round trip, the MCP tools and prompts, and the CLI |
-| `skills/`, `hooks/` | The Claude Code plugin's `/mac-voice-mcp:talk` and `:setup` commands, the `voice-help` skill, and the stay-in-voice hook |
+### Third-party software
 
-The package installs two commands: `mac-voice-mcp` (the one `npx -y mac-voice-mcp` runs), and `voice-mcp`.
+mac-voice-mcp doesn't bundle any of these. It uses them when they're on your Mac, and installs them only with your consent. Each one comes under its own license.
 
-**Testing changes.** Three layers; none of them depend on anyone's ears.
-
-1. **`npm test`** runs everywhere, with stub binaries. It covers the MCP tools, turn-taking, setup, the mic lock, the plugin hook and the release metadata.
-2. **The "Speech round trip" CI job** runs on a real Mac. Our own `setup --install` puts in SoX, whisper.cpp and the model. Then `doctor --no-loopback` runs, and `test/roundtrip.test.mjs` speaks known sentences with the real voice and transcribes them with the real whisper.cpp. The build fails if too many words come back wrong or transcription is too slow. The same job then installs the Kokoro voice with `setup --kokoro` and repeats the round trip with it, which also checks how soon Kokoro starts talking. GitHub's Macs have only basic voices and no GPU for whisper.cpp, so the limits there are looser: it guards against breakage, and doctor on a real Mac is the quality bar. The numbers are kept as a build artifact.
-3. **`npm run doctor`** on your own Mac adds the one thing CI can't test, your speakers and microphone. It plays a sentence through the speakers, records it and transcribes it. Each stage gets PASS, WARN or FAIL against fixed limits, and the report is saved under `~/.cache/mac-voice-mcp/doctor/`.
-
-**Trying the plugin from a checkout:** run `npm run dev:plugin`, then the `claude --plugin-dir …` command it prints. This loads a throwaway plugin, "mac-voice-mcp-dev", that runs this checkout's build with `node`. Its own name means it doesn't clash with an installed mac-voice-mcp. It also works inside this repo, where `npx mac-voice-mcp@<this version>` would find the checkout instead of the package and fail with `CONNECTION_CLOSED`.
-
-### Releasing
-
-- **First release:** `bash publish.sh`. It asks before each public step and uses your own GitHub and npm logins. It creates the GitHub repo, publishes to npm, and lists the server in the [official MCP Registry](https://registry.modelcontextprotocol.io), which Smithery, Glama, PulseMCP and mcp.so pick up from.
-- **Later releases:**
-  1. Add a section to `CHANGELOG.md` for the new version, in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format, dated today.
-  2. Run `npm version patch` (bug fixes), `npm version minor` (new features) or `npm version major` (breaking changes), per [semver](https://semver.org). It updates `package.json`, `package-lock.json`, `server.json` and the plugin (including the npm version the plugin runs), commits, and tags `v<version>`.
-  3. Run `git push --follow-tags`.
-
-  The Publish workflow then runs the tests, which also check that every version and the changelog entry match. It publishes to npm with provenance, lists the release in the MCP Registry, and creates a GitHub Release from the changelog section. It needs no secrets: npm and the registry both use GitHub's OIDC identity, once you've set the package's *Trusted Publisher* on npmjs.com (`publish.sh` prints the steps). If a step fails, fix the cause and use **Re-run failed jobs**. Steps that already finished are skipped.
+| Software | Used for | License |
+|---|---|---|
+| [SoX](https://sourceforge.net/projects/sox/) | Recording from the mic, Kokoro playback | GPL-2.0 |
+| [whisper.cpp](https://github.com/ggml-org/whisper.cpp) | Speech-to-text | MIT |
+| [Whisper models](https://huggingface.co/ggerganov/whisper.cpp) (OpenAI) | Speech-to-text | MIT |
+| macOS voices (`say`) | The built-in voice | Apple's macOS license |
+| [kokoro-js](https://github.com/hexgrad/kokoro) (optional) | The Kokoro voice | Apache-2.0 |
+| [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) model (optional) | The Kokoro voice | Apache-2.0 |
+| [espeak-ng](https://github.com/espeak-ng/espeak-ng) (optional, inside kokoro-js) | Turning text into sounds for Kokoro | GPL-3.0 |
+| [ffmpeg](https://ffmpeg.org) (fallback, never installed by setup) | Recording, if SoX is missing | LGPL-2.1 / GPL |
 
 ## License
 
-MIT
+[MIT](LICENSE) © Jeet
