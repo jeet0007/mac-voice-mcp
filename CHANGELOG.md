@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-06
+
 ### Added
 - **An optional natural voice: Kokoro.** [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) is a small neural voice that runs on your Mac and sounds much closer to a person than `say`.
   - **Install it only if you want it:** `voice_setup` with `kokoro=true` (Claude asks first), or `npx mac-voice-mcp setup --kokoro`. It installs `kokoro-js@1.2.1` with npm into `~/.cache/mac-voice-mcp/kokoro/` and downloads the model once, about 1 GB on disk. Nothing is bundled, and speaking never downloads anything.
@@ -94,7 +96,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   - `voice_setup`: checks first, installs only what's missing, and only after you agree.
   - The `setup` and `voice_mode` prompts.
 
-[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/jeet0007/mac-voice-mcp/compare/119a589...v0.1.1
 [0.1.0]: https://github.com/jeet0007/mac-voice-mcp/tree/119a589
