@@ -84,8 +84,10 @@ jobs:
           VOICE_MCP_TTS: kokoro
           VOICE_MCP_ROUNDTRIP: "1"
           VOICE_MCP_ROUNDTRIP_REPORT: roundtrip-kokoro-report.json
-          # First sound on a 3-core CI VM without a GPU; a real Mac's limit is 1500 ms.
-          VOICE_MCP_ROUNDTRIP_LIMITS: '{"plainEach":0.35,"plainOverall":0.2,"jargonEach":0.6,"warmTranscribeMs":10000,"firstSoundMs":5000}'
+          # GitHub's Mac VMs are several times slower than a real Mac at this (first runs: 3.5-6.4 s to the
+          # first sound), so the time limit here only catches a broken or hung engine. Speed on a real Mac
+          # is judged by `doctor` (PASS at 1.5 s).
+          VOICE_MCP_ROUNDTRIP_LIMITS: '{"plainEach":0.35,"plainOverall":0.2,"jargonEach":0.6,"warmTranscribeMs":10000,"firstSoundMs":12000}'
       - name: Keep the numbers
         if: always()
         uses: actions/upload-artifact@v7
