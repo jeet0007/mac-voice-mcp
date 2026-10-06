@@ -5,6 +5,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- **README: a Disclaimer, a Third-party software table and a trademark note.** They spell out what the tool does on your Mac (mic, installs with your consent), that speech recognition can mishear, the license of everything it uses but doesn't bundle, and that the project isn't affiliated with Apple or Anthropic.
+
+### Changed
+- **A shorter README, in the style of popular MCP servers:** what it's for, features, a four-step quick start and the most common fixes. The full guides moved to [`docs/`](docs/): install, voices, usage, configuration, troubleshooting, privacy and security, and development.
+
 ## [0.4.0] - 2026-10-06
 
 ### Added
