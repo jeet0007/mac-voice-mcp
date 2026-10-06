@@ -64,7 +64,7 @@ Environment variables (all optional):
   VOICE_MCP_WHISPER_MODEL_PATH     use this ggml model file
   VOICE_MCP_MODEL_SEARCH_PATHS     extra folders to look in for an existing model (":"-separated)
   VOICE_MCP_LANGUAGE               spoken language: en, th, de, … or auto
-  VOICE_MCP_WHISPER_PROMPT         words to bias recognition toward (names, jargon)
+  VOICE_MCP_WHISPER_PROMPT         a sentence about the topic, to hear its words better (default: a developer hint; none = off)
   VOICE_MCP_VOICE / _RATE          macOS say voice and words-per-minute
   VOICE_MCP_TTS                    auto (Kokoro once installed) | say | kokoro
   VOICE_MCP_KOKORO_VOICE           Kokoro voice (default af_heart; e.g. af_bella, am_michael, bf_emma)

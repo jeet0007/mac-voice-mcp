@@ -36,7 +36,7 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 |---|---|---|
 | `VOICE_MCP_WHISPER_MODEL` | `base.en` | Which model to use (see the table below). |
 | `VOICE_MCP_LANGUAGE` | `en` for `*.en` models, otherwise `auto` | `en`, `th`, `ja`, `de`, … |
-| `VOICE_MCP_WHISPER_PROMPT` | — | Words to bias toward: names, product terms, jargon. |
+| `VOICE_MCP_WHISPER_PROMPT` | a developer hint (English) | Tells whisper what the conversation is about, so it hears those words better. By default, in English: a short sentence about a developer talking to a coding assistant (builds, commits, pull requests, npm, JSON…). Write your own as a sentence, e.g. `A call with Priya about the Postgres and Kubernetes migration.`, or set `none` for no hint. A plain word list works worse than a sentence. |
 | `VOICE_MCP_WHISPER_MODEL_PATH` | — | Use this exact `ggml-*.bin` file. |
 | `VOICE_MCP_MODEL_SEARCH_PATHS` | — | Extra folders to check for an existing model (`:`-separated). |
 | `VOICE_MCP_WHISPER_SERVER` | `1` | Set to `0` to always use `whisper-cli`, with no warm server. |
