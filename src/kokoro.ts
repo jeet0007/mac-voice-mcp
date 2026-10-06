@@ -14,7 +14,7 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
@@ -462,12 +462,14 @@ export async function installKokoro(onProgress?: (message: string) => void): Pro
     const npm = findNpm();
     if (!npm) throw new SetupError("npm was not found, so kokoro-js can't be installed. Install Node.js from https://nodejs.org (it includes npm).");
     const pkgJson = path.join(f.dir, "package.json");
-    if (!existsSync(pkgJson)) {
-      await writeFile(
-        pkgJson,
-        JSON.stringify({ name: "mac-voice-mcp-kokoro", private: true, type: "module", description: "The optional Kokoro voice for mac-voice-mcp." }, null, 2) + "\n",
-      );
-    }
+    // "wx": create it only if it isn't there yet, in one step (no check-then-write race).
+    await writeFile(
+      pkgJson,
+      JSON.stringify({ name: "mac-voice-mcp-kokoro", private: true, type: "module", description: "The optional Kokoro voice for mac-voice-mcp." }, null, 2) + "\n",
+      { flag: "wx" },
+    ).catch((e: NodeJS.ErrnoException) => {
+      if (e.code !== "EEXIST") throw e;
+    });
     onProgress?.(`installing kokoro-js ${KOKORO_JS_VERSION} with npm`);
     log(`Running: npm install kokoro-js@${KOKORO_JS_VERSION} in ${f.dir}`);
     const r = await run(npm, ["install", "--no-audit", "--no-fund", "--loglevel=error", `kokoro-js@${KOKORO_JS_VERSION}`], {
@@ -478,7 +480,7 @@ export async function installKokoro(onProgress?: (message: string) => void): Pro
     });
     if (r.code !== 0) throw new Error(`npm install kokoro-js failed (exit ${r.code}): ${tail(r.stderr, 4)}`);
   }
-  if (!existsSync(f.entry) || (await readFile(f.entry, "utf8")) !== ENTRY_MJS) await writeFile(f.entry, ENTRY_MJS);
+  await writeFile(f.entry, ENTRY_MJS); // always (re)written: tiny, and it repairs an edited or stale one
 
   // Load it once, downloading the model if it isn't there yet. This is also the install's self-test.
   const hadModel = isKokoroModelPresent();
