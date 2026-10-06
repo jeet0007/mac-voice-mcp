@@ -80,10 +80,10 @@ async function turn(
       const text = "(Spoken. The microphone was not opened, because listen was false.)";
       return { ok: true, text, notes: [...notes, timingNote({ spokeMs: spoke, spoken })] };
     }
-    await chime("start");
     onPhase?.("listening");
     const tListen = Date.now();
-    const heard = await listenForTurn(seconds, wav, signal);
+    // The chime plays once the mic is really recording, so the first word is never lost.
+    const heard = await listenForTurn(seconds, wav, signal, { onListening: () => chime("start") });
     void chime("stop");
     const t1 = Date.now();
     debug("listen:", heard);

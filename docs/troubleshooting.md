@@ -8,6 +8,7 @@
 | "voice-mcp is not set up yet" | Ask Claude to *set up voice*, or run `npx -y mac-voice-mcp@latest setup`. |
 | "microphone returned pure digital silence" | macOS is blocking the mic for the host app. Go to **System Settings → Privacy & Security → Microphone**, enable Claude / Cursor / your terminal, then restart that app. If the message says it's recording with ffmpeg, the input device is the likelier cause: run `brew install sox`. |
 | No permission prompt ever appears | Run `tccutil reset Microphone <bundle id>` and restart the app. Running `test` in Terminal only gives permission to Terminal, not to Claude Desktop. |
+| It misses my first word | Wait for the chime: it plays once the mic is really recording. If words are still lost, run `doctor` and check the input device. |
 | It cuts me off while I'm thinking | Set `VOICE_MCP_END_SILENCE_MS=1800` (or up to `2500`). |
 | It never stops listening | The room is too noisy for the defaults. Set `VOICE_MCP_SPEECH_MARGIN_DB=18`, or use a headset. |
 | It hears its own voice | Use headphones, or turn the speaker volume down. It only listens after it finishes speaking, but echo can linger. |

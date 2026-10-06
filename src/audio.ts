@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { CONFIG, debug, IS_MAC, IS_WIN, log } from "./config.js";
-import { Endpointer, FRAME_BYTES, wavHeader, type EndReason, type EndpointerDiagnostics } from "./endpointer.js";
+import { Endpointer, FRAME_BYTES, FRAME_MS, wavHeader, type EndReason, type EndpointerDiagnostics } from "./endpointer.js";
 import { KokoroError, kokoroEnabled, speakKokoro, synthesizeKokoroToFile } from "./kokoro.js";
 import { activeChildren, CancelledError, run, SetupError, tail, which, type RunResult } from "./proc.js";
 
@@ -304,13 +304,28 @@ export async function recordForSeconds(seconds: number, outFile: string, onStart
   return { digitalSilence: !anyNonZero, peakDb: peak > 0 ? 10 * Math.log10(peak / 32768 ** 2) : -Infinity };
 }
 
+/** Audio the mic must have delivered before we tell the user it's open: the recorder is running, and the room's level is known. */
+export const MIC_WARMUP_MS = 250;
+
+export interface ListenOptions {
+  /**
+   * Called once the microphone is really recording (after MIC_WARMUP_MS of audio), to tell the
+   * user to talk — the "mic open" chime. While its promise is pending, the sound it makes is ignored.
+   */
+  onListening?: () => Promise<unknown> | void;
+}
+
 /**
  * Listen for one conversational turn and write it to `outFile` (16 kHz mono WAV).
  * Streams raw PCM from the recorder, runs the endpointer on it live, and stops the
  * recorder the moment the user finishes. Leading and trailing silence are trimmed
  * (keeping a little padding) so whisper gets just the utterance.
+ *
+ * The recorder starts first and `onListening` (the chime) comes only once audio is flowing, so
+ * someone who starts talking right at the chime is never cut off: opening a mic takes a moment,
+ * longer with Bluetooth.
  */
-export async function listenForTurn(maxSeconds: number, outFile: string, signal?: AbortSignal): Promise<ListenResult> {
+export async function listenForTurn(maxSeconds: number, outFile: string, signal?: AbortSignal, opts: ListenOptions = {}): Promise<ListenResult> {
   const recorder = findRecorder();
   if (!recorder) throw new SetupError(RECORDER_MISSING);
 
@@ -326,6 +341,18 @@ export async function listenForTurn(maxSeconds: number, outFile: string, signal?
   let pending: Buffer = Buffer.alloc(0);
   let reason: EndReason | null = null;
   let stderr = "";
+  const warmupFrames = Math.ceil(MIC_WARMUP_MS / FRAME_MS);
+  let announced = false;
+  const announce = () => {
+    announced = true;
+    if (!opts.onListening) return;
+    endpointer.setIgnoring(true);
+    Promise.resolve()
+      .then(opts.onListening)
+      .catch(() => {})
+      // A short tail: the chime's echo fades out of the mic a moment after it ends.
+      .finally(() => setTimeout(() => endpointer.setIgnoring(false), 80));
+  };
 
   const args = recorderArgs(recorder);
   debug("exec:", recorder.bin, args.join(" "));
@@ -354,6 +381,7 @@ export async function listenForTurn(maxSeconds: number, outFile: string, signal?
         off += FRAME_BYTES;
         frames.push(frame);
         reason = endpointer.push(frame);
+        if (!announced && frames.length >= warmupFrames) announce();
       }
       pending = pending.subarray(off);
       if (reason) stop();
