@@ -1,7 +1,7 @@
 {
   "name": "mac-voice-mcp",
   "displayName": "Mac Voice",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Talk with Claude out loud on your Mac. Speaks, listens for one natural turn, transcribes on-device with whisper.cpp. Run /mac-voice-mcp:setup once, then /mac-voice-mcp:talk.",
   "author": {
     "name": "Jeet"
@@ -14,7 +14,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "mac-voice-mcp@0.4.0"
+        "mac-voice-mcp@0.4.1"
       ]
     }
   }
