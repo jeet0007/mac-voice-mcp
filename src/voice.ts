@@ -114,7 +114,15 @@ async function turn(
     onPhase?.("transcribing");
     const transcript = await transcribe(wav, model, signal);
     const transcribed = Date.now() - t1;
-    if (!transcript) return { ok: true, text: noSpeech, notes: [...notes, timing(transcribed)] };
+    if (!transcript) {
+      // Something was loud enough to sound like speech (a cough, typing, a door), but whisper found no words in it.
+      // Starts with "(No speech detected" so the plugin's voice-mode hook knows the user wasn't heard.
+      const noWords =
+        "(No speech detected — the microphone picked up a sound but no words, probably a cough or background noise. The microphone is now off. " +
+        "Ask once more out loud. If there's still no answer, stop and say on screen that voice mode is paused " +
+        "and they can type anything to carry on — speaking won't work until you call speak_and_listen again.)";
+      return { ok: true, text: noWords, notes: [...notes, timing(transcribed)] };
+    }
     if (heard.reason === "max-duration") {
       const l = heard.levels;
       const f = (n: number) => (Number.isFinite(n) ? n.toFixed(0) : "?");

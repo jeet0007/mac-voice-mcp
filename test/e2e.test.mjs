@@ -550,3 +550,16 @@ test("whisper gets the developer hint by default in English; none turns it off; 
     }
   }
 });
+
+test("a sound with no words (whisper says [gunshot] for a cough) is reported as no speech, not as the user's answer", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_TRANSCRIPT: "[gunshot]" }));
+  try {
+    const r = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Ready?" } });
+    assert.equal(r.isError, false);
+    assert.match(r.content[0].text, /^\(No speech detected — the microphone picked up a sound but no words/);
+  } finally {
+    await client.close();
+  }
+});

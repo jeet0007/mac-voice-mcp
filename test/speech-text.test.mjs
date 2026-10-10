@@ -71,3 +71,24 @@ test("cleanTranscript drops whisper markers and timestamps", () => {
   assert.equal(cleanTranscript("[00:00:00.000 --> 00:00:02.000]  Deploy it.\n"), "Deploy it.");
   assert.equal(cleanTranscript("[ Silence ]"), "");
 });
+
+test("cleanTranscript drops whisper's sound notes: a cough or a fan is not an answer", () => {
+  // Real whisper output for noise-only clips (a cough, typing, a fan, a hum, breathing).
+  for (const note of ["[gunshot]", "[APPLAUSE]", "[sound of running]", "[MUSIC PLAYING]", "[Music]", "[static]", "(sound of running)", "*coughs*", "♪ ♪"]) {
+    assert.equal(cleanTranscript(` ${note}\n`), "", note);
+  }
+  assert.equal(cleanTranscript("[laughs] Yes, ship it. (door closes)"), "Yes, ship it.");
+});
+
+test("cleanTranscript drops sentences whisper invents from videos, but never real answers", () => {
+  assert.equal(cleanTranscript("You can find the link in the description below."), "");
+  assert.equal(cleanTranscript("Merge it. Thank you for watching!"), "Merge it.");
+  assert.equal(cleanTranscript("Please subscribe."), "");
+  assert.equal(cleanTranscript("Subtitles by the Amara.org community"), "");
+  // Real answers that look similar stay.
+  assert.equal(cleanTranscript("Thank you."), "Thank you.");
+  assert.equal(cleanTranscript("Bye."), "Bye.");
+  assert.equal(cleanTranscript("Subscribe to the webhook events, then deploy."), "Subscribe to the webhook events, then deploy.");
+  assert.equal(cleanTranscript("Put the link in the description of the PR."), "Put the link in the description of the PR.");
+  assert.equal(cleanTranscript("Does version 1.2.3 work?"), "Does version 1.2.3 work?");
+});
