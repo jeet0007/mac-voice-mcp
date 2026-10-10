@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-10
+
 ### Added
 - **README: a Disclaimer, a Third-party software table and a trademark note.** They spell out what the tool does on your Mac (mic, installs with your consent), that speech recognition can mishear, the license of everything it uses but doesn't bundle, and that the project isn't affiliated with Apple or Anthropic.
 
@@ -109,7 +111,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   - `voice_setup`: checks first, installs only what's missing, and only after you agree.
   - The `setup` and `voice_mode` prompts.
 
-[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.2.0...v0.3.0
