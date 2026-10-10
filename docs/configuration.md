@@ -61,7 +61,7 @@ whisper.cpp model names:
 |---|---|---|
 | `tiny.en` | 75 MB | Yes/no answers, the lowest latency |
 | `base.en` | 142 MB | **Default.** English conversation. |
-| `small.en` | 466 MB | Noticeably more accurate English |
+| `small.en` | 466 MB | **Noisy rooms.** On real recordings with background noise: 8% of words wrong instead of 12% with `base.en`; the same in a quiet room. About 0.3 s per reply instead of 0.1 s on Apple Silicon. |
 | `large-v3-turbo-q5_0` | 547 MB | Other languages, e.g. Thai with `VOICE_MCP_LANGUAGE=th` |
 
 **Plugin users:** the plugin's MCP server has no config block of its own. Set these in the `env` block of `~/.claude/settings.json` instead, then restart Claude Code.

@@ -5,6 +5,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+- **Docs and the voice-help skill now suggest `small.en` for noisy rooms,** with measured numbers: on real recordings with background noise it got 8% of words wrong instead of 12% with `base.en`, the same in a quiet room, at about 0.3 s per reply. `base.en` stays the default, so nobody gets a 466 MB download they didn't ask for.
+
 ### Fixed
 - **A cough or a fan no longer counts as your answer.** For a sound with no words, whisper writes a note like `[gunshot]` (a cough), `[APPLAUSE]` (typing) or `[sound of running]` (a fan), and those notes were passed to Claude as if you'd said them. Now every sound note is dropped, and Claude is told it heard a sound but no words. On 10 noise-only clips (cough, typing, fan, hum, music, a door, breathing, silence), all 10 now come back as no speech.
 - **Sentences whisper invents from videos are dropped**, such as "You can find the link in the description below." or "Thanks for watching!". Only whole sentences that nobody says to a coding assistant; "Thank you." and "Bye." stay.
