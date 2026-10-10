@@ -57,13 +57,30 @@ jobs:
       - name: Doctor (no speakers on CI)
         run: node dist/index.js doctor --no-loopback
         continue-on-error: true
+        env:
+          VOICE_MCP_DEBUG: "1"
       - name: Round trip
         run: node --test test/roundtrip.test.mjs
         env:
+          VOICE_MCP_DEBUG: "1"
           VOICE_MCP_ROUNDTRIP: "1"
           VOICE_MCP_ROUNDTRIP_REPORT: roundtrip-report.json
           # Calibrated from the first runs on GitHub's runners (basic voice, CPU-only whisper).
           VOICE_MCP_ROUNDTRIP_LIMITS: '{"plainEach":0.35,"plainOverall":0.2,"jargonEach":0.6,"warmTranscribeMs":10000}'
+      # Some runs on main get an empty transcript for every clip (the first one after ~28 s, then
+      # instantly), while the same code passes on pull requests. Capture whisper.cpp's own view.
+      - name: Diagnose whisper.cpp
+        if: failure()
+        run: |
+          set -x
+          sw_vers; sysctl -n machdep.cpu.brand_string; whisper-cli --version 2>&1 | head -3 || true
+          brew info --json=v2 whisper-cpp | python3 -c "import sys,json;print(json.load(sys.stdin)['formulae'][0]['installed'][0]['version'])"
+          say -o /tmp/diag.wav --file-format=WAVE --data-format=LEI16@16000 "The build passed and all tests are green."
+          ls -la /tmp/diag.wav ~/.cache/mac-voice-mcp/models/
+          M=~/.cache/mac-voice-mcp/models/ggml-base.en.bin
+          shasum -a 256 "$M"
+          time whisper-cli -m "$M" -f /tmp/diag.wav -nt 2>&1 | tail -25
+          time whisper-cli -m "$M" -f /tmp/diag.wav -nt -ng 2>&1 | tail -5
       # The same round trip with the optional Kokoro voice, installed by our own setup:
       # can whisper understand it, and how soon does it start talking?
       - name: Cache the Kokoro voice
