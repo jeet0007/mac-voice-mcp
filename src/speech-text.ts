@@ -143,13 +143,42 @@ export function prepareSpeech(input: string, opts: PrepareOptions = {}): Prepare
 }
 
 /** Remove timestamps and non-speech markers like [BLANK_AUDIO] from whisper output. */
+/**
+ * whisper's notes about sounds rather than words: [BLANK_AUDIO], [MUSIC PLAYING], [gunshot] (for a
+ * cough), [APPLAUSE] (for typing), (sound of running) (for a fan), *laughs*, ♪. Never something the user said.
+ */
+const SOUND_NOTES = /\[[^\]]*\]|\([^)]*\)|\*[^*\n]+\*|[♪♫]+/g;
+
+/**
+ * Sentences whisper invents from the videos it learned from, typically on noise or a clipped start.
+ * Only whole sentences that nobody says to a coding assistant; "Thank you." and "Bye." are real answers.
+ */
+const STOCK_SENTENCES = [
+  /^(?:thanks|thank you)(?: (?:so|very) much)? for (?:watching|listening)(?: and see you next time)?$/,
+  /^(?:please |don'?t forget to )?(?:like and )?subscribe(?: to (?:my|our|the) channel)?$/,
+  /^(?:you can )?find the links? in the description(?: below)?$/,
+  /^see you in the next (?:video|episode)$/,
+  /^(?:subtitles|captions|transcription|translated|transcribed)(?: by| provided by)? .*$/,
+];
+
+function isStockSentence(sentence: string): boolean {
+  const s = sentence.toLowerCase().replace(/[.!?,"“”]/g, "").replace(/\s+/g, " ").trim();
+  return STOCK_SENTENCES.some((re) => re.test(s));
+}
+
+/** whisper's raw output → just the words: no timestamps, sound notes or invented stock sentences. */
 export function cleanTranscript(raw: string): string {
-  return raw
+  const text = raw
     .split("\n")
     .map((l) => l.replace(/^\s*\[[\d:.\s\->]+\]\s*/, "")) // stray timestamps
     .join(" ")
-    .replace(/\[(?:BLANK_AUDIO|MUSIC|NOISE|SILENCE|INAUDIBLE|_[A-Z_]+_)[^\]]*\]/gi, " ")
-    .replace(/\[\s*(?:silence|music|noise|inaudible)\s*\]/gi, " ")
+    .replace(SOUND_NOTES, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const sentences = text.match(/.+?(?:[.!?]+(?=\s|$)|$)/g) ?? []; // a "." inside "1.2.3" or "Amara.org" doesn't end a sentence
+  return sentences
+    .filter((s) => !isStockSentence(s))
+    .join("")
     .replace(/\s+/g, " ")
     .trim();
 }
