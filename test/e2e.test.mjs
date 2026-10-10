@@ -525,3 +525,28 @@ test("setup: Kokoro is offered only when asked for, and an installed one is repo
     await c.client.close();
   }
 });
+
+// --- The default whisper hint ---------------------------------------------------------------------
+
+test("whisper gets the developer hint by default in English; none turns it off; your own replaces it", async () => {
+  const cases = [
+    [{}, /--prompt A software developer talks to a coding assistant/],
+    [{ VOICE_MCP_WHISPER_PROMPT: "none" }, null],
+    [{ VOICE_MCP_WHISPER_PROMPT: "Priya, Postgres" }, /--prompt Priya, Postgres/],
+    [{ VOICE_MCP_WHISPER_MODEL: "tiny", VOICE_MCP_LANGUAGE: "th" }, null], // English hint only for English
+  ];
+  for (const [env, expected] of cases) {
+    const sb = sandbox();
+    fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"), env.VOICE_MCP_WHISPER_MODEL ? "ggml-tiny.bin" : undefined);
+    const { client } = await connect(sb.env(env));
+    try {
+      await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Ready?" } });
+      const start = sb.readLog().split("\n").find((l) => l.startsWith("whisper-server start"));
+      assert.ok(start, JSON.stringify(env));
+      if (expected) assert.match(start, expected, JSON.stringify(env));
+      else assert.doesNotMatch(start, /--prompt/, JSON.stringify(env));
+    } finally {
+      await client.close();
+    }
+  }
+});

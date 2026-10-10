@@ -6,6 +6,7 @@
  *   - once speaking, ends the turn after `endSilenceMs` of quiet
  *   - ignores blips shorter than 300 ms (a cough, a click) and keeps listening
  *   - hard stop at `maxMs`
+ *   - while `ignoring` (our own "mic open" chime is playing), frames are neither speech nor background
  */
 
 export const SAMPLE_RATE = 16000;
@@ -73,12 +74,20 @@ export class Endpointer {
   lastVoicedFrame = -1;
   /** False while every sample so far has been exactly zero (a blocked mic). */
   anyNonZero = false;
+  /** True while our own chime plays: its sound reaches the mic, but it isn't the user. */
+  private ignoring = false;
 
   constructor(private readonly opts: EndpointerOptions) {
     this.maxFrames = Math.ceil(opts.maxMs / FRAME_MS);
     this.startTimeoutFrames = Math.ceil(Math.min(opts.startTimeoutMs, opts.maxMs) / FRAME_MS);
     this.endSilenceFrames = Math.ceil(opts.endSilenceMs / FRAME_MS);
     this.historySize = Math.max(FLOOR_WINDOW_FRAMES, this.endSilenceFrames, Math.ceil(1000 / FRAME_MS));
+  }
+
+  /** Stop (true) or resume (false) judging frames, e.g. while the "mic open" chime plays. Time still counts. */
+  setIgnoring(on: boolean): void {
+    this.ignoring = on;
+    if (on && !this.started) this.loudRun = 0;
   }
 
   /** Feed one 30 ms frame of 16-bit little-endian PCM; returns a reason once the turn is over. */
@@ -94,6 +103,7 @@ export class Endpointer {
     const rms = Math.sqrt(sumSq / Math.max(1, n)) / 32768;
     const db = Math.max(-100, 20 * Math.log10(rms + 1e-9));
     const idx = this.frames++;
+    if (this.ignoring) return this.timeLimit();
 
     if (idx >= SETTLE_FRAMES) {
       this.history.push(db);
@@ -157,6 +167,10 @@ export class Endpointer {
       }
     }
 
+    return this.timeLimit();
+  }
+
+  private timeLimit(): EndReason | null {
     if (this.frames >= this.maxFrames) return this.everStarted ? "max-duration" : "no-speech";
     if (!this.everStarted && this.frames >= this.startTimeoutFrames) return "no-speech";
     return null;

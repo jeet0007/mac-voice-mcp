@@ -9,7 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **README: a Disclaimer, a Third-party software table and a trademark note.** They spell out what the tool does on your Mac (mic, installs with your consent), that speech recognition can mishear, the license of everything it uses but doesn't bundle, and that the project isn't affiliated with Apple or Anthropic.
 
 ### Changed
+- **whisper hears developer talk better.** In English it now gets a one-sentence hint that the conversation is a developer talking to a coding assistant. On 60 test clips read by three voices, word errors fell from 3.4% to 2.3% on everyday sentences and from 3.8% to 3.1% on developer jargon ("rebase", "backend"), and nothing was invented in silence. `VOICE_MCP_WHISPER_PROMPT` replaces the hint with your own, and `none` turns it off.
 - **A shorter README, in the style of popular MCP servers:** what it's for, features, a four-step quick start and the most common fixes. The full guides moved to [`docs/`](docs/): install, voices, usage, configuration, troubleshooting, privacy and security, and development.
+
+### Fixed
+- **The first words of a reply were often lost.** The "mic open" chime played before the recorder had actually started, and opening a mic takes a moment (longer with Bluetooth), so anyone who answered right at the chime lost a word or two. In a test with 20 real recordings, 12 began mid-word, and the cut-off starts led whisper to mishear or invent the rest ("Open a draft PR…" came back as "You can find the link in the description below."). Now the mic opens first and the chime plays once audio is flowing; the chime's own sound is ignored. Re-recorded with the fix, 2 of 20 began mid-word, and whisper's word errors on that voice fell from about 20% to 5% (and from 28% to 12% with background noise).
 
 ## [0.4.0] - 2026-10-06
 

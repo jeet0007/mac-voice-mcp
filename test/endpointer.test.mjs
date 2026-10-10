@@ -114,3 +114,26 @@ test("wavHeader describes 16 kHz mono PCM", () => {
   assert.equal(h.readUInt16LE(22), 1);
   assert.equal(h.readUInt32LE(40), 32000);
 });
+
+test("our own chime is ignored: a loud sound while ignoring neither starts nor ends a turn, and time still counts", () => {
+  const ep = new Endpointer(OPTS);
+  let r = null;
+  for (let i = 0; i < ms(300); i++) r ??= ep.push(frame("noise")); // the mic warms up in a quiet room
+  ep.setIgnoring(true);
+  for (let i = 0; i < ms(450); i++) r ??= ep.push(frame("speech")); // the chime, loud and longer than a cough
+  ep.setIgnoring(false);
+  for (let i = 0; i < ms(1500); i++) r ??= ep.push(frame("noise")); // without ignoring, this pause would end the "turn" here
+  assert.equal(r, null, "the chime didn't count as the user's answer");
+  assert.equal(ep.speechStartFrame, -1);
+  for (let i = 0; i < ms(1500); i++) r ??= ep.push(frame("speech")); // the real answer
+  for (let i = 0; i < ms(2000) && !r; i++) r = ep.push(frame("noise"));
+  assert.equal(r, "end-of-turn");
+  assert.equal(ep.speechStartFrame, ms(300) + ms(450) + ms(1500), "the answer starts where the user started, not at the chime");
+
+  // Time spent ignoring still counts toward the start timeout.
+  const quiet = new Endpointer({ ...OPTS, startTimeoutMs: 1000 });
+  quiet.setIgnoring(true);
+  let reason = null;
+  for (let i = 0; i < ms(1200) && !reason; i++) reason = quiet.push(frame("noise"));
+  assert.equal(reason, "no-speech");
+});
