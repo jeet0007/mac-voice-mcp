@@ -42,7 +42,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Cache the speech model
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/mac-voice-mcp/models
           key: whisper-model-base.en-v1
@@ -84,7 +84,7 @@ jobs:
       # The same round trip with the optional Kokoro voice, installed by our own setup:
       # can whisper understand it, and how soon does it start talking?
       - name: Cache the Kokoro voice
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/mac-voice-mcp/kokoro
           key: kokoro-js-1.2.1-fp32-v1
