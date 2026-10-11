@@ -50,8 +50,14 @@ jobs:
         run: node dist/index.js setup --install
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
+      # Some runners' default voice writes almost no audio (0.1 s for a sentence), which made every
+      # transcript empty. Pin a classic voice for the round trip when the runner has one.
       - name: Voices on this runner
-        run: say -v '?' | head -60
+        run: |
+          say -v '?' | head -60
+          V=$(say -v '?' | grep -oE '^(Samantha|Alex|Fred) ' | head -1 | xargs)
+          echo "Round-trip voice: ${V:-the system voice}"
+          if [ -n "$V" ]; then echo "VOICE_MCP_VOICE=$V" >> "$GITHUB_ENV"; fi
       # Doctor's limits are for real Macs (Premium voice, GPU). Here it checks the plumbing and
       # records the numbers; the round-trip test below is the gate.
       - name: Doctor (no speakers on CI)

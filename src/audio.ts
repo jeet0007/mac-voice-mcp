@@ -1,10 +1,11 @@
 /** Speaking (native TTS), the mic chimes, and listening for one conversational turn. */
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { CONFIG, debug, IS_MAC, IS_WIN, log } from "./config.js";
 import { Endpointer, FRAME_BYTES, FRAME_MS, wavHeader, type EndReason, type EndpointerDiagnostics } from "./endpointer.js";
 import { KokoroError, kokoroEnabled, speakKokoro, synthesizeKokoroToFile } from "./kokoro.js";
+import { wavSeconds } from "./pcm.js";
 import { activeChildren, CancelledError, run, SetupError, tail, which, type RunResult } from "./proc.js";
 
 // ---------------------------------------------------------------------------
@@ -163,17 +164,31 @@ export async function synthesizeToFile(text: string, outFile: string): Promise<S
   if (kokoroEnabled()) return { engine: "kokoro", ...(await synthesizeKokoroToFile(text, outFile)) };
   const bin = findTts();
   if (!bin) throw new SetupError("No text-to-speech engine found.");
-  let result: RunResult;
-  if (IS_MAC) {
-    const { voice } = await chooseVoice();
-    const args = [...(voice ? ["-v", voice] : []), "-o", outFile, "--file-format=WAVE", "--data-format=LEI16@16000", "-f", "-"];
-    result = await run(bin, args, { input: text, timeoutMs: 60_000 });
-  } else if (/espeak/.test(bin)) {
-    result = await run(bin, ["-w", outFile, "--stdin"], { input: text, timeoutMs: 60_000 });
-  } else {
-    throw new SetupError("Writing speech to a file needs macOS `say` or espeak-ng.");
+  const { voice } = IS_MAC ? await chooseVoice() : { voice: undefined };
+  const once = async (): Promise<number> => {
+    let result: RunResult;
+    if (IS_MAC) {
+      const args = [...(voice ? ["-v", voice] : []), "-o", outFile, "--file-format=WAVE", "--data-format=LEI16@16000", "-f", "-"];
+      result = await run(bin, args, { input: text, timeoutMs: 60_000 });
+    } else if (/espeak/.test(bin)) {
+      result = await run(bin, ["-w", outFile, "--stdin"], { input: text, timeoutMs: 60_000 });
+    } else {
+      throw new SetupError("Writing speech to a file needs macOS `say` or espeak-ng.");
+    }
+    if (result.code !== 0) throw new Error(`Text-to-speech to file failed (exit ${result.code}): ${tail(result.stderr) || "no output"}`);
+    return wavSeconds(await readFile(outFile));
+  };
+  // Sometimes `say` exits fine but writes (almost) no audio, e.g. when the voice's speech data
+  // isn't available. Try once more, then say so plainly instead of handing silence to whisper.
+  const expected = text.trim().split(/\s+/).length > 2;
+  let seconds = await once();
+  if (expected && seconds < 0.3) seconds = await once();
+  if (expected && seconds < 0.3) {
+    throw new Error(
+      `Text-to-speech wrote only ${seconds.toFixed(2)} s of audio for "${text.slice(0, 40)}…" with ${voice ? `the voice "${voice}"` : "the system voice"}. ` +
+        "That voice may be missing its speech data: pick another with VOICE_MCP_VOICE (list them with `say -v '?'`).",
+    );
   }
-  if (result.code !== 0) throw new Error(`Text-to-speech to file failed (exit ${result.code}): ${tail(result.stderr) || "no output"}`);
   return { engine: "built-in" };
 }
 
