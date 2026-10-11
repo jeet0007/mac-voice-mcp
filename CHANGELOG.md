@@ -5,6 +5,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- **Talk to Claude while it works (Claude Code plugin).** After you answer out loud, the mic stays open while Claude works. Say something that starts with its name, such as "Claude, use the other branch", and a soft sound confirms it was heard. Claude gets it after its next tool call, or as soon as it finishes, and takes it into account.
+  - Only speech that starts with "Claude" is passed on. Everything else is transcribed on your Mac, checked for the name, and dropped.
+  - It stops when Claude speaks to you, when you type, when voice mode ends, when another Claude window takes over, and after 10 minutes without a voice turn (`VOICE_MCP_WORK_LISTEN_MINUTES`). macOS shows the orange mic dot while it's on.
+  - It needs the plugin's hook, so Claude Desktop and Cursor never keep the mic open. `VOICE_MCP_LISTEN_WHILE_WORKING=0` turns it off.
+  - The plugin's hook now runs after every tool call (it checks a small file and exits), so it can hand over what you said.
+
 ## [0.4.2] - 2026-10-11
 
 ### Changed

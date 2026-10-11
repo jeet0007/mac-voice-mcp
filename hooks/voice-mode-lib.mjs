@@ -10,10 +10,15 @@
  *                                   at most once per spoken answer, so it can never loop.
  *   SessionEnd                      clean up.
  *
+ * Talking while Claude works: after a spoken answer the hook marks this session in listening.state,
+ * and the MCP server keeps listening for "Claude, …" (src/worklisten.ts), leaving what it hears in
+ * inbox/. After any tool call, or when Claude tries to stop, the hook hands those words to Claude.
+ * Typing or the session ending removes the mark, which stops the listening.
+ *
  * State is one small file per Claude Code session, and expires after 30 idle minutes.
  * VOICE_MCP_STAY_IN_VOICE=0 in Claude Code's environment (settings.json "env") turns it off.
  */
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -85,30 +90,99 @@ export function heardUser(toolInput, toolResponse) {
 
 const isSpeakTool = (name) => /speak_and_listen$/.test(name ?? "");
 
+// --- Talking while Claude works (shared with src/worklisten.ts) ---------------------------------
+
+const INBOX_MAX_AGE_MS = 15 * 60_000;
+const listeningFile = (dir) => path.join(dir, "listening.state");
+const inboxDir = (dir) => path.join(dir, "inbox");
+
+function readListening(dir) {
+  try {
+    return JSON.parse(readFileSync(listeningFile(dir), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function clearListening(dir, session) {
+  if (readListening(dir)?.session === session) rmSync(listeningFile(dir), { force: true });
+}
+
+/** Take what the user said while this session worked (oldest first), if this is the session listening. */
+export function takeInterjections(dir, session, now = Date.now()) {
+  if (readListening(dir)?.session !== session) return [];
+  let names;
+  try {
+    names = readdirSync(inboxDir(dir)).filter((n) => n.endsWith(".json")).sort();
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const name of names) {
+    const file = path.join(inboxDir(dir), name);
+    try {
+      const entry = JSON.parse(readFileSync(file, "utf8"));
+      rmSync(file, { force: true });
+      if (typeof entry.text === "string" && now - entry.at < INBOX_MAX_AGE_MS) out.push(entry.text);
+    } catch {
+      rmSync(file, { force: true });
+    }
+  }
+  return out;
+}
+
+export function interjectionReason(texts) {
+  const said = texts.map((t) => (t ? `"${t}"` : "(only your name: they want to talk)")).join(", then ");
+  return (
+    `While you were working, the user said by voice: ${said}. ` +
+    "Take it into account now: adjust what you're doing if it changes the plan. " +
+    "Briefly acknowledge it by voice at your next natural pause (speak_and_listen), not in a separate turn right away unless they asked a question."
+  );
+}
+
 /**
  * Handle one hook event. Returns { exitCode: 0 } to carry on, or { exitCode: 2, stderr } to
  * send Claude back (Stop only).
  */
 export function handle(input, { env = process.env, now = Date.now() } = {}) {
-  if (/^(0|false|no|off)$/i.test(env.VOICE_MCP_STAY_IN_VOICE?.trim() ?? "")) return { exitCode: 0 };
   const session = input?.session_id;
   if (!session) return { exitCode: 0 };
   const dir = stateDir(env);
+  const stayInVoice = !/^(0|false|no|off)$/i.test(env.VOICE_MCP_STAY_IN_VOICE?.trim() ?? "");
 
   switch (input.hook_event_name) {
-    case "PostToolUse":
-      if (!isSpeakTool(input.tool_name)) return { exitCode: 0 };
-      if (heardUser(input.tool_input, input.tool_response)) writeState(dir, session, { on: true, at: now, nudged: false });
-      else clearState(dir, session);
+    case "PostToolUse": {
+      if (!isSpeakTool(input.tool_name)) {
+        // Any other tool: hand over what the user said meanwhile, if anything.
+        const said = takeInterjections(dir, session, now);
+        return said.length ? { exitCode: 2, stderr: interjectionReason(said) } : { exitCode: 0 };
+      }
+      if (heardUser(input.tool_input, input.tool_response)) {
+        if (stayInVoice) writeState(dir, session, { on: true, at: now, nudged: false });
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(listeningFile(dir), JSON.stringify({ session, at: now }));
+      } else {
+        clearState(dir, session);
+        clearListening(dir, session);
+      }
       return { exitCode: 0 };
+    }
     case "PostToolUseFailure":
-      if (isSpeakTool(input.tool_name)) clearState(dir, session);
+      if (isSpeakTool(input.tool_name)) {
+        clearState(dir, session);
+        clearListening(dir, session);
+      }
       return { exitCode: 0 };
     case "UserPromptSubmit":
     case "SessionEnd":
       clearState(dir, session);
+      clearListening(dir, session);
       return { exitCode: 0 };
     case "Stop": {
+      // Something said while Claude worked comes first, even after the one nudge per answer.
+      const said = takeInterjections(dir, session, now);
+      if (said.length) return { exitCode: 2, stderr: interjectionReason(said) };
+      if (!stayInVoice) return { exitCode: 0 };
       const s = readState(dir, session);
       // Let it stop unless voice mode is on, fresh, and we haven't already sent it back since the last answer.
       if (input.stop_hook_active || !s?.on || now - s.at >= EXPIRE_MS || s.nudged) return { exitCode: 0 };

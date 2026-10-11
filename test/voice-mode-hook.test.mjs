@@ -120,16 +120,67 @@ test("as a real process — also through a symlinked install path — and bad in
   }
 });
 
-test("hooks.json runs the hook for the right events and matches the tool under any server scope", () => {
+test("hooks.json runs the hook for the right events: after every tool, and on failures of speak_and_listen under any server scope", () => {
   const cfg = JSON.parse(readFileSync(path.join(ROOT, "hooks", "hooks.json"), "utf8"));
   assert.deepEqual(Object.keys(cfg.hooks).sort(), ["PostToolUse", "PostToolUseFailure", "SessionEnd", "Stop", "UserPromptSubmit"]);
   for (const groups of Object.values(cfg.hooks)) {
     for (const g of groups) for (const h of g.hooks) assert.equal(h.command, 'node "${CLAUDE_PLUGIN_ROOT}/hooks/voice-mode.mjs"');
   }
-  for (const event of ["PostToolUse", "PostToolUseFailure"]) {
-    const matcher = new RegExp(`^(?:${cfg.hooks[event][0].matcher})$`);
-    assert.match(TOOL, matcher);
-    assert.match("mcp__voice-mcp__speak_and_listen", matcher);
-    assert.doesNotMatch("mcp__plugin_mac-voice-mcp_voice-mcp__voice_setup", matcher);
-  }
+  // PostToolUse runs after every tool (no matcher): after any tool call it hands over what the user said meanwhile.
+  assert.equal(cfg.hooks.PostToolUse[0].matcher, undefined);
+  const matcher = new RegExp(`^(?:${cfg.hooks.PostToolUseFailure[0].matcher})$`);
+  assert.match(TOOL, matcher);
+  assert.match("mcp__voice-mcp__speak_and_listen", matcher);
+  assert.doesNotMatch("mcp__plugin_mac-voice-mcp_voice-mcp__voice_setup", matcher);
+});
+
+// --- Talking while Claude works --------------------------------------------------------------
+
+import { writeFileSync as writeFileSyncW, mkdirSync as mkdirSyncW, existsSync as existsSyncW } from "node:fs";
+
+function leaveInInbox(env, text, at = Date.now()) {
+  const inbox = path.join(env.VOICE_MCP_CACHE_DIR, "voice-mode", "inbox");
+  mkdirSyncW(inbox, { recursive: true });
+  writeFileSyncW(path.join(inbox, `${at}-x${Math.random().toString(36).slice(2, 6)}.json`), JSON.stringify({ text, at }));
+}
+
+test("a spoken answer marks this session as listening; typing removes the mark", () => {
+  const { env, run, spoke } = setup();
+  const mark = path.join(env.VOICE_MCP_CACHE_DIR, "voice-mode", "listening.state");
+  spoke();
+  assert.equal(JSON.parse(readFileSync(mark, "utf8")).session, "s1");
+  run("UserPromptSubmit");
+  assert.equal(existsSyncW(mark), false);
+  spoke();
+  spoke(reply("(No speech detected — the user did not reply within 15 seconds.)"));
+  assert.equal(existsSyncW(mark), false, "no answer ends listening too");
+});
+
+test("what the user said while Claude worked is handed over after its next tool call, once", () => {
+  const { env, run, spoke } = setup();
+  spoke();
+  leaveInInbox(env, "use the other branch");
+  const r = run("PostToolUse", { tool_name: "Bash", tool_input: { command: "ls" }, tool_response: "ok" });
+  assert.equal(r.exitCode, 2);
+  assert.match(r.stderr, /While you were working, the user said by voice: "use the other branch"/);
+  assert.deepEqual(run("PostToolUse", { tool_name: "Bash", tool_input: {}, tool_response: "ok" }), { exitCode: 0 }, "delivered once");
+});
+
+test("another session's interjections stay put, and Stop delivers them even after the one nudge", () => {
+  const { env, run, spoke } = setup();
+  spoke();
+  leaveInInbox(env, "skip the slow tests");
+  const other = handle({ session_id: "s2", hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: {}, tool_response: "ok" }, { env });
+  assert.deepEqual(other, { exitCode: 0 }, "not the session that's listening");
+  assert.equal(run("Stop").exitCode, 2, "first stop: the interjection");
+  assert.match(run("Stop").stderr ?? "", /speak_and_listen/, "then the usual voice-mode nudge");
+});
+
+test("VOICE_MCP_STAY_IN_VOICE=0 turns off the nudges but still hands over what the user said", () => {
+  const env = { VOICE_MCP_CACHE_DIR: mkdtempSync(path.join(os.tmpdir(), "voice-hook-")), VOICE_MCP_STAY_IN_VOICE: "0" };
+  const ev = (event, extra = {}) => handle({ session_id: "s1", hook_event_name: event, ...extra }, { env });
+  ev("PostToolUse", { tool_name: TOOL, tool_input: { text_to_speak: "Deploy?" }, tool_response: heard });
+  assert.deepEqual(ev("Stop"), { exitCode: 0 });
+  leaveInInbox(env, "wait");
+  assert.equal(ev("PostToolUse", { tool_name: "Read", tool_input: {}, tool_response: "x" }).exitCode, 2);
 });

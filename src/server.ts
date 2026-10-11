@@ -6,6 +6,7 @@ import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/proto
 import { z } from "zod";
 import { CONFIG, DEFAULT_LISTEN_SECONDS, log, MAX_LISTEN_SECONDS, PKG } from "./config.js";
 import { stopKokoro } from "./kokoro.js";
+import { workListener } from "./worklisten.js";
 import { locateModel } from "./model.js";
 import { activeChildren, SetupError } from "./proc.js";
 import { runSetupFlow } from "./setup.js";
@@ -154,6 +155,7 @@ export async function startServer(): Promise<void> {
   const shutdown = async (code = 0) => {
     if (shuttingDown) return;
     shuttingDown = true;
+    void workListener.stop();
     stopWhisperServer();
     stopKokoro();
     for (const child of activeChildren) child.kill("SIGTERM");

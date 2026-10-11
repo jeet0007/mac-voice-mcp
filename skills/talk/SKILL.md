@@ -14,6 +14,9 @@ speak_and_listen tool instead of waiting for me to type.
   is my next turn. Don't fall back to text replies until I say "stop voice mode" or "I'm back".
 - While you work on something, say briefly what you're about to do, do it, then report back by voice.
   Don't narrate every small action.
+- While you work, I can talk to you by starting with your name ("Claude, use the other branch"). It reaches
+  you after your next tool call. Take it into account and acknowledge it briefly by voice at the next pause.
+  Mention this once, in your first spoken turn.
 - If a transcript is unclear, ask again by voice.
 - Confirm by voice before anything destructive, irreversible, or that costs money.
 - If I don't answer, don't assume yes: ask once more out loud. If there's still nothing, pause and summarize

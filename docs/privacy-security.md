@@ -5,6 +5,7 @@
 ## Privacy and safety
 
 - **Audio stays on your machine.** Recordings go to a temporary file that's deleted after each turn. The only network use is the one-time model download from Hugging Face, plus npm and Hugging Face once more if you install the Kokoro voice. Speaking never downloads anything.
+- **Between turns, only "Claude, …" is kept.** With the plugin in Claude Code, the mic stays open while Claude works (the orange dot shows it). What it hears is transcribed on your Mac and dropped unless it starts with Claude's name; that sentence is left in a local file for the plugin to hand to Claude, then deleted. `VOICE_MCP_LISTEN_WHILE_WORKING=0` turns this off.
 - **The warm whisper server is local only.** It listens on `127.0.0.1` on a random port, and stops when idle or when this server exits.
 - **Setup can only install known packages.** Its install list is fixed in the code (`sox`, `whisper-cpp`, and `kokoro-js@1.2.1` for the optional voice), so nothing Claude says can make it install anything else. It never uninstalls or modifies other software.
 - **Licenses of the optional Kokoro voice.** The Kokoro model and kokoro-js are Apache-2.0. kokoro-js turns text into sounds with a WebAssembly build of espeak-ng (GPL-3.0), through the `phonemizer` package. None of this is part of mac-voice-mcp (MIT). It's installed on your Mac only if you ask for it.

@@ -4,7 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, lstatSync, readlinkSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync, lstatSync, readlinkSync, symlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -559,6 +559,85 @@ test("a sound with no words (whisper says [gunshot] for a cough) is reported as 
     const r = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Ready?" } });
     assert.equal(r.isError, false);
     assert.match(r.content[0].text, /^\(No speech detected — the microphone picked up a sound but no words/);
+  } finally {
+    await client.close();
+  }
+});
+
+// --- Talking to Claude while it works ---------------------------------------------------------
+
+const voiceModeDir = (sb) => path.join(sb.home, ".cache", "mac-voice-mcp", "voice-mode");
+/** What the plugin hook does right after a spoken answer: mark this session as listening. */
+const markListening = (sb) => {
+  mkdirSync(voiceModeDir(sb), { recursive: true });
+  writeFileSync(path.join(voiceModeDir(sb), "listening.state"), JSON.stringify({ session: "s1", at: Date.now() }));
+};
+const inboxTexts = (sb) => {
+  const dir = path.join(voiceModeDir(sb), "inbox");
+  return existsSync(dir) ? readdirSync(dir).map((f) => JSON.parse(readFileSync(path.join(dir, f), "utf8")).text) : [];
+};
+async function waitFor(check, ms = 8000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (check()) return true;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return false;
+}
+
+test("while Claude works, 'Claude, …' is heard and left for the hook; the next voice turn passes it on", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_TRANSCRIPT: "Claude, use the other branch." }));
+  try {
+    const r1 = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Shall I start?" } });
+    assert.equal(r1.content[0].text, "Claude, use the other branch.");
+    markListening(sb); // the hook confirms voice mode
+    assert.ok(await waitFor(() => inboxTexts(sb).length > 0), "the listener heard it");
+    assert.equal(inboxTexts(sb)[0], "use the other branch.");
+
+    // The hook didn't run here, so the next voice turn hands it over itself.
+    const r2 = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Done. Anything else?" } });
+    assert.match(text(r2), /while you were working, the user said by voice: "use the other branch\."/);
+  } finally {
+    await client.close();
+  }
+});
+
+test("talk that isn't for Claude is dropped, and without the plugin hook the mic isn't kept open", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  let c = await connect(sb.env({ STUB_TRANSCRIPT: "Can you pass the salt?" }));
+  try {
+    await c.client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Shall I start?" } });
+    markListening(sb);
+    assert.ok(await waitFor(() => (sb.readLog().match(/^rec /gm)?.length ?? 0) >= 3), "listening while Claude works");
+    assert.deepEqual(inboxTexts(sb), [], "nothing kept");
+  } finally {
+    await c.client.close();
+  }
+
+  const sb2 = sandbox();
+  fakeModel(path.join(sb2.home, ".cache", "mac-voice-mcp", "models"));
+  c = await connect(sb2.env({ VOICE_MCP_WORK_LISTEN_CONFIRM_MS: "300" }));
+  try {
+    await c.client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Shall I start?" } });
+    await new Promise((r) => setTimeout(r, 1200)); // no hook marks voice mode (Claude Desktop, Cursor)
+    assert.equal(sb2.readLog().match(/^rec /gm)?.length, 1, "only the voice turn used the mic");
+  } finally {
+    await c.client.close();
+  }
+});
+
+test("VOICE_MCP_LISTEN_WHILE_WORKING=0 never listens between turns", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ VOICE_MCP_LISTEN_WHILE_WORKING: "0" }));
+  try {
+    await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Shall I start?" } });
+    markListening(sb);
+    await new Promise((r) => setTimeout(r, 1200));
+    assert.equal(sb.readLog().match(/^rec /gm)?.length, 1);
   } finally {
     await client.close();
   }
