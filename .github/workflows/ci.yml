@@ -12,9 +12,13 @@ jobs:
   test:
     strategy:
       fail-fast: false
+      # Each supported Node version once: the oldest (22) and newest (26) on macOS, where people use
+      # it, and the middle LTS (24) on Linux, which keeps the espeak-ng path working.
       matrix:
-        os: [macos-latest, ubuntu-latest]
-        node: [22, 24, 26]
+        include:
+          - { os: macos-latest, node: 22 }
+          - { os: macos-latest, node: 26 }
+          - { os: ubuntu-latest, node: 24 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -54,7 +58,7 @@ jobs:
       # transcript empty. Pin a classic voice for the round trip when the runner has one.
       - name: Voices on this runner
         run: |
-          say -v '?' | head -60
+          say -v '?' | grep -E '\sen_' || true
           V=$(say -v '?' | grep -oE '^(Samantha|Alex|Fred) ' | head -1 | xargs)
           echo "Round-trip voice: ${V:-the system voice}"
           if [ -n "$V" ]; then echo "VOICE_MCP_VOICE=$V" >> "$GITHUB_ENV"; fi
@@ -71,10 +75,11 @@ jobs:
           VOICE_MCP_DEBUG: "1"
           VOICE_MCP_ROUNDTRIP: "1"
           VOICE_MCP_ROUNDTRIP_REPORT: roundtrip-report.json
-          # Calibrated from the first runs on GitHub's runners (basic voice, CPU-only whisper).
-          VOICE_MCP_ROUNDTRIP_LIMITS: '{"plainEach":0.35,"plainOverall":0.2,"jargonEach":0.6,"warmTranscribeMs":10000}'
-      # Some runs on main get an empty transcript for every clip (the first one after ~28 s, then
-      # instantly), while the same code passes on pull requests. Capture whisper.cpp's own view.
+          # For GitHub's runners: robotic voices (often Fred) and CPU-only whisper. A broken pipeline
+          # scores ~100% wrong; one sentence in a robotic voice can be ~40% wrong.
+          VOICE_MCP_ROUNDTRIP_LIMITS: '{"plainEach":0.5,"plainOverall":0.2,"jargonEach":0.6,"warmTranscribeMs":10000}'
+      # If the round trip fails, capture the voice's and whisper.cpp's own view. (Empty transcripts
+      # once turned out to be a runner voice that wrote 0.1 s of audio for a whole sentence.)
       - name: Diagnose whisper.cpp
         if: failure()
         run: |
