@@ -13,6 +13,7 @@
 | It never stops listening | The room is too noisy for the defaults. Set `VOICE_MCP_SPEECH_MARGIN_DB=18`, or use a headset. |
 | It hears its own voice | Use headphones, or turn the speaker volume down. It only listens after it finishes speaking, but echo can linger. |
 | "Homebrew: not installed" | Install it from [brew.sh](https://brew.sh). It needs your password, so it can't run from Claude. Then run setup again. |
+| It mishears me when there's background noise | Switch to `small.en` (`VOICE_MCP_WHISPER_MODEL=small.en`, then run setup to download it). In noise it makes about a third fewer mistakes than the default. |
 | It garbles names or jargon | Describe the conversation in `VOICE_MCP_WHISPER_PROMPT` as a sentence that uses the words, e.g. `"A call with Priya about the Postgres and Kubernetes migration."`, or switch to `small.en`. |
 | The voice sounds robotic | Download a Premium voice, or install the Kokoro voice (see [Voices](voices.md)). Either is used automatically. |
 | "The Kokoro voice didn't work" | The built-in voice spoke instead. Ask Claude to *check voice setup*, or run `npx -y mac-voice-mcp@latest setup`. To reinstall it, delete `~/.cache/mac-voice-mcp/kokoro/` and run `setup --kokoro`. |
