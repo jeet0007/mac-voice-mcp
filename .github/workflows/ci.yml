@@ -76,8 +76,9 @@ jobs:
           VOICE_MCP_ROUNDTRIP: "1"
           VOICE_MCP_ROUNDTRIP_REPORT: roundtrip-report.json
           # For GitHub's runners: robotic voices (often Fred) and CPU-only whisper. A broken pipeline
-          # scores ~100% wrong; one sentence in a robotic voice can be ~40% wrong.
-          VOICE_MCP_ROUNDTRIP_LIMITS: '{"plainEach":0.5,"plainOverall":0.2,"jargonEach":0.6,"warmTranscribeMs":10000}'
+          # scores ~100% wrong; one sentence in a robotic voice can be ~40% wrong. CPU-only whisper on a
+          # busy runner takes 3-11 s per clip; the time limit only catches a hang.
+          VOICE_MCP_ROUNDTRIP_LIMITS: '{"plainEach":0.5,"plainOverall":0.2,"jargonEach":0.6,"warmTranscribeMs":30000}'
       # If the round trip fails, capture the voice's and whisper.cpp's own view. (Empty transcripts
       # once turned out to be a runner voice that wrote 0.1 s of audio for a whole sentence.)
       - name: Diagnose whisper.cpp
@@ -115,7 +116,7 @@ jobs:
           # GitHub's Mac VMs are several times slower than a real Mac at this (first runs: 3.5-6.4 s to the
           # first sound), so the time limit here only catches a broken or hung engine. Speed on a real Mac
           # is judged by `doctor` (PASS at 1.5 s).
-          VOICE_MCP_ROUNDTRIP_LIMITS: '{"plainEach":0.35,"plainOverall":0.2,"jargonEach":0.6,"warmTranscribeMs":10000,"firstSoundMs":12000}'
+          VOICE_MCP_ROUNDTRIP_LIMITS: '{"plainEach":0.35,"plainOverall":0.2,"jargonEach":0.6,"warmTranscribeMs":30000,"firstSoundMs":12000}'
       - name: Keep the numbers
         if: always()
         uses: actions/upload-artifact@v7
