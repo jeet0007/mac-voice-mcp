@@ -4,7 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync, lstatSync, readlinkSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync, lstatSync, readlinkSync, symlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -245,7 +245,7 @@ test("setup reuses a whisper.cpp built from source that isn't on PATH", async ()
 const audioEvents = (log) =>
   log
     .split("\n")
-    .map((l) => (l.startsWith("speak ") ? "speak" : l.startsWith("rec ") ? "rec" : /whisper-server inference/.test(l) ? "transcribe" : null))
+    .map((l) => (l.startsWith("speak ") ? "speak" : l.startsWith("rec -") ? "rec" : /whisper-server inference/.test(l) ? "transcribe" : null))
     .filter(Boolean);
 
 test("two sessions on one Mac take turns at the mic instead of talking over each other", async () => {
@@ -611,7 +611,7 @@ test("talk that isn't for Claude is dropped, and without the plugin hook the mic
   try {
     await c.client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Shall I start?" } });
     markListening(sb);
-    assert.ok(await waitFor(() => (sb.readLog().match(/^rec /gm)?.length ?? 0) >= 3), "listening while Claude works");
+    assert.ok(await waitFor(() => (sb.readLog().match(/^rec -/gm)?.length ?? 0) >= 3), "listening while Claude works");
     assert.deepEqual(inboxTexts(sb), [], "nothing kept");
   } finally {
     await c.client.close();
@@ -623,7 +623,7 @@ test("talk that isn't for Claude is dropped, and without the plugin hook the mic
   try {
     await c.client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Shall I start?" } });
     await new Promise((r) => setTimeout(r, 1200)); // no hook marks voice mode (Claude Desktop, Cursor)
-    assert.equal(sb2.readLog().match(/^rec /gm)?.length, 1, "only the voice turn used the mic");
+    assert.equal(sb2.readLog().match(/^rec -/gm)?.length, 1, "only the voice turn used the mic");
   } finally {
     await c.client.close();
   }
@@ -637,7 +637,28 @@ test("VOICE_MCP_LISTEN_WHILE_WORKING=0 never listens between turns", async () =>
     await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Shall I start?" } });
     markListening(sb);
     await new Promise((r) => setTimeout(r, 1200));
-    assert.equal(sb.readLog().match(/^rec /gm)?.length, 1);
+    assert.equal(sb.readLog().match(/^rec -/gm)?.length, 1);
+  } finally {
+    await client.close();
+  }
+});
+
+test("typing closes the mic within a moment, even in the middle of waiting for speech", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  // After the voice turn the room is quiet: the listener would otherwise wait 15 s (at 10x speed, 1.5 s) for speech.
+  const { client } = await connect(sb.env({ STUB_SCENARIO_LATER: "silent", VOICE_MCP_START_TIMEOUT_SECONDS: "60" }));
+  try {
+    await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Shall I start?" } });
+    markListening(sb);
+    assert.ok(await waitFor(() => (sb.readLog().match(/^rec -/gm)?.length ?? 0) >= 2), "listening while Claude works");
+    const stoppedBefore = sb.readLog().match(/^rec stopped$/gm)?.length ?? 0;
+    rmSync(path.join(voiceModeDir(sb), "listening.state")); // what the hook does when the user types
+    const t = Date.now();
+    assert.ok(await waitFor(() => (sb.readLog().match(/^rec stopped$/gm)?.length ?? 0) > stoppedBefore, 2000), "the recorder was stopped");
+    assert.ok(Date.now() - t < 1500, `took ${Date.now() - t} ms`);
+    await new Promise((r) => setTimeout(r, 800));
+    assert.equal(sb.readLog().match(/^rec -/gm)?.length, 2, "and not started again");
   } finally {
     await client.close();
   }

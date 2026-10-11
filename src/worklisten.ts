@@ -31,6 +31,8 @@ export const inboxDir = () => path.join(voiceModeDir(), "inbox");
 
 /** How long after our voice turn the hook has to confirm voice mode before we give up (no hook → no listening). */
 const CONFIRM_MS = Math.max(200, envNum("VOICE_MCP_WORK_LISTEN_CONFIRM_MS", 10_000));
+/** How often, while listening, we check whether to stop (the user typed, voice mode ended, …). */
+const WATCH_MS = 250;
 /** Inbox entries older than this are stale and never delivered. */
 export const INBOX_MAX_AGE_MS = 15 * 60_000;
 
@@ -163,7 +165,24 @@ class WorkListener {
           continue;
         }
         const wav = path.join(tmp, "heard.wav");
-        const heard = await listenForTurn(30, wav, signal);
+        // Check a few times a second, so the mic closes right away when the user types, voice mode
+        // ends or another session starts a turn, not only after the next 15-second wait.
+        const listening = new AbortController();
+        const onStop = () => listening.abort();
+        signal.addEventListener("abort", onStop, { once: true });
+        const watch = setInterval(() => {
+          if (!ours(readListening()) || micBusyElsewhere() || Date.now() - turnEnd > idleMs) listening.abort();
+        }, WATCH_MS);
+        let heard: Awaited<ReturnType<typeof listenForTurn>>;
+        try {
+          heard = await listenForTurn(30, wav, listening.signal);
+        } catch (e) {
+          if (e instanceof CancelledError) continue; // the checks at the top of the loop decide what's next
+          throw e;
+        } finally {
+          clearInterval(watch);
+          signal.removeEventListener("abort", onStop);
+        }
         if (signal.aborted) return;
         if (heard.reason === "no-speech" || heard.digitalSilence) continue;
         const text = await transcribe(wav, model, signal);

@@ -203,7 +203,7 @@ test("VOICE_MCP_STAY_IN_VOICE=0 turns off the nudges but still hands over what t
   const env = { VOICE_MCP_CACHE_DIR: mkdtempSync(path.join(os.tmpdir(), "voice-hook-")), VOICE_MCP_STAY_IN_VOICE: "0" };
   const ev = (event, extra = {}) => handle({ session_id: "s1", hook_event_name: event, ...extra }, { env });
   ev("PostToolUse", { tool_name: TOOL, tool_input: { text_to_speak: "Deploy?" }, tool_response: heard });
-  assert.deepEqual(ev("Stop"), { exitCode: 0 });
   leaveInInbox(env, "wait");
   assert.equal(ev("PostToolUse", { tool_name: "Read", tool_input: {}, tool_response: "x" }).exitCode, 2);
+  assert.deepEqual(ev("Stop"), { exitCode: 0 });
 });
