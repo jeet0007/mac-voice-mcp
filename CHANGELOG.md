@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-10-11
+
 ### Changed
 - **Docs and the voice-help skill now suggest `small.en` for noisy rooms,** with measured numbers: on real recordings with background noise it got 8% of words wrong instead of 12% with `base.en`, the same in a quiet room, at about 0.3 s per reply. `base.en` stays the default, so nobody gets a 466 MB download they didn't ask for.
 
@@ -119,7 +121,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   - `voice_setup`: checks first, installs only what's missing, and only after you agree.
   - The `setup` and `voice_mode` prompts.
 
-[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.3.0...v0.3.1
