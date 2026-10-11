@@ -41,6 +41,7 @@ export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {
   const { signal, onPhase } = opts;
   // The mic is ours for this turn: stop listening in the background, and pass on anything the
   // user said while Claude worked that the plugin's hook hasn't delivered yet.
+  const wasListening = workListener.running;
   await workListener.stop();
   const waiting = interjectionNote(takeInbox());
   const listen = opts.listen !== false;
@@ -65,8 +66,9 @@ export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {
     release();
   }
   if (waiting) result.notes.unshift(waiting);
-  // They answered out loud: keep listening while Claude works, for "Claude, …".
-  if (result.heard) workListener.start();
+  // They answered out loud, or this was only an announcement ("give me a few minutes") while we
+  // were listening: keep listening while Claude works, for "Claude, …".
+  if (result.heard || (!listen && wasListening && result.ok)) workListener.start();
   return result;
 }
 

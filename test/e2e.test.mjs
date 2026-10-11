@@ -663,3 +663,35 @@ test("typing closes the mic within a moment, even in the middle of waiting for s
     await client.close();
   }
 });
+
+test("a spoken update that doesn't wait for an answer keeps listening while Claude works", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO_LATER: "silent", VOICE_MCP_START_TIMEOUT_SECONDS: "60" }));
+  const recs = () => sb.readLog().match(/^rec -/gm)?.length ?? 0;
+  try {
+    await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Shall I start?" } });
+    markListening(sb);
+    assert.ok(await waitFor(() => recs() >= 2), "listening while Claude works");
+    const r = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Give me a few minutes.", listen: false } });
+    assert.equal(r.isError, false);
+    assert.equal(recs(), 2, "the update itself doesn't listen");
+    markListening(sb); // the hook keeps this session marked after an update
+    assert.ok(await waitFor(() => recs() >= 3), "listening again after the update");
+  } finally {
+    await client.close();
+  }
+
+  // An update when the mic wasn't open (a goodbye) doesn't open it.
+  const sb2 = sandbox();
+  fakeModel(path.join(sb2.home, ".cache", "mac-voice-mcp", "models"));
+  const c = await connect(sb2.env({}));
+  try {
+    await c.client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Bye!", listen: false } });
+    markListening(sb2);
+    await new Promise((r) => setTimeout(r, 1200));
+    assert.equal(sb2.readLog().match(/^rec -/gm)?.length ?? 0, 0);
+  } finally {
+    await c.client.close();
+  }
+});

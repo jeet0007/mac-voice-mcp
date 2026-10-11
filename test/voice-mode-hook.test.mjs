@@ -189,6 +189,15 @@ test("what the user said while Claude worked is handed over after its next tool 
   assert.deepEqual(run("PostToolUse", { tool_name: "Bash", tool_input: {}, tool_response: "ok" }), { exitCode: 0 }, "delivered once");
 });
 
+test("a subagent's tool calls leave what the user said for the main Claude", () => {
+  const { env, run, spoke } = setup();
+  spoke();
+  leaveInInbox(env, "use the other branch");
+  const sub = run("PostToolUse", { tool_name: "Bash", tool_input: {}, tool_response: "ok", agent_id: "a1", agent_type: "fork" });
+  assert.deepEqual(sub, { exitCode: 0 });
+  assert.equal(run("PostToolUse", { tool_name: "Bash", tool_input: {}, tool_response: "ok" }).exitCode, 2, "main Claude gets it");
+});
+
 test("another session's interjections stay put, and Stop delivers them even after the one nudge", () => {
   const { env, run, spoke } = setup();
   spoke();
@@ -206,4 +215,40 @@ test("VOICE_MCP_STAY_IN_VOICE=0 turns off the nudges but still hands over what t
   leaveInInbox(env, "wait");
   assert.equal(ev("PostToolUse", { tool_name: "Read", tool_input: {}, tool_response: "x" }).exitCode, 2);
   assert.deepEqual(ev("Stop"), { exitCode: 0 });
+});
+
+test("a spoken update that doesn't wait for an answer keeps the mic open while Claude works", () => {
+  const { env, run, spoke } = setup();
+  const mark = path.join(env.VOICE_MCP_CACHE_DIR, "voice-mode", "listening.state");
+  const update = [reply("(Spoken. The microphone was not opened, because listen was false.)"), { text_to_speak: "Give me a few minutes.", listen: false }];
+  spoke();
+  spoke(...update, Date.now() + 1000);
+  assert.equal(JSON.parse(readFileSync(mark, "utf8")).session, "s1", "still listening");
+  assert.ok(JSON.parse(readFileSync(mark, "utf8")).at > Date.now(), "marked again, so the server knows this turn is still in voice mode");
+  leaveInInbox(env, "skip the slow tests");
+  assert.equal(run("PostToolUse", { tool_name: "Bash", tool_input: {}, tool_response: "ok" }).exitCode, 2, "and what's said still reaches Claude");
+
+  // Not while the mic is closed (a goodbye after typing), and not when the update failed.
+  const b = setup();
+  b.spoke(...update);
+  assert.equal(existsSyncW(path.join(b.env.VOICE_MCP_CACHE_DIR, "voice-mode", "listening.state")), false);
+  const c = setup();
+  c.spoke();
+  c.spoke({ content: [{ type: "text", text: "voice-mcp is not set up yet: …" }], isError: true }, update[1]);
+  assert.equal(existsSyncW(path.join(c.env.VOICE_MCP_CACHE_DIR, "voice-mode", "listening.state")), false);
+});
+
+test("when Claude finishes for real, the mic closes; a nudge back into voice keeps it open", () => {
+  const { env, run, spoke } = setup();
+  const mark = path.join(env.VOICE_MCP_CACHE_DIR, "voice-mode", "listening.state");
+  spoke();
+  assert.equal(run("Stop").exitCode, 2, "nudged back to speak_and_listen");
+  assert.equal(existsSyncW(mark), true);
+  assert.deepEqual(run("Stop"), { exitCode: 0 });
+  assert.equal(existsSyncW(mark), false);
+
+  const off = { VOICE_MCP_CACHE_DIR: mkdtempSync(path.join(os.tmpdir(), "voice-hook-")), VOICE_MCP_STAY_IN_VOICE: "0" };
+  handle({ session_id: "s1", hook_event_name: "PostToolUse", tool_name: TOOL, tool_input: { text_to_speak: "Deploy?" }, tool_response: heard }, { env: off });
+  handle({ session_id: "s1", hook_event_name: "Stop" }, { env: off });
+  assert.equal(existsSyncW(path.join(off.VOICE_MCP_CACHE_DIR, "voice-mode", "listening.state")), false, "also with nudges off");
 });

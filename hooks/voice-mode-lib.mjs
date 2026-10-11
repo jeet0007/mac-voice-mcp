@@ -153,13 +153,20 @@ export function handle(input, { env = process.env, now = Date.now() } = {}) {
   switch (input.hook_event_name) {
     case "PostToolUse": {
       if (!isSpeakTool(input.tool_name)) {
-        // Any other tool: hand over what the user said meanwhile, if anything.
+        // Any other tool: hand over what the user said meanwhile, if anything. Not to a subagent
+        // (its tool calls fire this hook too, with agent_id set): the words are for the main Claude.
+        if (input.agent_id) return { exitCode: 0 };
         const said = takeInterjections(dir, session, now);
         return said.length ? { exitCode: 2, stderr: interjectionReason(said) } : { exitCode: 0 };
       }
       if (heardUser(input.tool_input, input.tool_response)) {
         if (stayInVoice) writeState(dir, session, { on: true, at: now, nudged: false });
         mkdirSync(dir, { recursive: true });
+        writeFileSync(listeningFile(dir), JSON.stringify({ session, at: now }));
+      } else if (input.tool_input?.listen === false && input.tool_response?.isError !== true && readListening(dir)?.session === session) {
+        // Only an announcement ("give me a few minutes") while listening: keep listening, so the
+        // user can still say "Claude, …" while Claude works.
+        clearState(dir, session);
         writeFileSync(listeningFile(dir), JSON.stringify({ session, at: now }));
       } else {
         clearState(dir, session);
@@ -182,10 +189,13 @@ export function handle(input, { env = process.env, now = Date.now() } = {}) {
       // Something said while Claude worked comes first, even after the one nudge per answer.
       const said = takeInterjections(dir, session, now);
       if (said.length) return { exitCode: 2, stderr: interjectionReason(said) };
-      if (!stayInVoice) return { exitCode: 0 };
-      const s = readState(dir, session);
+      const s = stayInVoice ? readState(dir, session) : null;
       // Let it stop unless voice mode is on, fresh, and we haven't already sent it back since the last answer.
-      if (input.stop_hook_active || !s?.on || now - s.at >= EXPIRE_MS || s.nudged) return { exitCode: 0 };
+      if (!stayInVoice || input.stop_hook_active || !s?.on || now - s.at >= EXPIRE_MS || s.nudged) {
+        // Claude is done working, so nothing said now could reach it: close the mic.
+        clearListening(dir, session);
+        return { exitCode: 0 };
+      }
       writeState(dir, session, { ...s, nudged: true });
       return { exitCode: 2, stderr: STOP_REASON };
     }

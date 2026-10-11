@@ -29,7 +29,9 @@ A soft sound tells you it was heard. Claude gets it after its next step (its nex
 
 - **Only speech that starts with "Claude" is passed on.** Everything else the mic picks up (you talking to someone, a call, a video) is transcribed on your Mac, checked for the name, and dropped. Nothing is stored or sent anywhere.
 - **macOS shows the orange mic dot** while this is on.
-- **It stops** when Claude speaks to you (the turn takes the mic), when you type, when voice mode ends, when you talk in another Claude window, and after 10 minutes without a voice turn (`VOICE_MCP_WORK_LISTEN_MINUTES`).
+- **It pauses** while Claude speaks to you (the turn takes the mic), and carries on after a quick update that doesn't wait for an answer, such as "Give me a few minutes."
+- **It stops** within a quarter of a second when you type, when Claude finishes, when voice mode ends, when you talk in another Claude window, and after 10 minutes without a voice turn (`VOICE_MCP_WORK_LISTEN_MINUTES`).
+- **It goes to the main Claude.** If Claude has started helper agents, what you say waits for Claude itself, not for a helper.
 - **To turn it off,** set `"VOICE_MCP_LISTEN_WHILE_WORKING": "0"` in the `env` block of `~/.claude/settings.json`.
 
 It needs the plugin's hook, so it only works in Claude Code with the plugin. Claude Desktop and Cursor never keep the mic open between turns.

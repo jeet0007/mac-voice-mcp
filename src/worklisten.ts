@@ -9,9 +9,10 @@
  *
  * It only runs while the plugin's hook says this session is in voice mode (the hook writes
  * listening.state right after each voice turn and removes it when the user types), so apps
- * without the hook (Claude Desktop, Cursor) never get an open mic. It stops at the next voice
- * turn, when voice mode ends, when another session takes over, and after
- * VOICE_MCP_WORK_LISTEN_MINUTES (default 10) without a voice turn.
+ * without the hook (Claude Desktop, Cursor) never get an open mic. It pauses for each voice turn
+ * (and carries on after one that only announces something), and stops when Claude finishes, when
+ * voice mode ends, when another session takes over, and after VOICE_MCP_WORK_LISTEN_MINUTES
+ * (default 10) without a voice turn.
  */
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
