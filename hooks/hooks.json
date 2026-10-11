@@ -3,10 +3,20 @@
   "hooks": {
     "PostToolUse": [
       {
+        "matcher": "mcp__.*voice-mcp__speak_and_listen",
         "hooks": [
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/voice-mode.mjs\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/after-tool.sh\"",
             "timeout": 5
           }
         ]

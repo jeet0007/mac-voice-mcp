@@ -10,7 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   - Only speech that starts with "Claude" is passed on. Everything else is transcribed on your Mac, checked for the name, and dropped.
   - It stops when Claude speaks to you, when you type, when voice mode ends, when another Claude window takes over, and after 10 minutes without a voice turn (`VOICE_MCP_WORK_LISTEN_MINUTES`). macOS shows the orange mic dot while it's on.
   - It needs the plugin's hook, so Claude Desktop and Cursor never keep the mic open. `VOICE_MCP_LISTEN_WHILE_WORKING=0` turns it off.
-  - The plugin's hook now runs after every tool call (it checks a small file and exits), so it can hand over what you said.
+  - To hand over what you said, the plugin now runs a tiny shell check after every tool call: about 2 ms, and Node only starts when there is something to deliver.
 
 ## [0.4.2] - 2026-10-11
 

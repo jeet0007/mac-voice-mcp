@@ -120,18 +120,41 @@ test("as a real process — also through a symlinked install path — and bad in
   }
 });
 
-test("hooks.json runs the hook for the right events: after every tool, and on failures of speak_and_listen under any server scope", () => {
+test("hooks.json: speak_and_listen updates voice mode under any server scope; every other tool only runs the cheap check", () => {
   const cfg = JSON.parse(readFileSync(path.join(ROOT, "hooks", "hooks.json"), "utf8"));
   assert.deepEqual(Object.keys(cfg.hooks).sort(), ["PostToolUse", "PostToolUseFailure", "SessionEnd", "Stop", "UserPromptSubmit"]);
-  for (const groups of Object.values(cfg.hooks)) {
-    for (const g of groups) for (const h of g.hooks) assert.equal(h.command, 'node "${CLAUDE_PLUGIN_ROOT}/hooks/voice-mode.mjs"');
+  const NODE = 'node "${CLAUDE_PLUGIN_ROOT}/hooks/voice-mode.mjs"';
+  for (const [event, groups] of Object.entries(cfg.hooks)) {
+    for (const g of groups) {
+      for (const h of g.hooks) {
+        if (event === "PostToolUse" && g.matcher === undefined) assert.equal(h.command, 'sh "${CLAUDE_PLUGIN_ROOT}/hooks/after-tool.sh"');
+        else assert.equal(h.command, NODE);
+      }
+    }
   }
-  // PostToolUse runs after every tool (no matcher): after any tool call it hands over what the user said meanwhile.
-  assert.equal(cfg.hooks.PostToolUse[0].matcher, undefined);
-  const matcher = new RegExp(`^(?:${cfg.hooks.PostToolUseFailure[0].matcher})$`);
-  assert.match(TOOL, matcher);
-  assert.match("mcp__voice-mcp__speak_and_listen", matcher);
-  assert.doesNotMatch("mcp__plugin_mac-voice-mcp_voice-mcp__voice_setup", matcher);
+  // speak_and_listen (under any server scope) updates voice mode; every other tool only runs the cheap inbox check.
+  for (const g of [cfg.hooks.PostToolUse[0], cfg.hooks.PostToolUseFailure[0]]) {
+    const matcher = new RegExp(`^(?:${g.matcher})$`);
+    assert.match(TOOL, matcher);
+    assert.match("mcp__voice-mcp__speak_and_listen", matcher);
+    assert.doesNotMatch("mcp__plugin_mac-voice-mcp_voice-mcp__voice_setup", matcher);
+  }
+  assert.equal(cfg.hooks.PostToolUse[1].matcher, undefined, "the inbox check runs after every tool");
+});
+
+test("after every tool, the shell check exits at once with nothing said, and hands over what was said", () => {
+  const { env, spoke } = setup();
+  const script = path.join(ROOT, "hooks", "after-tool.sh");
+  const event = JSON.stringify({ session_id: "s1", hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: {}, tool_response: "ok" });
+  const runSh = () => spawnSync("sh", [script], { input: event, env: { ...process.env, ...env }, encoding: "utf8" });
+  spoke();
+  let r = runSh();
+  assert.equal(r.status, 0);
+  assert.equal(r.stderr, "");
+  leaveInInbox(env, "use the other branch");
+  r = runSh();
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /the user said by voice: "use the other branch"/);
 });
 
 // --- Talking while Claude works --------------------------------------------------------------
