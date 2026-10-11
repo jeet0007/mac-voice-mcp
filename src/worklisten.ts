@@ -14,7 +14,7 @@
  * voice mode ends, when another session takes over, and after VOICE_MCP_WORK_LISTEN_MINUTES
  * (default 10) without a voice turn.
  */
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -36,6 +36,8 @@ const CONFIRM_MS = Math.max(200, envNum("VOICE_MCP_WORK_LISTEN_CONFIRM_MS", 10_0
 const WATCH_MS = 250;
 /** Inbox entries older than this are stale and never delivered. */
 export const INBOX_MAX_AGE_MS = 15 * 60_000;
+/** Longest message kept: a 30-second interjection is about 100 words, so this only cuts whisper running on. */
+export const INBOX_MAX_CHARS = 1000;
 
 /**
  * "Claude, use the other branch" → "use the other branch". Only speech that starts with Claude's
@@ -58,9 +60,13 @@ export interface InboxEntry {
 
 /** Leave something the user said for the hook (or the next voice turn) to hand to Claude. */
 export function addToInbox(text: string, now = Date.now()): void {
-  mkdirSync(inboxDir(), { recursive: true });
+  // What the user said is private: only their account can list or read it.
+  mkdirSync(inboxDir(), { recursive: true, mode: 0o700 });
+  chmodSync(inboxDir(), 0o700); // also when an older version created it
+  const kept = text.length > INBOX_MAX_CHARS ? `${text.slice(0, INBOX_MAX_CHARS)}…` : text;
+  // The name is ours (time + random), never from the text; the text is only ever read back as a JSON string.
   const file = path.join(inboxDir(), `${now}-${Math.random().toString(36).slice(2, 8)}.json`);
-  writeFileSync(file, JSON.stringify({ text, at: now } satisfies InboxEntry));
+  writeFileSync(file, JSON.stringify({ text: kept, at: now } satisfies InboxEntry), { mode: 0o600, flag: "wx" });
 }
 
 /** Take everything waiting in the inbox (oldest first), removing it. Stale entries are dropped. */
