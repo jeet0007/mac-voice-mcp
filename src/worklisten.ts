@@ -31,10 +31,12 @@ export const listeningFile = () => path.join(voiceModeDir(), "listening.state");
 export const inboxDir = () => path.join(voiceModeDir(), "inbox");
 
 /**
- * Where the voice turn is (speaking, listening…), for the plugin's band above the prompt. null when
- * no turn is running. Best effort: a band that can't read it just shows nothing.
+ * Where the voice turn is (speaking, listening…), for a status display of your own, such as a band
+ * above Claude Code's prompt. Only with VOICE_MCP_PHASE_FILE=1. null when no turn is running. One file
+ * for every session on this Mac. Best effort: a display that can't read it just shows nothing.
  */
 export function showPhase(phase: string | null): void {
+  if (!CONFIG.phaseFile) return;
   const file = path.join(voiceModeDir(), "phase.json");
   try {
     if (phase === null) rmSync(file, { force: true });

@@ -5,6 +5,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- **Voice mode keeps talking while long work runs (Claude Code plugin).** With `/mac-voice-mcp:talk`, Claude does quick things itself and hands anything longer (test runs, builds, research) to a background agent, then goes straight back to listening, so you can keep talking while the work happens. When the agent finishes, Claude tells you the result by voice. If you go quiet in the meantime, it says "Still on it" once instead of asking again every few seconds.
+- **`VOICE_MCP_PHASE_FILE=1`** writes what a voice turn is doing (speaking, listening, transcribing, waiting) to `voice-mode/phase.json`, for a status display of your own. Off by default.
+
+### Changed
+- **A spoken update no longer holds Claude up.** `speak_and_listen` with `listen: false` ("Give me a few minutes") now returns at once and speaks while Claude carries on. Each one used to block Claude's next step for the whole sentence: 7 to 12 seconds in real use, and 8.1 s down to 0.3 s for an 8-second sentence in a test. The next voice turn waits until it has finished, listening while Claude works resumes only once the speaker is quiet, and a voice that fails right away is still reported straight away (a later failure comes with the next result).
+
 ## [0.5.0] - 2026-10-12
 
 ### Added

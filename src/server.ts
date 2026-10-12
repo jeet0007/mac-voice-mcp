@@ -12,7 +12,7 @@ import { activeChildren, SetupError } from "./proc.js";
 import { runSetupFlow } from "./setup.js";
 import { stopWhisperServer } from "./stt.js";
 import { SERVER_INSTRUCTIONS, SETUP_PROMPT, SETUP_TOOL_DESCRIPTION, SPEAK_TOOL_DESCRIPTION, VOICE_MODE_PROMPT } from "./texts.js";
-import { exclusive, speakAndListen } from "./voice.js";
+import { exclusive, finishSpeaking, speakAndListen } from "./voice.js";
 
 type Extra = RequestHandlerExtra<ServerRequest, ServerNotification>;
 
@@ -20,11 +20,9 @@ type Extra = RequestHandlerExtra<ServerRequest, ServerNotification>;
  * MCP progress notifications, when the client asked for them (it sent a progressToken).
  * They show what's happening and keep clients that reset their timeout on progress happy.
  */
-function progressReporter(extra: Extra, phases = false): ((message: string) => void) | undefined {
+function progressReporter(extra: Extra): ((message: string) => void) | undefined {
   const token = extra._meta?.progressToken;
-  // Off when a band above the prompt shows the phase instead: Claude Code turns even a textless
-  // progress ping into a "Processing N" line, so send none (it doesn't need them to keep waiting).
-  if (token === undefined || (phases && !CONFIG.progressText)) return undefined;
+  if (token === undefined) return undefined;
   let progress = 0;
   return (message) => {
     extra
@@ -59,13 +57,13 @@ export function createServer(): McpServer {
           .optional()
           .describe(
             "Default true. false: only speak, without opening the microphone — for a one-way announcement, " +
-              "or to say goodbye when the user ends voice mode.",
+              "or to say goodbye when the user ends voice mode. It returns right away and speaks while you carry on.",
           ),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async ({ text_to_speak, listen_seconds, listen }, extra): Promise<CallToolResult> => {
-      const progress = progressReporter(extra, true);
+      const progress = progressReporter(extra);
       const phaseMessage = (phase: string) =>
         phase === "waiting" ? "waiting for another voice session on this Mac to finish" : phase;
       try {
@@ -112,9 +110,10 @@ export function createServer(): McpServer {
     },
     async ({ install, kokoro }, extra): Promise<CallToolResult> => {
       try {
-        const outcome = await exclusive(() =>
-          runSetupFlow({ install: install === true, kokoro: kokoro === true, onProgress: progressReporter(extra) }),
-        );
+        const outcome = await exclusive(async () => {
+          await finishSpeaking(); // its checks use the speaker too
+          return runSetupFlow({ install: install === true, kokoro: kokoro === true, onProgress: progressReporter(extra) });
+        });
         return { content: [{ type: "text", text: outcome.report }] };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

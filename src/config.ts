@@ -91,8 +91,8 @@ export const CONFIG = {
    * anything you say that starts with "Claude, …". Off: VOICE_MCP_LISTEN_WHILE_WORKING=0.
    */
   listenWhileWorking: envBool("VOICE_MCP_LISTEN_WHILE_WORKING", true),
-  /** Say the phase (speaking, listening…) in progress messages. Off when something else shows it: VOICE_MCP_PROGRESS_TEXT=0. */
-  progressText: envBool("VOICE_MCP_PROGRESS_TEXT", true),
+  /** Write the voice turn's phase to voice-mode/phase.json, for a status display of your own (off by default). */
+  phaseFile: envBool("VOICE_MCP_PHASE_FILE", false),
   /** Play a short sound when the mic opens/closes (macOS). */
   chime: envBool("VOICE_MCP_CHIME", true),
 

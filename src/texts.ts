@@ -52,7 +52,7 @@ export const SPEAK_TOOL_DESCRIPTION = [
   "",
   "Once the user is talking with you by voice, keep the conversation in voice: answer each transcript with",
   "another speak_and_listen call (not a text reply) until they say stop or start typing.",
-  "To end voice mode, or for a one-way announcement, pass listen: false: it speaks without opening the mic.",
+  "To end voice mode, or for a one-way announcement, pass listen: false: it returns at once and speaks while you work.",
   'A reply of "(No speech detected …)" means the user did not answer — never treat it as consent. Ask once more;',
   "if still nothing, stop and say on screen that voice mode is paused and they can type to carry on (not speak: the mic is off).",
   'The "voice-mcp timing" line at the end is diagnostics: ignore it unless the user asks why things feel slow.',

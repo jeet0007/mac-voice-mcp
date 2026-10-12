@@ -3,10 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { chime, findRecorder, listenForTurn, MIC_PERMISSION_HINT, RECORDER_MISSING, speak, type Spoken } from "./audio.js";
-import { CONFIG, debug, DEFAULT_LISTEN_SECONDS, MAX_LISTEN_SECONDS, MAX_SPEAK_CHARS } from "./config.js";
+import { CONFIG, debug, DEFAULT_LISTEN_SECONDS, log, MAX_LISTEN_SECONDS, MAX_SPEAK_CHARS } from "./config.js";
 import { acquireMicLock, MicBusyError } from "./lock.js";
 import { ensureModel } from "./model.js";
-import { resetWhichCache, SetupError } from "./proc.js";
+import { CancelledError, resetWhichCache, SetupError, sleep } from "./proc.js";
 import { prepareSpeech } from "./speech-text.js";
 import { findWhisperCli, findWhisperServer, prewarm, STT_MISSING, transcribe } from "./stt.js";
 import { interjectionNote, showPhase, takeInbox, workListener } from "./worklisten.js";
@@ -37,7 +37,24 @@ export interface SpeakOptions {
   onPhase?: (phase: Phase) => void;
 }
 
+/**
+ * A spoken update (listen: false) still playing in the background, and notes from it for the next
+ * result (a Kokoro fallback, or an error after the call had already returned).
+ */
+let speaking: Promise<void> | null = null;
+const laterNotes: string[] = [];
+
+/** How long a spoken update waits for an early failure (no voice installed…) before returning. */
+const EARLY_FAILURE_MS = 300;
+
+/** Wait for a spoken update to finish (another turn needs the speaker). */
+export async function finishSpeaking(): Promise<void> {
+  await speaking;
+}
+
 export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {}): Promise<VoiceResult> {
+  // One speaker: a spoken update from the last call finishes first.
+  await finishSpeaking();
   const { signal } = opts;
   const onPhase = (phase: Phase) => {
     showPhase(phase);
@@ -64,24 +81,84 @@ export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {
     if (err instanceof MicBusyError) return { ok: false, text: err.message, notes: waiting ? [waiting] : [] };
     throw err;
   }
+  if (!listen) return speakInBackground(textToSpeak, { release, onPhase, waiting, keepListening: wasListening });
   let result: VoiceResult;
   try {
-    result = await turn(textToSpeak, seconds, model, signal, onPhase);
+    result = await turn(textToSpeak, seconds, model!, signal, onPhase);
   } finally {
     showPhase(null);
     release();
   }
+  result.notes.unshift(...laterNotes.splice(0));
   if (waiting) result.notes.unshift(waiting);
-  // They answered out loud, or this was only an announcement ("give me a few minutes") while we
-  // were listening: keep listening while Claude works, for "Claude, …".
-  if (result.heard || (!listen && wasListening && result.ok)) workListener.start();
+  // They answered out loud: keep listening while Claude works, for "Claude, …".
+  if (result.heard) workListener.start();
   return result;
+}
+
+/**
+ * A spoken update ("give me a few minutes"): return right away, so Claude carries on working while
+ * it plays (each one used to hold Claude up for the whole sentence, 7-12 s), and keep the speaker
+ * and mic until it's done. An error in the first moment (no voice installed) is still reported here;
+ * anything later goes with the next result.
+ */
+async function speakInBackground(
+  textToSpeak: string,
+  o: { release: () => void; onPhase: (phase: Phase) => void; waiting: string | null; keepListening: boolean },
+): Promise<VoiceResult> {
+  const speech = prepareSpeech(textToSpeak, { maxWords: CONFIG.maxSpeakWords, maxChars: MAX_SPEAK_CHARS });
+  const t0 = Date.now();
+  let returned = false;
+  let failure: unknown = null;
+  o.onPhase("speaking");
+  // Not tied to this request's signal: the request is over long before the sentence is.
+  const done = speak(speech.text)
+    .then(
+      (spoken) => {
+        const fallback = fallbackNote(spoken);
+        if (fallback) laterNotes.push(fallback);
+        debug(`spoken update finished after ${secs(Date.now() - t0)}`);
+      },
+      (err: unknown) => {
+        if (err instanceof CancelledError) return;
+        if (!returned) {
+          failure = err; // reported by this call, below
+          return;
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        log("spoken update failed:", message);
+        laterNotes.push(`voice-mcp note: your last spoken update wasn't heard: ${message}`);
+      },
+    )
+    .finally(() => {
+      showPhase(null);
+      o.release();
+      // Listening while Claude works resumes once the speaker is quiet, so it doesn't hear itself.
+      // It counts from when this call returned, which is when the plugin's hook marked the session.
+      if (o.keepListening && !failure) workListener.start(t0);
+    });
+  const tracked: Promise<void> = done.finally(() => {
+    if (speaking === tracked) speaking = null;
+  });
+  speaking = tracked;
+
+  // Fails right away (no voice installed, bad setup)? Then say so now, as before.
+  await Promise.race([done, sleep(EARLY_FAILURE_MS)]);
+  returned = true;
+  if (failure) throw failure;
+  const notes = [...speech.notes, ...laterNotes.splice(0)];
+  if (o.waiting) notes.unshift(o.waiting);
+  return {
+    ok: true,
+    text: "(Speaking in the background, so you can carry on working. The microphone was not opened, because listen was false.)",
+    notes,
+  };
 }
 
 async function turn(
   textToSpeak: string,
   seconds: number,
-  model: string | null,
+  model: string,
   signal: AbortSignal | undefined,
   onPhase: ((phase: Phase) => void) | undefined,
 ): Promise<VoiceResult> {
@@ -96,10 +173,6 @@ async function turn(
     const spoke = Date.now() - t0;
     const fallback = fallbackNote(spoken);
     if (fallback) notes.push(fallback);
-    if (!model) {
-      const text = "(Spoken. The microphone was not opened, because listen was false.)";
-      return { ok: true, text, notes: [...notes, timingNote({ spokeMs: spoke, spoken })] };
-    }
     onPhase?.("listening");
     const tListen = Date.now();
     // The chime plays once the mic is really recording, so the first word is never lost.

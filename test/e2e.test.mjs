@@ -288,7 +288,7 @@ test("a session that keeps the mic busy makes the next one give up with a clear 
   const cache = path.join(sb.home, ".cache", "mac-voice-mcp");
   fakeModel(path.join(cache, "models"));
   writeFileSync(path.join(cache, "mic.lock"), JSON.stringify({ pid: process.pid, since: Date.now() })); // alive: this test runner
-  const { client } = await connect(sb.env({ VOICE_MCP_LOCK_WAIT_SECONDS: "1" }));
+  const { client } = await connect(sb.env({ VOICE_MCP_LOCK_WAIT_SECONDS: "1", VOICE_MCP_PHASE_FILE: "1" }));
   try {
     const r = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Hello?" } });
     assert.equal(r.isError, true);
@@ -307,7 +307,7 @@ test("listen: false speaks without opening the mic, and needs no speech-to-text 
     const r = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Voice mode is off. Talk soon!", listen: false } });
     assert.equal(r.isError, false);
     assert.match(r.content[0].text, /microphone was not opened/);
-    assert.match(text(r), /voice-mcp timing: spoke [\d.]+ s/);
+    assert.ok(await waitFor(() => audioEvents(sb.readLog()).length > 0));
     assert.deepEqual(audioEvents(sb.readLog()), ["speak"]);
   } finally {
     await client.close();
@@ -694,5 +694,77 @@ test("a spoken update that doesn't wait for an answer keeps listening while Clau
     assert.equal(sb2.readLog().match(/^rec -/gm)?.length ?? 0, 0);
   } finally {
     await c.client.close();
+  }
+});
+
+// --- Spoken updates don't hold Claude up --------------------------------------------------------
+
+test("a spoken update returns at once, and the next turn waits for it to finish", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SAY_MS: "1500", VOICE_MCP_PHASE_FILE: "1" }));
+  const phaseFile = path.join(voiceModeDir(sb), "phase.json");
+  try {
+    const t = Date.now();
+    const r = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Give me a few minutes.", listen: false } });
+    const took = Date.now() - t;
+    assert.equal(r.isError, false);
+    assert.match(r.content[0].text, /^\(Speaking in the background/);
+    assert.ok(took < 1000, `returned after ${took} ms, while speaking takes 1500 ms`);
+    assert.equal(JSON.parse(readFileSync(phaseFile, "utf8")).phase, "speaking", "still speaking after the call returned");
+
+    await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Done. Anything else?" } });
+    const log = sb.readLog().split("\n");
+    const idx = (prefix) => log.findIndex((l) => l.startsWith(prefix));
+    assert.ok(idx('speak-end "Give me a few minutes."') < idx('speak "Done. Anything else?"'), "one voice at a time");
+    assert.ok(idx('speak-end "Done. Anything else?"') < idx("rec -"), "the mic opens after speaking");
+    assert.ok(!existsSync(phaseFile), "cleared after the turn");
+  } finally {
+    await client.close();
+  }
+});
+
+test("a spoken update that fails at once says so; one that fails later says so in the next result", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  let c = await connect(sb.env({ STUB_SAY_FAIL: "1" }));
+  try {
+    const r = await c.client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Give me a minute.", listen: false } });
+    assert.equal(r.isError, true);
+    assert.match(text(r), /^voice-mcp error: /);
+  } finally {
+    await c.client.close();
+  }
+
+  const sb2 = sandbox();
+  fakeModel(path.join(sb2.home, ".cache", "mac-voice-mcp", "models"));
+  c = await connect(sb2.env({ STUB_SAY_FAIL: "1", STUB_SAY_MS: "800" }));
+  try {
+    const r1 = await c.client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Give me a minute.", listen: false } });
+    assert.equal(r1.isError, false, "still playing when the call returned");
+    const r2 = await c.client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Still there?", listen: false } });
+    assert.match(text(r2), /your last spoken update wasn't heard/);
+  } finally {
+    await c.client.close();
+  }
+});
+
+test("after a spoken update, listening while Claude works resumes only once the speaker is quiet", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO_LATER: "silent", VOICE_MCP_START_TIMEOUT_SECONDS: "60", STUB_SAY_MS: "1200" }));
+  const recs = () => sb.readLog().match(/^rec -/gm)?.length ?? 0;
+  try {
+    await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Shall I start?" } });
+    markListening(sb);
+    assert.ok(await waitFor(() => recs() >= 2), "listening while Claude works");
+    await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Give me a few minutes.", listen: false } });
+    markListening(sb); // what the hook does after an update while listening
+    assert.ok(await waitFor(() => recs() >= 3), "listening again");
+    const log = sb.readLog().split("\n");
+    const lastRec = log.map((l, i) => (l.startsWith("rec -") ? i : -1)).filter((i) => i >= 0).pop();
+    assert.ok(log.findIndex((l) => l.startsWith('speak-end "Give me a few minutes."')) < lastRec, "not while speaking");
+  } finally {
+    await client.close();
   }
 });

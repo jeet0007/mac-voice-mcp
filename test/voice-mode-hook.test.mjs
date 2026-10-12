@@ -48,7 +48,7 @@ test("typing, or the session ending, ends voice mode", () => {
 
 test("listen:false, no answer, or a failed call ends voice mode", () => {
   for (const [input, response] of [
-    [{ text_to_speak: "Bye!", listen: false }, reply("(Spoken. The microphone was not opened, because listen was false.)")],
+    [{ text_to_speak: "Bye!", listen: false }, reply("(Speaking in the background, so you can carry on working. The microphone was not opened, because listen was false.)")],
     [{ text_to_speak: "Still there?" }, reply("(No speech detected — the user did not reply within 15 seconds. The microphone is now off.)")],
     [{ text_to_speak: "Hi" }, { content: [{ type: "text", text: "voice-mcp is not set up yet: …" }], isError: true }],
     [{ text_to_speak: "Hi" }, [{ type: "text", text: "Another voice session on this Mac (another Claude window, Claude Desktop or Cursor) has been using the speaker" }]],
@@ -220,7 +220,7 @@ test("VOICE_MCP_STAY_IN_VOICE=0 turns off the nudges but still hands over what t
 test("a spoken update that doesn't wait for an answer keeps the mic open while Claude works", () => {
   const { env, run, spoke } = setup();
   const mark = path.join(env.VOICE_MCP_CACHE_DIR, "voice-mode", "listening.state");
-  const update = [reply("(Spoken. The microphone was not opened, because listen was false.)"), { text_to_speak: "Give me a few minutes.", listen: false }];
+  const update = [reply("(Speaking in the background, so you can carry on working. The microphone was not opened, because listen was false.)"), { text_to_speak: "Give me a few minutes.", listen: false }];
   spoke();
   spoke(...update, Date.now() + 1000);
   assert.equal(JSON.parse(readFileSync(mark, "utf8")).session, "s1", "still listening");

@@ -25,7 +25,8 @@ anything unspeakable and says so in a "voice-mcp note"; follow those notes.
   until they say stop or start typing. The plugin's hook enforces this: if you try to finish with a
   text-only reply while voice mode is on, you'll be sent back once to answer by voice.
 - To end voice mode, or for a one-way announcement, call speak_and_listen with `listen: false`: it speaks
-  without opening the mic, and voice mode ends. Voice mode also ends when the user types, or doesn't answer.
+  without opening the mic, and returns right away so you can keep working while it plays. A goodbye ends
+  voice mode. Voice mode also ends when the user types, or doesn't answer.
 - The final "voice-mcp timing" line is diagnostics. Ignore it unless the user asks why things feel slow.
 
 ## Fixing problems

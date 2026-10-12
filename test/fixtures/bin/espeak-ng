@@ -21,6 +21,15 @@ process.stdin.on("end", () => {
     fs.writeFileSync(out, Buffer.concat([h, pcm]));
     fs.appendFileSync(process.env.STUB_LOG, `speak-to-file ${JSON.stringify(text)}\n`);
   } else {
+    // STUB_SAY_MS: take this long to "speak" (logs "speak-end" after). STUB_SAY_FAIL=1: then fail.
     fs.appendFileSync(process.env.STUB_LOG, `speak ${JSON.stringify(text)}\n`);
+    const ms = Number(process.env.STUB_SAY_MS ?? 0);
+    setTimeout(() => {
+      if (ms) fs.appendFileSync(process.env.STUB_LOG, `speak-end ${JSON.stringify(text)}\n`);
+      if (process.env.STUB_SAY_FAIL === "1") {
+        process.stderr.write("stub espeak-ng: no voice data\n");
+        process.exit(1);
+      }
+    }, ms);
   }
 });
