@@ -1,5 +1,5 @@
 {
-  "description": "Keeps a voice conversation in voice: while you're talking with Claude out loud, it answers by voice until you type or say stop.",
+  "description": "Keeps a voice conversation in voice, and passes on what you say to Claude while it works (\"Claude, …\"): answers come by voice until you type or say stop.",
   "hooks": {
     "PostToolUse": [
       {
@@ -9,6 +9,15 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/voice-mode.mjs\"",
             "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/after-tool.sh\"",
+            "timeout": 5
           }
         ]
       }

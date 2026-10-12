@@ -17,6 +17,25 @@ Once you answer out loud, you're in a voice conversation. Claude replies by voic
 
 In Claude Code, the plugin enforces this with a hook. If Claude tries to answer in text mid-conversation, the hook sends it back once to answer by voice. If it stops again, the hook lets it. To turn the hook off, add `"VOICE_MCP_STAY_IN_VOICE": "0"` to the `env` block in `~/.claude/settings.json`. Other apps rely on the instructions alone.
 
+## Talk to Claude while it works
+
+In Claude Code with the plugin, after you answer out loud the mic stays open while Claude works. Start with Claude's name and say what you want:
+
+- *"Claude, use the other branch."*
+- *"Hey Claude, skip the slow tests."*
+- *"Claude?"* on its own tells Claude you want to talk.
+
+A soft sound tells you it was heard. Claude gets it after its next step (its next tool call), or as soon as it finishes, and takes it into account. If Claude speaks to you first, it gets it in that turn instead.
+
+- **Only speech that starts with "Claude" is passed on.** Everything else the mic picks up (you talking to someone, a call, a video) is transcribed on your Mac, checked for the name, and dropped. Nothing is stored or sent anywhere.
+- **macOS shows the orange mic dot** while this is on.
+- **It pauses** while Claude speaks to you (the turn takes the mic), and carries on after a quick update that doesn't wait for an answer, such as "Give me a few minutes."
+- **It stops** within a quarter of a second when you type, when Claude finishes, when voice mode ends, when you talk in another Claude window, and after 10 minutes without a voice turn (`VOICE_MCP_WORK_LISTEN_MINUTES`).
+- **It goes to the main Claude.** If Claude has started helper agents, what you say waits for Claude itself, not for a helper.
+- **To turn it off,** set `"VOICE_MCP_LISTEN_WHILE_WORKING": "0"` in the `env` block of `~/.claude/settings.json`.
+
+It needs the plugin's hook, so it only works in Claude Code with the plugin. Claude Desktop and Cursor never keep the mic open between turns.
+
 **Several sessions, one mic.** Every mac-voice-mcp on your Mac takes turns: Claude Code windows, Claude Desktop and Cursor. While one is speaking or listening, the others wait for that turn to finish (shown as "waiting for another voice session"). They give up after 2 minutes with a message. If a session crashes, the next one takes the mic over.
 
 ## Getting Claude to sound natural

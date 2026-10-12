@@ -9,11 +9,14 @@ import { ensureModel } from "./model.js";
 import { resetWhichCache, SetupError } from "./proc.js";
 import { prepareSpeech } from "./speech-text.js";
 import { findWhisperCli, findWhisperServer, prewarm, STT_MISSING, transcribe } from "./stt.js";
+import { interjectionNote, takeInbox, workListener } from "./worklisten.js";
 
 export interface VoiceResult {
   ok: boolean;
   text: string;
   notes: string[];
+  /** The user answered out loud (a real transcript, not "no speech" or an error). */
+  heard?: boolean;
 }
 
 /** Everything speak_and_listen needs, checked before saying a word. Never installs anything. */
@@ -36,6 +39,11 @@ export interface SpeakOptions {
 
 export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {}): Promise<VoiceResult> {
   const { signal, onPhase } = opts;
+  // The mic is ours for this turn: stop listening in the background, and pass on anything the
+  // user said while Claude worked that the plugin's hook hasn't delivered yet.
+  const wasListening = workListener.running;
+  await workListener.stop();
+  const waiting = interjectionNote(takeInbox());
   const listen = opts.listen !== false;
   const requested = opts.listenSeconds ?? DEFAULT_LISTEN_SECONDS;
   const seconds = Math.min(MAX_LISTEN_SECONDS, Math.max(1, Number.isFinite(requested) ? requested : DEFAULT_LISTEN_SECONDS));
@@ -48,14 +56,20 @@ export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {
   try {
     release = await acquireMicLock({ signal, onWait: () => onPhase?.("waiting") });
   } catch (err) {
-    if (err instanceof MicBusyError) return { ok: false, text: err.message, notes: [] };
+    if (err instanceof MicBusyError) return { ok: false, text: err.message, notes: waiting ? [waiting] : [] };
     throw err;
   }
+  let result: VoiceResult;
   try {
-    return await turn(textToSpeak, seconds, model, signal, onPhase);
+    result = await turn(textToSpeak, seconds, model, signal, onPhase);
   } finally {
     release();
   }
+  if (waiting) result.notes.unshift(waiting);
+  // They answered out loud, or this was only an announcement ("give me a few minutes") while we
+  // were listening: keep listening while Claude works, for "Claude, …".
+  if (result.heard || (!listen && wasListening && result.ok)) workListener.start();
+  return result;
 }
 
 async function turn(
@@ -133,7 +147,7 @@ async function turn(
           `last second ${f(l.recentDb)} ± ${l.recentSpreadDb.toFixed(1)} dB.)`,
       );
     }
-    return { ok: true, text: transcript, notes: [...notes, timing(transcribed)] };
+    return { ok: true, text: transcript, notes: [...notes, timing(transcribed)], heard: true };
   } finally {
     await rm(tmpDir, { recursive: true, force: true });
   }

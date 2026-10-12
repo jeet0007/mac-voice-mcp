@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // Stub SoX `rec`: streams synthetic 16 kHz mono s16le audio to stdout at 10x real time.
 // STUB_SCENARIO: answer | cough | silent | zero | long
+// STUB_SCENARIO_LATER: another scenario for every recording after the first (e.g. silence while Claude works).
 const fs = require("fs");
 fs.appendFileSync(process.env.STUB_LOG, `rec ${process.argv.slice(2).join(" ")}\n`);
+const runs = fs.readFileSync(process.env.STUB_LOG, "utf8").match(/^rec /gm).length;
 const SR = 16000;
 let seed = 7;
 const rand = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) * 2 - 1;
@@ -11,7 +13,7 @@ const noise = (sec, amp = 40) => Array.from({ length: Math.round(SR * sec) }, ()
 const speech = (sec) => Array.from({ length: Math.round(SR * sec) }, (_, i) =>
   Math.round(8000 * Math.sin((2 * Math.PI * 180 * i) / SR) * (0.55 + 0.45 * Math.sin((2 * Math.PI * 4 * i) / SR))));
 const burst = (sec) => Array.from({ length: Math.round(SR * sec) }, (_, i) => (i % 2 ? 9000 : -9000));
-const scenario = process.env.STUB_SCENARIO || "answer";
+const scenario = (runs > 1 && process.env.STUB_SCENARIO_LATER) || process.env.STUB_SCENARIO || "answer";
 const script = {
   answer: [noise(1), speech(1.5), noise(0.6), speech(1.2)], // a mid-answer pause shorter than 1.2 s
   cough: [noise(1), burst(0.15), noise(2), speech(1.5)],
@@ -23,7 +25,10 @@ const frames = [];
 for (const part of script) for (let i = 0; i < part.length; i += 480) frames.push(part.slice(i, i + 480));
 const tailFrame = () => (scenario === "zero" ? new Array(480).fill(0) : noise(0.03));
 process.stdout.on("error", () => process.exit(0));
-process.on("SIGTERM", () => process.exit(0));
+process.on("SIGTERM", () => {
+  fs.appendFileSync(process.env.STUB_LOG, "rec stopped\n");
+  process.exit(0);
+});
 let i = 0;
 setInterval(() => {
   const f = i < frames.length ? frames[i++] : tailFrame();

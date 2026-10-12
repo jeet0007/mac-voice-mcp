@@ -46,6 +46,7 @@ Claude ◀──────────────── "Yes, and tag Priya."
 - ⚡ **Fast replies.** A warm whisper.cpp server keeps the model loaded, so transcribing takes a fraction of a second on Apple Silicon.
 - 🗣️ **A natural voice, if you want one.** Uses your best macOS voice, or the optional [Kokoro](docs/voices.md#the-kokoro-voice-optional) neural voice.
 - ✋ **Asks before installing anything.** Setup checks what you already have and reuses it.
+- 🙋 **Talk while Claude works.** Say "Claude, use the other branch" mid-task and it takes it into account at its next step (Claude Code plugin).
 - 🪟 **One mic, many windows.** Claude Code, Claude Desktop and Cursor take turns instead of talking over each other.
 - 📏 **Measured, not guessed.** `doctor` checks the whole pipeline on your Mac and scores it PASS, WARN or FAIL.
 

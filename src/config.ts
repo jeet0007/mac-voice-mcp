@@ -86,6 +86,11 @@ export const CONFIG = {
   rate: process.env.VOICE_MCP_RATE?.trim() || undefined,
   /** Spoken text longer than this is cut at a sentence boundary (0 = no limit). */
   maxSpeakWords: Math.max(0, Math.floor(envNum("VOICE_MCP_MAX_SPEAK_WORDS", 120))),
+  /**
+   * Claude Code plugin: after you answer out loud, keep listening while Claude works, and pass on
+   * anything you say that starts with "Claude, …". Off: VOICE_MCP_LISTEN_WHILE_WORKING=0.
+   */
+  listenWhileWorking: envBool("VOICE_MCP_LISTEN_WHILE_WORKING", true),
   /** Play a short sound when the mic opens/closes (macOS). */
   chime: envBool("VOICE_MCP_CHIME", true),
 
