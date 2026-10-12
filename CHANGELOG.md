@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-12
+
 ### Added
 - **Talk to Claude while it works (Claude Code plugin).** After you answer out loud, the mic stays open while Claude works. Say something that starts with its name, such as "Claude, use the other branch", and a soft sound confirms it was heard. Claude gets it after its next tool call, or as soon as it finishes, and takes it into account.
   - Only speech that starts with "Claude" is passed on. Everything else is transcribed on your Mac, checked for the name, and dropped. What's passed on waits in a file only your account can read, and is deleted once Claude has it.
@@ -129,7 +131,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   - `voice_setup`: checks first, installs only what's missing, and only after you agree.
   - The `setup` and `voice_mode` prompts.
 
-[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.3.1...v0.4.0
