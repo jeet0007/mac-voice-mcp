@@ -17,6 +17,7 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 | `VOICE_MCP_KOKORO_DIR` | `~/.cache/mac-voice-mcp/kokoro` | Where the Kokoro voice is installed. |
 | `VOICE_MCP_MAX_SPEAK_WORDS` | `120` | Longer text is cut at a sentence boundary ("the rest is on screen"). |
 | `VOICE_MCP_CHIME` | `1` | Set to `0` to turn off the mic open/close sounds. |
+| `VOICE_MCP_PROGRESS_TEXT` | `1` | Set to `0` to send no progress messages during a voice turn, for when something else shows what the turn is doing (speaking, listening…). Clients then only see the result. |
 | `VOICE_MCP_LISTEN_WHILE_WORKING` | `1` | Claude Code plugin: after you answer out loud, listen while Claude works for things you say to it ("Claude, …"). See [Talk to Claude while it works](usage.md#talk-to-claude-while-it-works). `0` turns it off. |
 | `VOICE_MCP_WORK_LISTEN_MINUTES` | `10` | Stop listening while Claude works after this long without a voice turn. |
 | `VOICE_MCP_LOCK_WAIT_SECONDS` | `120` | How long a turn waits while another session on this Mac is using the mic. |

@@ -294,6 +294,7 @@ test("a session that keeps the mic busy makes the next one give up with a clear 
     assert.equal(r.isError, true);
     assert.match(text(r), /Another voice session on this Mac/);
     assert.deepEqual(audioEvents(sb.readLog()), [], "nothing was spoken or recorded");
+    assert.ok(!existsSync(path.join(cache, "voice-mode", "phase.json")), "no stale 'waiting' left for the band");
   } finally {
     await client.close();
   }
