@@ -37,7 +37,7 @@ export const STOP_REASON =
  */
 export const NOT_HEARD_PREFIXES = [
   "(No speech detected",
-  "(Spoken.",
+  "(Speaking in the background",
   "The microphone returned pure digital silence",
   "voice-mcp is not set up yet:",
   "voice-mcp error:",
