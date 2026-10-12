@@ -9,7 +9,7 @@ import { ensureModel } from "./model.js";
 import { resetWhichCache, SetupError } from "./proc.js";
 import { prepareSpeech } from "./speech-text.js";
 import { findWhisperCli, findWhisperServer, prewarm, STT_MISSING, transcribe } from "./stt.js";
-import { interjectionNote, takeInbox, workListener } from "./worklisten.js";
+import { interjectionNote, showPhase, takeInbox, workListener } from "./worklisten.js";
 
 export interface VoiceResult {
   ok: boolean;
@@ -38,7 +38,11 @@ export interface SpeakOptions {
 }
 
 export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {}): Promise<VoiceResult> {
-  const { signal, onPhase } = opts;
+  const { signal } = opts;
+  const onPhase = (phase: Phase) => {
+    showPhase(phase);
+    opts.onPhase?.(phase);
+  };
   // The mic is ours for this turn: stop listening in the background, and pass on anything the
   // user said while Claude worked that the plugin's hook hasn't delivered yet.
   const wasListening = workListener.running;
@@ -54,8 +58,9 @@ export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {
   // Wait for any other voice session on this Mac to finish with the speaker and mic.
   let release: () => void;
   try {
-    release = await acquireMicLock({ signal, onWait: () => onPhase?.("waiting") });
+    release = await acquireMicLock({ signal, onWait: () => onPhase("waiting") });
   } catch (err) {
+    showPhase(null); // gave up waiting for the mic, or cancelled: don't leave "waiting" showing
     if (err instanceof MicBusyError) return { ok: false, text: err.message, notes: waiting ? [waiting] : [] };
     throw err;
   }
@@ -63,6 +68,7 @@ export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {
   try {
     result = await turn(textToSpeak, seconds, model, signal, onPhase);
   } finally {
+    showPhase(null);
     release();
   }
   if (waiting) result.notes.unshift(waiting);

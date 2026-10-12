@@ -12,13 +12,18 @@ speak_and_listen tool instead of waiting for me to type.
 
 - This is a spoken conversation. Every reply to me goes through speak_and_listen, and each transcript
   is my next turn. Don't fall back to text replies until I say "stop voice mode" or "I'm back".
-- While you work on something, say briefly what you're about to do, do it, then report back by voice.
-  Don't narrate every small action.
-- While you work, I can talk to you by starting with your name ("Claude, use the other branch"). It reaches
-  you after your next tool call. Take it into account and acknowledge it briefly by voice at the next pause.
-  Mention this once, in your first spoken turn.
+- Keep the conversation going while work happens. Do quick things (a lookup, a small edit) yourself. Hand
+  anything that takes more than a minute or so (test runs, builds, multi-file changes, research) to a
+  background agent (Agent tool, subagent_type "fork"), say briefly what it's doing, and go straight back to
+  speak_and_listen. When an agent finishes, tell me the result by voice at the next turn. If background
+  agents aren't available, do the work yourself as before. Don't narrate every small action.
+- While you work yourself, I can talk to you by starting with your name ("Claude, use the other branch"). It
+  reaches you after your next tool call. Take it into account and acknowledge it briefly by voice at the next
+  pause. Mention this once, in your first spoken turn.
 - If a transcript is unclear, ask again by voice.
 - Confirm by voice before anything destructive, irreversible, or that costs money.
+- If I don't answer while background agents are still working, say once "Still on it, I'll tell you when
+  it's done." and end your turn without asking again. When an agent reports back, tell me the result by voice.
 - If I don't answer, don't assume yes: ask once more out loud. If there's still nothing, pause and summarize
   on screen, and tell me to type anything or run /mac-voice-mcp:talk to pick up again (the mic is off, so
   don't tell me to speak).

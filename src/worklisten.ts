@@ -30,6 +30,23 @@ export const voiceModeDir = () => path.join(CONFIG.cacheDir, "voice-mode");
 export const listeningFile = () => path.join(voiceModeDir(), "listening.state");
 export const inboxDir = () => path.join(voiceModeDir(), "inbox");
 
+/**
+ * Where the voice turn is (speaking, listening…), for the plugin's band above the prompt. null when
+ * no turn is running. Best effort: a band that can't read it just shows nothing.
+ */
+export function showPhase(phase: string | null): void {
+  const file = path.join(voiceModeDir(), "phase.json");
+  try {
+    if (phase === null) rmSync(file, { force: true });
+    else {
+      mkdirSync(voiceModeDir(), { recursive: true });
+      writeFileSync(file, JSON.stringify({ phase, at: Date.now() }));
+    }
+  } catch {
+    /* the band is optional */
+  }
+}
+
 /** How long after our voice turn the hook has to confirm voice mode before we give up (no hook → no listening). */
 const CONFIRM_MS = Math.max(200, envNum("VOICE_MCP_WORK_LISTEN_CONFIRM_MS", 10_000));
 /** How often, while listening, we check whether to stop (the user typed, voice mode ended, …). */

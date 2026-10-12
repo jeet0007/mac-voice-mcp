@@ -20,9 +20,11 @@ type Extra = RequestHandlerExtra<ServerRequest, ServerNotification>;
  * MCP progress notifications, when the client asked for them (it sent a progressToken).
  * They show what's happening and keep clients that reset their timeout on progress happy.
  */
-function progressReporter(extra: Extra): ((message: string) => void) | undefined {
+function progressReporter(extra: Extra, phases = false): ((message: string) => void) | undefined {
   const token = extra._meta?.progressToken;
-  if (token === undefined) return undefined;
+  // Off when a band above the prompt shows the phase instead: Claude Code turns even a textless
+  // progress ping into a "Processing N" line, so send none (it doesn't need them to keep waiting).
+  if (token === undefined || (phases && !CONFIG.progressText)) return undefined;
   let progress = 0;
   return (message) => {
     extra
@@ -63,7 +65,7 @@ export function createServer(): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async ({ text_to_speak, listen_seconds, listen }, extra): Promise<CallToolResult> => {
-      const progress = progressReporter(extra);
+      const progress = progressReporter(extra, true);
       const phaseMessage = (phase: string) =>
         phase === "waiting" ? "waiting for another voice session on this Mac to finish" : phase;
       try {
