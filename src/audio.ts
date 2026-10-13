@@ -6,7 +6,7 @@ import { CONFIG, debug, IS_MAC, IS_WIN, log } from "./config.js";
 import { Endpointer, FRAME_BYTES, FRAME_MS, wavHeader, type EndReason, type EndpointerDiagnostics } from "./endpointer.js";
 import { KokoroError, kokoroEnabled, speakKokoro, synthesizeKokoroToFile } from "./kokoro.js";
 import { wavSeconds } from "./pcm.js";
-import { activeChildren, CancelledError, run, SetupError, tail, which, type RunResult } from "./proc.js";
+import { activeChildren, CancelledError, run, SetupError, startWaiting, tail, which, type RunResult, type Waiting } from "./proc.js";
 
 // ---------------------------------------------------------------------------
 // Text-to-speech
@@ -127,28 +127,81 @@ export async function speak(text: string, signal?: AbortSignal): Promise<Spoken>
   return { engine: "built-in" };
 }
 
-/** macOS `say`, espeak-ng, or Windows SAPI. */
-async function speakBuiltIn(text: string, signal?: AbortSignal): Promise<void> {
+/** The built-in voice's command, for engines that read the text from stdin (all but spd-say). */
+async function builtInCommand(): Promise<{ bin: string; args: string[] } | null> {
   const bin = findTts();
-  if (!bin) throw new SetupError("No text-to-speech engine found. Install espeak-ng (e.g. `sudo apt install espeak-ng`).");
-
-  let result: RunResult;
+  if (!bin) return null;
   if (IS_MAC) {
     const args: string[] = [];
     const { voice } = await chooseVoice();
     if (voice) args.push("-v", voice);
     if (CONFIG.rate) args.push("-r", CONFIG.rate);
     args.push("-f", "-"); // read from stdin: no argv length limits, no flag injection
-    result = await run(bin, args, { input: text, signal, timeoutMs: 180_000 });
-  } else if (IS_WIN) {
+    return { bin, args };
+  }
+  if (IS_WIN) {
     const ps =
       "Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; " +
       "$s.Speak([Console]::In.ReadToEnd())";
-    result = await run(bin, ["-NoProfile", "-NonInteractive", "-Command", ps], { input: text, signal, timeoutMs: 180_000 });
-  } else if (bin.endsWith("spd-say")) {
-    result = await run(bin, ["-w", ` ${text}`], { signal, timeoutMs: 180_000 });
+    return { bin, args: ["-NoProfile", "-NonInteractive", "-Command", ps] };
+  }
+  if (bin.endsWith("spd-say")) return null;
+  return { bin, args: ["--stdin"] };
+}
+
+/**
+ * The built-in voice, started ahead of time. Loading a voice takes a while (about 1.4 s for a Siri
+ * voice with `say`), and the engines read the text from stdin, so one is started early and waits:
+ * the next reply only has to hand it the text. Measured with Siri Voice 4: 1.4 s → 0.6 s from the
+ * text to the end of the speech, beyond the audio itself. Replaced after each reply; stopped when idle.
+ */
+let standby: { key: string; proc: Waiting } | null = null;
+let standbyTimer: NodeJS.Timeout | undefined;
+
+function takeStandby(key: string): Waiting | null {
+  const s = standby;
+  standby = null;
+  clearTimeout(standbyTimer);
+  if (!s) return null;
+  if (s.key === key && s.proc.ready) return s.proc;
+  s.proc.kill(); // the voice setting changed, or it stopped
+  return null;
+}
+
+/** Start the built-in voice now, so the next reply starts sooner. Does nothing with Kokoro or spd-say. */
+export async function prepareBuiltInVoice(): Promise<void> {
+  if (!CONFIG.voiceStandby || kokoroEnabled()) return;
+  const cmd = await builtInCommand();
+  if (!cmd) return;
+  const key = [cmd.bin, ...cmd.args].join("\0");
+  if (standby?.key === key && standby.proc.ready) return;
+  takeStandby(""); // drop a stale one
+  standby = { key, proc: startWaiting(cmd.bin, cmd.args) };
+  clearTimeout(standbyTimer);
+  standbyTimer = setTimeout(() => takeStandby(""), CONFIG.serverIdleMinutes * 60_000);
+  standbyTimer.unref();
+}
+
+/** Stop the waiting voice (the server is shutting down). */
+export function stopBuiltInVoice(): void {
+  takeStandby("");
+}
+
+/** macOS `say`, espeak-ng, or Windows SAPI. */
+async function speakBuiltIn(text: string, signal?: AbortSignal): Promise<void> {
+  const bin = findTts();
+  if (!bin) throw new SetupError("No text-to-speech engine found. Install espeak-ng (e.g. `sudo apt install espeak-ng`).");
+
+  let result: RunResult;
+  const cmd = await builtInCommand();
+  if (cmd) {
+    const ready = takeStandby([cmd.bin, ...cmd.args].join("\0"));
+    result = ready
+      ? await ready.send(text, { signal, timeoutMs: 180_000 })
+      : await run(cmd.bin, cmd.args, { input: text, signal, timeoutMs: 180_000 });
+    void prepareBuiltInVoice(); // for the next reply
   } else {
-    result = await run(bin, ["--stdin"], { input: text, signal, timeoutMs: 180_000 });
+    result = await run(bin, ["-w", ` ${text}`], { signal, timeoutMs: 180_000 });
   }
 
   if (result.code !== 0) {

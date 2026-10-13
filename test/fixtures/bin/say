@@ -7,11 +7,14 @@ if (args[0] === "-v" && args[1] === "?") {
   process.stdout.write(process.env.STUB_SAY_VOICES ?? "Samantha            en_US    # Hello! My name is Samantha.\n");
   process.exit(0);
 }
+// Every start, and when the text arrives: the server may start the voice before the reply is ready.
+fs.appendFileSync(process.env.STUB_LOG, `tts-start ${process.pid}\n`);
 const voice = args[0] === "-v" ? args[1] : null;
 const out = args.includes("-o") ? args[args.indexOf("-o") + 1] : null;
 let text = "";
 process.stdin.on("data", (d) => (text += d));
 process.stdin.on("end", () => {
+  fs.appendFileSync(process.env.STUB_LOG, `tts-input ${process.pid}\n`);
   const tag = voice ? ` voice=${JSON.stringify(voice)}` : "";
   if (out) {
     // STUB_TTS_SHORT=1: write almost no audio (a voice missing its data); =once: only the first time.

@@ -17,6 +17,8 @@ speak_and_listen tool instead of waiting for me to type.
   background agent (Agent tool with run_in_background: true), say briefly what it's doing, and go straight back to
   speak_and_listen. When an agent finishes, tell me the result by voice at the next turn. If background
   agents aren't available, do the work yourself as before. Don't narrate every small action.
+- Don't send a separate filler line ("Okay", "Let me check") just before your answer: every voice message
+  takes a moment to start, so the answer arrives after an odd pause. Lead with the answer itself.
 - While you work yourself, I can talk to you by starting with your name ("Claude, use the other branch"). It
   reaches you after your next tool call. Take it into account and acknowledge it briefly by voice at the next
   pause. Mention this once, in your first spoken turn.

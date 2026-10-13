@@ -15,6 +15,8 @@ Once Kokoro is installed it's used automatically, and the macOS voice becomes th
 
 **Get a better voice (recommended).** macOS includes free Premium voices that sound far more natural than the default. Open **System Settings → Accessibility → Spoken Content → System Voice → Manage Voices…**, and download one, for example English → *Ava (Premium)* or *Zoe (Premium)*. The next voice turn uses it automatically. To choose a specific voice, or keep the system voice, see `VOICE_MCP_VOICE` in [Configuration](configuration.md#speaking). `VOICE_MCP_VOICE=default` always uses the voice chosen in System Settings.
 
+**Siri voices take a moment to load.** macOS loads the voice each time it speaks: about 1.4 s with Siri Voice 4. So after your first voice turn, the voice is started ahead of each reply and waits for the text, which takes about 0.8 s off. The first reply of a session still waits the full time. Other voices load much faster (`VOICE_MCP_VOICE_STANDBY` in [Configuration](configuration.md#speaking)).
+
 ## The Kokoro voice (optional)
 
 [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) is a small neural voice that sounds close to a person and runs entirely on your Mac. Ask Claude to *"install the Kokoro voice"*, or run `npx -y mac-voice-mcp@latest setup --kokoro`.
