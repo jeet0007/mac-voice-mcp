@@ -598,7 +598,7 @@ test("while Claude works, 'Claude, …' is heard and left for the hook; the next
     assert.equal(inboxTexts(sb)[0], "use the other branch.");
 
     // The hook didn't run here, so the next voice turn hands it over itself.
-    const r2 = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Done. Anything else?" } });
+    const r2 = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "All done. Anything else?" } });
     assert.match(text(r2), /while you were working, the user said by voice: "use the other branch\."/);
   } finally {
     await client.close();
@@ -713,11 +713,11 @@ test("a spoken update returns at once, and the next turn waits for it to finish"
     assert.ok(took < 1000, `returned after ${took} ms, while speaking takes 1500 ms`);
     assert.equal(JSON.parse(readFileSync(phaseFile, "utf8")).phase, "speaking", "still speaking after the call returned");
 
-    await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Done. Anything else?" } });
+    await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "All done. Anything else?" } });
     const log = sb.readLog().split("\n");
     const idx = (prefix) => log.findIndex((l) => l.startsWith(prefix));
-    assert.ok(idx('speak-end "Give me a few minutes."') < idx('speak "Done. Anything else?"'), "one voice at a time");
-    assert.ok(idx('speak-end "Done. Anything else?"') < idx("rec -"), "the mic opens after speaking");
+    assert.ok(idx('speak-end "Give me a few minutes."') < idx('speak "All done. Anything else?"'), "one voice at a time");
+    assert.ok(idx('speak-end "All done. Anything else?"') < idx("rec -"), "the mic opens after speaking");
     assert.ok(!existsSync(phaseFile), "cleared after the turn");
   } finally {
     await client.close();
@@ -764,6 +764,43 @@ test("after a spoken update, listening while Claude works resumes only once the 
     const log = sb.readLog().split("\n");
     const lastRec = log.map((l, i) => (l.startsWith("rec -") ? i : -1)).filter((i) => i >= 0).pop();
     assert.ok(log.findIndex((l) => l.startsWith('speak-end "Give me a few minutes."')) < lastRec, "not while speaking");
+  } finally {
+    await client.close();
+  }
+});
+
+// --- The built-in voice starts before the reply is ready ----------------------------------------
+
+test("the built-in voice is started ahead of the next reply, so that reply only hands it the text", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env());
+  const ttsLines = (kind) => sb.readLog().split("\n").filter((l) => l.startsWith(`tts-${kind} `)).map((l) => l.split(" ")[1]);
+  try {
+    await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Shall I start?" } });
+    const before = ttsLines("start"); // what was running before the second reply was asked for
+    await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "All done. Anything else?" } });
+    assert.ok(await waitFor(() => ttsLines("start").length >= 3), "a fresh one waits after each reply");
+    const [first, second] = ttsLines("input");
+    assert.notEqual(second, first);
+    assert.ok(before.includes(second), "the second reply used a voice started before it was asked for");
+    assert.deepEqual(lines(sb.readLog(), "speak ").map((l) => l.replace(/ voice=.*/, "")), ['speak "Shall I start?"', 'speak "All done. Anything else?"']);
+  } finally {
+    await client.close();
+  }
+});
+
+test("VOICE_MCP_VOICE_STANDBY=0 starts the voice only when there is something to say", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ VOICE_MCP_VOICE_STANDBY: "0" }));
+  try {
+    await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Shall I start?" } });
+    await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "All done. Anything else?" } });
+    await new Promise((r) => setTimeout(r, 500));
+    const count = (kind) => sb.readLog().split("\n").filter((l) => l.startsWith(`tts-${kind} `)).length;
+    assert.equal(count("start"), 2);
+    assert.equal(count("input"), 2);
   } finally {
     await client.close();
   }

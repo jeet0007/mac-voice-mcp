@@ -3,9 +3,12 @@
 const fs = require("fs");
 const args = process.argv.slice(2);
 const out = args.includes("-w") ? args[args.indexOf("-w") + 1] : null;
+// Every start, and when the text arrives: the server may start the voice before the reply is ready.
+fs.appendFileSync(process.env.STUB_LOG, `tts-start ${process.pid}\n`);
 let text = "";
 process.stdin.on("data", (d) => (text += d));
 process.stdin.on("end", () => {
+  fs.appendFileSync(process.env.STUB_LOG, `tts-input ${process.pid}\n`);
   if (out) {
     // STUB_TTS_SHORT=1: write almost no audio (a voice missing its data); =once: only the first time.
     const flag = process.env.STUB_TTS_SHORT;

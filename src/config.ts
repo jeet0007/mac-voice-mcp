@@ -93,6 +93,8 @@ export const CONFIG = {
   listenWhileWorking: envBool("VOICE_MCP_LISTEN_WHILE_WORKING", true),
   /** Write the voice turn's phase to voice-mode/phase.json, for a status display of your own (off by default). */
   phaseFile: envBool("VOICE_MCP_PHASE_FILE", false),
+  /** Start the built-in voice ahead of each reply, so it speaks sooner (about 0.8 s with Siri voices). */
+  voiceStandby: envBool("VOICE_MCP_VOICE_STANDBY", true),
   /** Play a short sound when the mic opens/closes (macOS). */
   chime: envBool("VOICE_MCP_CHIME", true),
 

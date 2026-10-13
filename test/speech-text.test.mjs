@@ -92,3 +92,13 @@ test("cleanTranscript drops sentences whisper invents from videos, but never rea
   assert.equal(cleanTranscript("Put the link in the description of the PR."), "Put the link in the description of the PR.");
   assert.equal(cleanTranscript("Does version 1.2.3 work?"), "Does version 1.2.3 work?");
 });
+
+test("a one-word opener runs into the next sentence, so the voice doesn't stop after it", () => {
+  assert.equal(prepareSpeech("Okay. This is what I found: the mock starts late.").text, "Okay, This is what I found: the mock starts late.");
+  assert.equal(prepareSpeech("Got it! I'll run the tests first.").text, "Got it, I'll run the tests first.");
+  assert.equal(prepareSpeech("Done. 42 tests pass.").text, "Done, 42 tests pass.");
+  // Only at the very start, only known openers, and never on its own.
+  assert.equal(prepareSpeech("Yes.").text, "Yes.");
+  assert.equal(prepareSpeech("The build is done. Tests pass.").text, "The build is done. Tests pass.");
+  assert.equal(prepareSpeech("Deploy. Then tell me.").text, "Deploy. Then tell me.");
+});

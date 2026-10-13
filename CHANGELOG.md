@@ -5,6 +5,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+- **Replies start sooner with the built-in voice.** macOS loads the voice each time it speaks, which takes about 1.4 s with a Siri voice before the first word. Now, after your first voice turn, the voice is started ahead of each reply and waits for the text. With Siri Voice 4, the wait beyond the speech itself fell from 1.4 s to 0.6 s on 8 test replies. `VOICE_MCP_VOICE_STANDBY=0` turns it off.
+- **No stop after "Okay."** A one-word opener now runs into the next sentence ("Okay, this is what I found…"): voices pause after a full stop, and after a one-word sentence it stands out. With Siri Voice 4, the longest pause in such replies fell from about 0.5 s to 0.3 s on average.
+- **The talk skill asks Claude not to send a separate "Okay" before its answer,** since each voice message takes a moment to start.
+
 ## [0.6.0] - 2026-10-13
 
 ### Added

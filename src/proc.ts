@@ -129,6 +129,91 @@ export function run(cmd: string, args: string[], opts: RunOptions = {}): Promise
   });
 }
 
+/** A process started ahead of time, waiting for its input on stdin (see startWaiting). */
+export interface Waiting {
+  /** Still running and not yet given its input. */
+  readonly ready: boolean;
+  /** When it was started (Date.now()). */
+  readonly startedAt: number;
+  /** Give it its input and wait for it to finish, like run(). */
+  send(input: string, opts?: { signal?: AbortSignal; timeoutMs?: number }): Promise<RunResult>;
+  kill(): void;
+}
+
+/**
+ * Start a process that reads its input from stdin, but don't give it the input yet: it can load
+ * what it needs (a voice) in the meantime, and starts working the moment send() is called.
+ */
+export function startWaiting(cmd: string, args: string[], opts: { env?: NodeJS.ProcessEnv } = {}): Waiting {
+  debug("exec (waiting for input):", cmd, args.join(" "));
+  const startedAt = Date.now();
+  const child = spawn(cmd, args, {
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+    env: opts.env ? { ...process.env, ...opts.env } : process.env,
+  });
+  activeChildren.add(child);
+  let stdout = "";
+  let stderr = "";
+  let sent = false;
+  let closed = false;
+  let failed: Error | null = null;
+  child.stdout?.setEncoding("utf8").on("data", (d: string) => (stdout += d));
+  child.stderr?.setEncoding("utf8").on("data", (d: string) => (stderr += d));
+  child.stdin?.on("error", () => {});
+  const exit = new Promise<number | null>((resolve) => {
+    child.on("error", (err) => {
+      failed = err;
+      closed = true;
+      activeChildren.delete(child);
+      resolve(null);
+    });
+    child.on("close", (code) => {
+      closed = true;
+      activeChildren.delete(child);
+      resolve(code);
+    });
+  });
+  const kill = () => {
+    if (closed) return;
+    child.kill("SIGTERM");
+    setTimeout(() => child.exitCode === null && child.kill("SIGKILL"), 2000).unref();
+  };
+  return {
+    get ready() {
+      return !sent && !closed;
+    },
+    startedAt,
+    kill,
+    async send(input, o = {}) {
+      if (sent || closed) throw new Error("this process was already used, or has stopped");
+      if (o.signal?.aborted) {
+        kill();
+        throw new CancelledError();
+      }
+      sent = true;
+      let timedOut = false;
+      const timer = o.timeoutMs
+        ? setTimeout(() => {
+            timedOut = true;
+            kill();
+          }, o.timeoutMs)
+        : undefined;
+      o.signal?.addEventListener("abort", kill, { once: true });
+      child.stdin?.end(input);
+      try {
+        const code = await exit;
+        if (failed) throw failed;
+        if (o.signal?.aborted) throw new CancelledError();
+        return { code, stdout, stderr, timedOut };
+      } finally {
+        if (timer) clearTimeout(timer);
+        o.signal?.removeEventListener("abort", kill);
+      }
+    },
+  };
+}
+
 export function tail(s: string, lines = 6): string {
   return s.trim().split("\n").slice(-lines).join("\n");
 }
