@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-13
+
 ### Added
 - **Voice mode keeps talking while long work runs (Claude Code plugin).** With `/mac-voice-mcp:talk`, Claude does quick things itself and hands anything longer (test runs, builds, research) to a background agent, then goes straight back to listening, so you can keep talking while the work happens. When the agent finishes, Claude tells you the result by voice. If you go quiet in the meantime, it says "Still on it" once instead of asking again every few seconds.
 - **`VOICE_MCP_PHASE_FILE=1`** writes what a voice turn is doing (speaking, listening, transcribing, waiting) to `voice-mode/phase.json`, for a status display of your own. Off by default.
@@ -138,7 +140,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   - `voice_setup`: checks first, installs only what's missing, and only after you agree.
   - The `setup` and `voice_mode` prompts.
 
-[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.4.0...v0.4.1
