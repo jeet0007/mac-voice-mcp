@@ -100,7 +100,8 @@ export const CONFIG = {
 
   // --- Listening (turn-taking)
   /** End of turn: stop listening after this much silence once the user has spoken. */
-  endSilenceMs: Math.max(300, envNum("VOICE_MCP_END_SILENCE_MS", 1200)),
+  // 1.5 s: on 10 recorded explanations, 1.2 s cut off 3 mid-thought (pauses up to 1.5 s); 1.5 s cut off none.
+  endSilenceMs: Math.max(300, envNum("VOICE_MCP_END_SILENCE_MS", 1500)),
   /** Give up if the user hasn't started talking within this many seconds. */
   startTimeoutSeconds: Math.max(1, envNum("VOICE_MCP_START_TIMEOUT_SECONDS", 15)),
   /** Speech must be this many dB above the room's background noise. Lower = more sensitive. */
