@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-23
+
 ### Added
 - **Voice Buddy (Claude Code), a new optional plugin in the same marketplace:** `/plugin install voice-buddy@mac-voice-mcp`.
   - **An animated buddy above the prompt** shows what the voice is doing in that window: orange while Claude speaks, blue while it listens, purple while it transcribes, grey while it waits for another voice session, green while it listens for "Claude, …". Coloured blocks in the terminal, a smooth animated shape in the desktop app and VS Code. Inspired by [animated-blobs](https://github.com/xom9ikk/animated-blobs).
@@ -159,7 +161,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   - `voice_setup`: checks first, installs only what's missing, and only after you agree.
   - The `setup` and `voice_mode` prompts.
 
-[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.4.2...v0.5.0
