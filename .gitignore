@@ -9,3 +9,5 @@ test-output.log
 trufflehog-findings.json
 # Local Claude Code settings from testing the plugin
 .claude/
+# Written by Claude Code for editors when it loads a mod from a folder
+plugins/*/tsconfig.json
