@@ -18,8 +18,11 @@ You need **Node.js 22 or newer** and a Mac (Apple Silicon recommended). Whicheve
   ```
   /plugin marketplace add jeet0007/mac-voice-mcp
   /plugin install mac-voice-mcp@mac-voice-mcp
+  /plugin install voice-buddy@mac-voice-mcp
   ```
   The plugin adds `/mac-voice-mcp:setup` and `/mac-voice-mcp:talk`, a skill that teaches Claude how to use voice well and fix common problems, and a hook that keeps a voice conversation in voice (see [Voice mode](usage.md#voice-mode)). Each plugin version runs the matching npm release.
+
+  **Voice Buddy** (the last line, optional) adds the animated buddy above the prompt and lets you interrupt by typing (see [Voice Buddy](usage.md#voice-buddy-see-the-voice-type-to-interrupt)). Already have Mac Voice? Run just that line, then `/reload-plugins` or start a new session. In the desktop app's Code tab, where `/plugin` doesn't run: click **+** next to the prompt, then **Plugins**, and add Voice Buddy from the `mac-voice-mcp` marketplace.
 - **The official MCP Registry.** It's listed as [`io.github.jeet0007/mac-voice-mcp`](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.jeet0007/mac-voice-mcp). Apps and directories that read the registry pick it up from there. In VS Code, open the Extensions view (⇧⌘X), search `@mcp mac-voice`, and click **Install**. Smithery, Glama, PulseMCP and mcp.so copy the registry, so it shows up there too.
 
 ## By hand
