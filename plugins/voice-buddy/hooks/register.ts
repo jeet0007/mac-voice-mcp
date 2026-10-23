@@ -24,6 +24,7 @@ const UPDATE_PLAYS_MS = 30_000
 let running = 0 // speak_and_listen calls of this session in progress
 let updateUntil = 0 // a spoken update may be playing until then
 let signalled = false // already told voice-mcp, since the last voice turn started
+let reported = false // already said once that it couldn't
 
 /** voice-mcp's cache folder, resolved the way voice-mcp and its hook resolve it. */
 async function voiceModeDir($: EngineInterface): Promise<string | undefined> {
@@ -49,16 +50,22 @@ async function userTyped($: EngineInterface): Promise<void> {
   if (signalled) return
   const now = await $.clock.now()
   const dir = await voiceModeDir($)
-  if (!dir) return
+  if (!dir) throw new Error('no HOME to find voice-mcp in')
   if (running === 0 && now > updateUntil && !(await listeningHere($, dir))) return
   signalled = true
   await $.fs.write(`${dir}/stop`, JSON.stringify({ at: now }))
 }
 
-/** Never let this get in the way of typing: a failure only means voice-mcp keeps listening. */
+/**
+ * Never let this get in the way of typing: a failure only means voice-mcp keeps going until the
+ * turn ends. Say why, once. (Success needs no message: the voice going quiet is the message.)
+ */
 function noticeTyping($: EngineInterface): void {
-  userTyped($).catch(() => {
+  userTyped($).catch((err: unknown) => {
     signalled = false
+    if (reported) return
+    reported = true
+    $.ui.toast(`voice-buddy couldn't stop the voice: ${err instanceof Error ? err.message : String(err)}`)
   })
 }
 
