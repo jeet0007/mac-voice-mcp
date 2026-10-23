@@ -805,3 +805,80 @@ test("VOICE_MCP_VOICE_STANDBY=0 starts the voice only when there is something to
     await client.close();
   }
 });
+
+// --- Typing stops a voice turn at once (the voice-buddy mod's stop signal) ---------------------
+
+/** What the voice-buddy mod does at the user's first keystroke during a voice turn. */
+const typeNow = (sb, at = Date.now()) => {
+  mkdirSync(voiceModeDir(sb), { recursive: true });
+  writeFileSync(path.join(voiceModeDir(sb), "stop"), JSON.stringify({ at }));
+};
+
+test("typing while voice-mcp listens stops listening at once and tells Claude to wait for the typed message", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  // Nobody answers: without the signal, this would wait the whole 15 s (1.5 s at the stub's 10x) for speech.
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "silent", VOICE_MCP_START_TIMEOUT_SECONDS: "60" }));
+  try {
+    const call = client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Shall I start?" } });
+    assert.ok(await waitFor(() => /^rec -/m.test(sb.readLog())), "listening");
+    const t = Date.now();
+    typeNow(sb);
+    const r = await call;
+    assert.ok(Date.now() - t < 1500, `took ${Date.now() - t} ms`);
+    assert.equal(r.isError, false);
+    assert.match(r.content[0].text, /^\(The user started typing/);
+    assert.match(sb.readLog(), /^rec stopped$/m, "the recorder was stopped");
+  } finally {
+    await client.close();
+  }
+});
+
+test("typing while voice-mcp speaks stops the voice too; a stop from before the turn is ignored", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SAY_MS: "3000" }));
+  try {
+    typeNow(sb, Date.now() - 5000); // an old keystroke, from an earlier turn
+    const call = client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Here is a long answer." } });
+    assert.ok(await waitFor(() => /^speak "Here is a long answer\."/m.test(sb.readLog())), "speaking");
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(/^speak-end/m.test(sb.readLog()), false, "the old stop didn't cut it short");
+    const t = Date.now();
+    typeNow(sb);
+    const r = await call;
+    assert.ok(Date.now() - t < 1500, `took ${Date.now() - t} ms`);
+    assert.match(r.content[0].text, /^\(The user started typing/);
+    await new Promise((r) => setTimeout(r, 300));
+    const log = sb.readLog();
+    assert.equal(/^speak-end/m.test(log), false, "the voice was stopped mid-sentence");
+    assert.equal(/^rec -/m.test(log), false, "and the mic never opened");
+  } finally {
+    await client.close();
+  }
+});
+
+test("typing stops a spoken update playing in the background, and listening while Claude works", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO_LATER: "silent", VOICE_MCP_START_TIMEOUT_SECONDS: "60", STUB_SAY_MS: "3000" }));
+  const recs = () => sb.readLog().match(/^rec -/gm)?.length ?? 0;
+  try {
+    await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Shall I start?" } });
+    markListening(sb);
+    assert.ok(await waitFor(() => recs() >= 2), "listening while Claude works");
+    typeNow(sb);
+    assert.ok(await waitFor(() => (sb.readLog().match(/^rec stopped$/gm)?.length ?? 0) >= 1, 2000), "listening while working stopped");
+
+    await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Give me a few minutes.", listen: false } });
+    await new Promise((r) => setTimeout(r, 200));
+    const t = Date.now();
+    typeNow(sb);
+    // The next turn waits for the update to finish: with the voice stopped, that's at once.
+    await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Okay.", listen: false } });
+    assert.ok(Date.now() - t < 1500, `took ${Date.now() - t} ms`);
+    assert.equal(/^speak-end "Give me a few minutes\."/m.test(sb.readLog()), false, "the update was stopped mid-sentence");
+  } finally {
+    await client.close();
+  }
+});

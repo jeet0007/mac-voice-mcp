@@ -252,3 +252,11 @@ test("when Claude finishes for real, the mic closes; a nudge back into voice kee
   handle({ session_id: "s1", hook_event_name: "Stop" }, { env: off });
   assert.equal(existsSyncW(path.join(off.VOICE_MCP_CACHE_DIR, "voice-mode", "listening.state")), false, "also with nudges off");
 });
+
+test("when the user starts typing during a voice turn, voice mode ends: no nudge back to voice", () => {
+  const { env, run, spoke } = setup();
+  spoke();
+  spoke(reply("(The user started typing instead of answering by voice, so voice-mcp stopped speaking and listening.)"));
+  assert.deepEqual(run("Stop"), { exitCode: 0 });
+  assert.equal(existsSyncW(path.join(env.VOICE_MCP_CACHE_DIR, "voice-mode", "listening.state")), false, "and the mic stays closed");
+});

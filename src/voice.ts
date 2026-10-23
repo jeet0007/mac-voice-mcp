@@ -9,7 +9,7 @@ import { ensureModel } from "./model.js";
 import { CancelledError, resetWhichCache, SetupError, sleep } from "./proc.js";
 import { prepareSpeech } from "./speech-text.js";
 import { findWhisperCli, findWhisperServer, prewarm, STT_MISSING, transcribe } from "./stt.js";
-import { interjectionNote, showPhase, takeInbox, workListener } from "./worklisten.js";
+import { interjectionNote, showPhase, stopRequestedSince, takeInbox, workListener } from "./worklisten.js";
 
 export interface VoiceResult {
   ok: boolean;
@@ -47,6 +47,40 @@ const laterNotes: string[] = [];
 /** How long a spoken update waits for an early failure (no voice installed…) before returning. */
 const EARLY_FAILURE_MS = 300;
 
+/** What Claude is told when the user starts typing during a voice turn (the voice-buddy mod's signal). */
+export const USER_TYPED =
+  "(The user started typing instead of answering by voice, so voice-mcp stopped speaking and listening. " +
+  "Stop here and wait for their typed message; don't call speak_and_listen again unless they ask to talk.)";
+/** How often a voice turn checks whether the user started typing. */
+const STOP_POLL_MS = 100;
+
+/** Abort when the user starts typing (a stop signal at or after `since`), or when `signal` aborts. */
+function watchForTyping(since: number, signal?: AbortSignal) {
+  const ctl = new AbortController();
+  let typed = false;
+  const onAbort = () => ctl.abort();
+  if (signal?.aborted) ctl.abort();
+  signal?.addEventListener("abort", onAbort, { once: true });
+  const check = () => {
+    if (!typed && stopRequestedSince(since)) {
+      typed = true;
+      ctl.abort();
+    }
+  };
+  check();
+  const timer = setInterval(check, STOP_POLL_MS);
+  return {
+    signal: ctl.signal,
+    get typed() {
+      return typed;
+    },
+    dispose() {
+      clearInterval(timer);
+      signal?.removeEventListener("abort", onAbort);
+    },
+  };
+}
+
 /** Wait for a spoken update to finish (another turn needs the speaker). */
 export async function finishSpeaking(): Promise<void> {
   await speaking;
@@ -56,6 +90,7 @@ export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {
   // One speaker: a spoken update from the last call finishes first.
   await finishSpeaking();
   const { signal } = opts;
+  const startedAt = Date.now();
   const onPhase = (phase: Phase) => {
     showPhase(phase);
     opts.onPhase?.(phase);
@@ -81,11 +116,17 @@ export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {
     if (err instanceof MicBusyError) return { ok: false, text: err.message, notes: waiting ? [waiting] : [] };
     throw err;
   }
-  if (!listen) return speakInBackground(textToSpeak, { release, onPhase, waiting, keepListening: wasListening });
+  if (!listen) return speakInBackground(textToSpeak, { release, onPhase, waiting, keepListening: wasListening, startedAt });
   let result: VoiceResult;
+  // The user starts typing: stop talking and listening now, not after the 15-second wait for speech.
+  const typing = watchForTyping(startedAt, signal);
   try {
-    result = await turn(textToSpeak, seconds, model!, signal, onPhase);
+    result = await turn(textToSpeak, seconds, model!, typing.signal, onPhase);
+  } catch (err) {
+    if (!(typing.typed && err instanceof CancelledError)) throw err;
+    result = { ok: true, text: USER_TYPED, notes: [] };
   } finally {
+    typing.dispose();
     showPhase(null);
     release();
   }
@@ -104,15 +145,17 @@ export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {
  */
 async function speakInBackground(
   textToSpeak: string,
-  o: { release: () => void; onPhase: (phase: Phase) => void; waiting: string | null; keepListening: boolean },
+  o: { release: () => void; onPhase: (phase: Phase) => void; waiting: string | null; keepListening: boolean; startedAt: number },
 ): Promise<VoiceResult> {
   const speech = prepareSpeech(textToSpeak, { maxWords: CONFIG.maxSpeakWords, maxChars: MAX_SPEAK_CHARS });
   const t0 = Date.now();
   let returned = false;
   let failure: unknown = null;
   o.onPhase("speaking");
-  // Not tied to this request's signal: the request is over long before the sentence is.
-  const done = speak(speech.text)
+  // Not tied to this request's signal (the request is over long before the sentence is), but the
+  // user starting to type stops it.
+  const typing = watchForTyping(o.startedAt);
+  const done = speak(speech.text, typing.signal)
     .then(
       (spoken) => {
         const fallback = fallbackNote(spoken);
@@ -131,11 +174,12 @@ async function speakInBackground(
       },
     )
     .finally(() => {
+      typing.dispose();
       showPhase(null);
       o.release();
       // Listening while Claude works resumes once the speaker is quiet, so it doesn't hear itself.
       // It counts from when this call returned, which is when the plugin's hook marked the session.
-      if (o.keepListening && !failure) workListener.start(t0);
+      if (o.keepListening && !failure && !typing.typed) workListener.start(t0);
     });
   const tracked: Promise<void> = done.finally(() => {
     if (speaking === tracked) speaking = null;

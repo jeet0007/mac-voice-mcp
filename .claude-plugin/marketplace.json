@@ -10,6 +10,12 @@
       "displayName": "Mac Voice",
       "source": "./",
       "description": "Talk with Claude out loud on your Mac (on-device speech recognition with whisper.cpp)."
+    },
+    {
+      "name": "voice-buddy",
+      "displayName": "Voice Buddy",
+      "source": "./plugins/voice-buddy",
+      "description": "Companion to Mac Voice for Claude Code: start typing and Claude stops talking and listening at once."
     }
   ]
 }

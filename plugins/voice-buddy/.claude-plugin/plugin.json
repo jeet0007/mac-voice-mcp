@@ -1,0 +1,9 @@
+{
+  "name": "voice-buddy",
+  "version": "0.1.0",
+  "description": "Companion to Mac Voice for Claude Code: start typing and Claude stops talking and listening at once, instead of after the wait for speech.",
+  "author": { "name": "Jeet" },
+  "homepage": "https://github.com/jeet0007/mac-voice-mcp#readme",
+  "repository": "https://github.com/jeet0007/mac-voice-mcp",
+  "license": "MIT"
+}
