@@ -108,7 +108,7 @@ Run `npx -y mac-voice-mcp@latest doctor` first. It tests setup, the voice and tr
 | Symptom | Fix |
 |---|---|
 | "microphone returned pure digital silence" | Allow the mic for the app (Claude, Cursor or your terminal) in **System Settings → Privacy & Security → Microphone**, then restart it. |
-| It cuts me off while I'm thinking | Set `VOICE_MCP_END_SILENCE_MS=1800`. |
+| It cuts me off while I'm thinking | Set `VOICE_MCP_END_SILENCE_MS=2000`. |
 | The voice sounds robotic | Download a Premium macOS voice or install Kokoro. See [Voices](docs/voices.md). |
 | It asks for approval every turn | See [Allow voice turns without prompts](#allow-voice-turns-without-prompts). |
 

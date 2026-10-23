@@ -27,7 +27,7 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 
 | Variable | Default | |
 |---|---|---|
-| `VOICE_MCP_END_SILENCE_MS` | `1200` | How long a pause ends your turn. Use `1800` if it cuts you off while you think, `800` for snappier replies. |
+| `VOICE_MCP_END_SILENCE_MS` | `1500` | How long a pause ends your turn. Use `2000` if it still cuts you off while you think, `1000` for snappier replies. |
 | `VOICE_MCP_START_TIMEOUT_SECONDS` | `15` | How long to wait for you to start talking. |
 | `VOICE_MCP_SPEECH_MARGIN_DB` | `12` | How much louder than room noise counts as speech. Raise it in noisy rooms. |
 | `VOICE_MCP_MIN_SPEECH_DB` | `-48` | The quietest level that ever counts as speech (dBFS). |
