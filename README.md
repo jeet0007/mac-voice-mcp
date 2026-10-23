@@ -42,12 +42,12 @@ Claude ◀──────────────── "Yes, and tag Priya."
 ## Features
 
 - 🔒 **On-device.** whisper.cpp transcribes on your Mac. Recordings are deleted after each turn.
-- 💬 **Natural turn-taking.** A soft chime, then it waits for you to start, and hands back about a second after you stop. No push-to-talk.
+- 💬 **Natural turn-taking.** A soft chime, then it waits for you to start, and hands back about 1.5 seconds after you stop. No push-to-talk.
 - ⚡ **Fast replies.** A warm whisper.cpp server keeps the model loaded, so transcribing takes a fraction of a second on Apple Silicon.
 - 🗣️ **A natural voice, if you want one.** Uses your best macOS voice, or the optional [Kokoro](docs/voices.md#the-kokoro-voice-optional) neural voice.
 - ✋ **Asks before installing anything.** Setup checks what you already have and reuses it.
 - 🙋 **Talk while Claude works.** Say "Claude, use the other branch" mid-task and it takes it into account at its next step (Claude Code plugin).
-- ⌨️ **Type to interrupt.** With the optional Voice Buddy plugin, your first keystroke stops Claude talking and listening at once (Claude Code).
+- 🫧 **Voice Buddy (optional, Claude Code).** An animated buddy above the prompt shows when Claude is speaking or listening, and your first keystroke interrupts it.
 - 🪟 **One mic, many windows.** Claude Code, Claude Desktop and Cursor take turns instead of talking over each other.
 - 📏 **Measured, not guessed.** `doctor` checks the whole pipeline on your Mac and scores it PASS, WARN or FAIL.
 
@@ -62,7 +62,7 @@ You need a Mac (Apple Silicon recommended) and **Node.js 22 or newer**.
   /plugin marketplace add jeet0007/mac-voice-mcp
   /plugin install mac-voice-mcp@mac-voice-mcp
   ```
-  Optional: `/plugin install voice-buddy@mac-voice-mcp` lets you [interrupt by typing](docs/usage.md#interrupt-by-typing-voice-buddy).
+  Optional, for the animated buddy and type-to-interrupt: `/plugin install voice-buddy@mac-voice-mcp` ([what it does](docs/usage.md#voice-buddy-see-the-voice-type-to-interrupt)).
 - **Cursor or VS Code:** <a href="https://cursor.com/en/install-mcp?name=voice-mcp&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIm1hYy12b2ljZS1tY3BAbGF0ZXN0Il19"><img alt="Add to Cursor" src="https://cursor.com/deeplink/mcp-install-dark.svg" height="24"></a> <a href="https://insiders.vscode.dev/redirect/mcp/install?name=voice-mcp&config=%7B%22type%22%3A%22stdio%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22mac-voice-mcp%40latest%22%5D%7D"><img alt="Install in VS Code" src="https://img.shields.io/badge/VS_Code-Install_Server-0098FF?style=for-the-badge&logo=visualstudiocode&logoColor=white" height="24"></a>
 
 - **Claude Desktop and other apps:** add `npx -y mac-voice-mcp@latest` as a stdio MCP server. See [Install](docs/install.md#by-hand) for each app.
@@ -101,7 +101,7 @@ The server has two tools and two prompts:
 | `setup` prompt | A guided setup: it checks, asks you, installs, then runs a spoken test. |
 | `voice_mode` prompt | A hands-free session where Claude checks in by voice at natural points. |
 
-Claude is told how to write for the ear: short sentences, no markdown, file names instead of paths. If code or links still get through, the server rewrites them before speaking. In Claude Code, the plugin also keeps a voice conversation in voice until you type. More in [Using it](docs/usage.md).
+Claude is told to write for the ear: short sentences, no markdown, file names instead of paths. Anything that slips through is rewritten before it's spoken. In Claude Code, the plugin keeps a voice conversation in voice until you type. More in [Using it](docs/usage.md).
 
 ## Troubleshooting
 
@@ -120,7 +120,7 @@ More in [Troubleshooting](docs/troubleshooting.md).
 
 - [Install](docs/install.md): every app, the MCP Registry, installing from a clone, upgrading.
 - [Voices](docs/voices.md): macOS Premium voices and the optional Kokoro voice.
-- [Using it](docs/usage.md): voice mode, several sessions, getting Claude to sound natural.
+- [Using it](docs/usage.md): voice mode, talking while Claude works, Voice Buddy, several sessions.
 - [Configuration](docs/configuration.md): every setting, and the speech models.
 - [Troubleshooting](docs/troubleshooting.md): common problems and known limitations.
 - [Privacy and security](docs/privacy-security.md): what stays on your Mac, and how the project is secured.
