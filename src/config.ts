@@ -2,12 +2,11 @@
  * Configuration (all optional environment variables) and logging.
  * stdout belongs to the MCP protocol, so every log line goes to stderr.
  */
-import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const require = createRequire(import.meta.url);
-export const PKG = require("../package.json") as { name: string; version: string };
+export const PKG = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { name: string; version: string };
 
 export const IS_MAC = process.platform === "darwin";
 export const IS_WIN = process.platform === "win32";
