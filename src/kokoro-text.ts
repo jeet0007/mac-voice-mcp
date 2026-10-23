@@ -37,39 +37,31 @@ export function fixPronunciation(text: string): string {
 /** Longest chunk handed to Kokoro at once, in characters (well under its ~510-token limit). */
 export const MAX_CHUNK_CHARS = 250;
 /**
- * The first chunk is kept short: nothing plays until it's generated, so its length is the delay
- * before the first sound. Later chunks are generated while earlier ones play.
+ * Nothing plays until the first chunk is generated, so it's short: the first sentence or clause of
+ * at least FIRST_MIN_CHARS (so a lone "Okay." isn't all there is to play) and at most
+ * FIRST_CLAUSE_CHARS; failing that, the first FIRST_CHUNK_CHARS, cut between words.
  */
-export const FIRST_CHUNK_CHARS = 100;
-/** Short sentences are merged up to this size: very short inputs sound worse. */
-const MERGE_UP_TO = 120;
-/** The first chunk only absorbs the next sentence while it's this short (e.g. "Done."). */
-const FIRST_MERGE_UP_TO = 30;
+export const FIRST_CHUNK_CHARS = 40;
+const FIRST_MIN_CHARS = 15;
+const FIRST_CLAUSE_CHARS = 60;
+/**
+ * Each later chunk is generated while the one before it plays, so it may be at most this many times
+ * longer. On an M-series Mac Kokoro makes speech about 5x faster than it plays (13.5 ms per character
+ * for 67 ms of audio, plus ~250 ms per chunk); 3x leaves room for a busy machine. Before, a short
+ * opener followed by a long sentence ("Sure." then 150 characters) left 1.2 s of silence after it.
+ */
+const GROWTH = 3;
 
-/** Cut one sentence into pieces of at most `limit` characters: at clause boundaries, else between words. */
-function splitLong(sentence: string, limit: number): string[] {
-  const pieces: string[] = [];
-  let current = "";
-  for (const clause of sentence.split(/(?<=[,;:—–])\s+/)) {
-    for (const word of clause.split(" ")) {
-      if (current && current.length + 1 + word.length > limit) {
-        pieces.push(current);
-        current = "";
-      }
-      current = current ? `${current} ${word}` : word;
-    }
-    if (current.length >= limit * 0.6) {
-      pieces.push(current);
-      current = "";
-    }
-  }
-  if (current) pieces.push(current);
-  return pieces;
+interface Word {
+  w: string;
+  /** The break after this word: 2 a sentence end, 1 a clause, 0 just a space. */
+  rank: number;
 }
 
 /**
- * Split text into speakable chunks: sentences, merged when short, split at commas/words when long.
- * The first chunk is short, so speech starts quickly.
+ * Split text into speakable chunks that grow: the first is short, so speech starts quickly, and each
+ * later one is ready before the previous one has finished playing. Cuts at sentence ends, else at
+ * clauses, else between words; nothing is lost or reordered.
  */
 export function chunkForSpeech(text: string, maxChars = MAX_CHUNK_CHARS): string[] {
   const clean = text
@@ -79,23 +71,41 @@ export function chunkForSpeech(text: string, maxChars = MAX_CHUNK_CHARS): string
     .replace(/\s+/g, " ")
     .trim();
   if (!/[\p{L}\p{N}]/u.test(clean)) return []; // nothing to say (blank, or only punctuation)
-  const sentences = clean.match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)/g)?.map((s) => s.trim()).filter(Boolean) ?? [clean];
+  const words: Word[] = clean
+    .split(" ")
+    .map((w) => ({ w, rank: /[.!?]["')\]]*$/.test(w) ? 2 : /[,;:—–]$/.test(w) ? 1 : 0 }));
 
-  const pieces: string[] = [];
-  for (const sentence of sentences) {
-    const limit = pieces.length === 0 ? Math.min(FIRST_CHUNK_CHARS, maxChars) : maxChars;
-    if (sentence.length <= limit) pieces.push(sentence);
-    else pieces.push(...splitLong(sentence, limit));
-  }
-
-  // Merge neighbours while short, so tiny fragments don't get their own odd-sounding chunk.
   const chunks: string[] = [];
-  for (const p of pieces) {
-    const last = chunks[chunks.length - 1];
-    const mergeUpTo = chunks.length === 1 ? FIRST_MERGE_UP_TO : MERGE_UP_TO;
-    const limit = chunks.length === 1 ? FIRST_CHUNK_CHARS : maxChars;
-    if (last !== undefined && last.length < mergeUpTo && last.length + 1 + p.length <= limit) chunks[chunks.length - 1] = `${last} ${p}`;
-    else chunks.push(p);
+  let i = 0;
+  while (i < words.length) {
+    const first = chunks.length === 0;
+    const limit = first ? FIRST_CLAUSE_CHARS : Math.min(maxChars, Math.max(FIRST_CHUNK_CHARS, chunks[chunks.length - 1]!.length * GROWTH));
+    let len = 0;
+    let end = i; // the words up to here fit
+    let best = -1;
+    let bestRank = -1;
+    for (let j = i; j < words.length; j++) {
+      const next = len === 0 ? words[j]!.w.length : len + 1 + words[j]!.w.length;
+      if (len > 0 && next > limit) break;
+      len = next;
+      end = j + 1;
+      const r = words[j]!.rank;
+      // The first chunk takes the first break past its minimum; later ones the last, best break.
+      if (first ? r > 0 && len >= FIRST_MIN_CHARS && best < 0 : r > 0 && r >= bestRank) {
+        best = j + 1;
+        bestRank = r;
+      }
+    }
+    let cut: number;
+    if (end >= words.length) cut = words.length; // the rest fits
+    else if (best > i) cut = best;
+    else if (first) {
+      // No clause in reach: the first FIRST_CHUNK_CHARS, between words.
+      cut = i;
+      for (let n = 0; cut < end && (n === 0 || n + 1 + words[cut]!.w.length <= FIRST_CHUNK_CHARS); cut++) n += (n ? 1 : 0) + words[cut]!.w.length;
+    } else cut = end; // only spaces to cut at: use the room
+    chunks.push(words.slice(i, cut).map((x) => x.w).join(" "));
+    i = cut;
   }
   return chunks;
 }
