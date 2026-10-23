@@ -40,6 +40,20 @@ test("long sentences are split at clauses, then words, and no chunk is too long 
   assert.deepEqual(chunkForSpeech(word), [word]);
 });
 
+test("chunks grow, so each is ready before the one before it finishes playing", () => {
+  // "Sure." alone used to be followed by a 150-character chunk: 1.2 s of silence on Jeet's Mac.
+  const chunks = chunkForSpeech(
+    "Okay. This is what I found: the test fails because the mock server starts after the first request, so the request times out before anything answers, and the retry never runs.",
+  );
+  assert.equal(chunks[0], "Okay. This is what I found:", "the first clause, not a lone 'Okay.'");
+  for (let k = 1; k < chunks.length; k++) {
+    assert.ok(chunks[k].length <= Math.max(FIRST_CHUNK_CHARS, chunks[k - 1].length * 3), `chunk ${k} (${chunks[k].length}) after ${chunks[k - 1].length}`);
+  }
+  // A long first sentence with no clause in reach starts with its first few words.
+  const first = chunkForSpeech("Sure. The build broke because the lock file is out of date with the package file, so npm refuses.")[0];
+  assert.ok(first.length <= FIRST_CHUNK_CHARS, first);
+});
+
 test("prepareForKokoro fixes pronunciation and chunks", () => {
   assert.deepEqual(prepareForKokoro("Saved config.json.\nDone?"), ["Saved config dot jay-son. Done?"]);
 });
