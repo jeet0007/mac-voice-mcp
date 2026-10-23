@@ -47,6 +47,7 @@ Claude ◀──────────────── "Yes, and tag Priya."
 - 🗣️ **A natural voice, if you want one.** Uses your best macOS voice, or the optional [Kokoro](docs/voices.md#the-kokoro-voice-optional) neural voice.
 - ✋ **Asks before installing anything.** Setup checks what you already have and reuses it.
 - 🙋 **Talk while Claude works.** Say "Claude, use the other branch" mid-task and it takes it into account at its next step (Claude Code plugin).
+- ⌨️ **Type to interrupt.** With the optional Voice Buddy plugin, your first keystroke stops Claude talking and listening at once (Claude Code).
 - 🪟 **One mic, many windows.** Claude Code, Claude Desktop and Cursor take turns instead of talking over each other.
 - 📏 **Measured, not guessed.** `doctor` checks the whole pipeline on your Mac and scores it PASS, WARN or FAIL.
 
@@ -61,6 +62,7 @@ You need a Mac (Apple Silicon recommended) and **Node.js 22 or newer**.
   /plugin marketplace add jeet0007/mac-voice-mcp
   /plugin install mac-voice-mcp@mac-voice-mcp
   ```
+  Optional: `/plugin install voice-buddy@mac-voice-mcp` lets you [interrupt by typing](docs/usage.md#interrupt-by-typing-voice-buddy).
 - **Cursor or VS Code:** <a href="https://cursor.com/en/install-mcp?name=voice-mcp&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIm1hYy12b2ljZS1tY3BAbGF0ZXN0Il19"><img alt="Add to Cursor" src="https://cursor.com/deeplink/mcp-install-dark.svg" height="24"></a> <a href="https://insiders.vscode.dev/redirect/mcp/install?name=voice-mcp&config=%7B%22type%22%3A%22stdio%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22mac-voice-mcp%40latest%22%5D%7D"><img alt="Install in VS Code" src="https://img.shields.io/badge/VS_Code-Install_Server-0098FF?style=for-the-badge&logo=visualstudiocode&logoColor=white" height="24"></a>
 
 - **Claude Desktop and other apps:** add `npx -y mac-voice-mcp@latest` as a stdio MCP server. See [Install](docs/install.md#by-hand) for each app.

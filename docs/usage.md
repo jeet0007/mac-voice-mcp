@@ -17,6 +17,21 @@ Once you answer out loud, you're in a voice conversation. Claude replies by voic
 
 In Claude Code, the plugin enforces this with a hook. If Claude tries to answer in text mid-conversation, the hook sends it back once to answer by voice. If it stops again, the hook lets it. To turn the hook off, add `"VOICE_MCP_STAY_IN_VOICE": "0"` to the `env` block in `~/.claude/settings.json`. Other apps rely on the instructions alone.
 
+## Interrupt by typing (Voice Buddy)
+
+Without it, what you type during a voice turn waits until the turn is over: up to 15 seconds while voice-mcp waits for you to speak. With the optional **Voice Buddy** plugin, your first keystroke stops Claude talking and listening at once (within about a tenth of a second), and Claude waits for your typed message instead of asking again by voice.
+
+```
+/plugin install voice-buddy@mac-voice-mcp
+```
+
+- **It works during** a voice turn, a spoken update that's still playing ("Give me a few minutes"), and listening while Claude works ("Claude, …").
+- **Only your own window counts.** Typing in another Claude window leaves this one alone.
+- **Typing ends voice mode,** as it always has. Run `/mac-voice-mcp:talk` to pick up again.
+- **It's a Claude Code mod,** an early-access kind of plugin. If a Claude Code update ever breaks it, voice keeps working, and **Esc** still interrupts a voice turn.
+
+Without Voice Buddy, press **Esc** to interrupt, then type.
+
 ## Talk to Claude while it works
 
 In Claude Code with the plugin, after you answer out loud the mic stays open while Claude works. Start with Claude's name and say what you want:

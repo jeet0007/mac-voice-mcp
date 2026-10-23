@@ -29,6 +29,22 @@ import { transcribe } from "./stt.js";
 export const voiceModeDir = () => path.join(CONFIG.cacheDir, "voice-mode");
 export const listeningFile = () => path.join(voiceModeDir(), "listening.state");
 export const inboxDir = () => path.join(voiceModeDir(), "inbox");
+/**
+ * The user started typing (written by the voice-buddy mod at the first keystroke, as {"at": ms}):
+ * the voice turn running now stops speaking and listening at once, and so does listening while
+ * Claude works.
+ */
+export const stopFile = () => path.join(voiceModeDir(), "stop");
+
+/** Was a stop asked for at or after `since` (ms)? */
+export function stopRequestedSince(since: number): boolean {
+  try {
+    const at = (JSON.parse(readFileSync(stopFile(), "utf8")) as { at?: unknown }).at;
+    return typeof at === "number" && at >= since;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Where the voice turn is (speaking, listening…), for a status display of your own, such as a band
@@ -184,7 +200,7 @@ class WorkListener {
     const tmp = await mkdtemp(path.join(os.tmpdir(), "voice-mcp-work-"));
     try {
       while (!signal.aborted) {
-        if (!ours(readListening())) return; // the user typed, voice mode ended, or another session took over
+        if (!ours(readListening()) || stopRequestedSince(turnEnd)) return; // the user typed, voice mode ended, or another session took over
         if (Date.now() - turnEnd > idleMs) return;
         if (micBusyElsewhere()) {
           await sleep(1000);
@@ -197,7 +213,7 @@ class WorkListener {
         const onStop = () => listening.abort();
         signal.addEventListener("abort", onStop, { once: true });
         const watch = setInterval(() => {
-          if (!ours(readListening()) || micBusyElsewhere() || Date.now() - turnEnd > idleMs) listening.abort();
+          if (!ours(readListening()) || stopRequestedSince(turnEnd) || micBusyElsewhere() || Date.now() - turnEnd > idleMs) listening.abort();
         }, WATCH_MS);
         let heard: Awaited<ReturnType<typeof listenForTurn>>;
         try {
