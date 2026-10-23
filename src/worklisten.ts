@@ -47,9 +47,10 @@ export function stopRequestedSince(since: number): boolean {
 }
 
 /**
- * Where the voice turn is (speaking, listening…), for a status display of your own, such as a band
- * above Claude Code's prompt. Only with VOICE_MCP_PHASE_FILE=1. null when no turn is running. One file
- * for every session on this Mac. Best effort: a display that can't read it just shows nothing.
+ * Where the voice turn is (speaking, listening…), for Voice Buddy's band above Claude Code's prompt,
+ * or a display of your own. VOICE_MCP_PHASE_FILE=0 turns it off. null when no turn is running. One
+ * file for the whole Mac (there's one voice turn at a time). Best effort: a display that can't read
+ * it just shows nothing.
  */
 export function showPhase(phase: string | null): void {
   if (!CONFIG.phaseFile) return;

@@ -17,13 +17,29 @@ Once you answer out loud, you're in a voice conversation. Claude replies by voic
 
 In Claude Code, the plugin enforces this with a hook. If Claude tries to answer in text mid-conversation, the hook sends it back once to answer by voice. If it stops again, the hook lets it. To turn the hook off, add `"VOICE_MCP_STAY_IN_VOICE": "0"` to the `env` block in `~/.claude/settings.json`. Other apps rely on the instructions alone.
 
-## Interrupt by typing (Voice Buddy)
+## Voice Buddy: see the voice, type to interrupt
 
-Without it, what you type during a voice turn waits until the turn is over: up to 15 seconds while voice-mcp waits for you to speak. With the optional **Voice Buddy** plugin, your first keystroke stops Claude talking and listening at once (within about a tenth of a second), and Claude waits for your typed message instead of asking again by voice.
+**Voice Buddy** is an optional companion plugin for Claude Code:
 
 ```
 /plugin install voice-buddy@mac-voice-mcp
 ```
+
+**The buddy.** While voice is on in a window, a small animated blob sits above the prompt and shows what the voice turn is doing:
+
+| Colour | Means |
+|---|---|
+| Orange, lively | Claude is speaking |
+| Blue, breathing | Listening for your answer |
+| Purple, quick | Got it, transcribing |
+| Grey | Waiting for another voice session to finish |
+| Green, calm | Listening for "Claude, …" while Claude works |
+
+It's drawn with coloured blocks in the terminal and as a smooth animated shape in the desktop app and VS Code. Each window shows only its own voice.
+
+### Interrupt by typing
+
+Without Voice Buddy, what you type during a voice turn waits until the turn is over: up to 15 seconds while voice-mcp waits for you to speak. With it, your first keystroke stops Claude talking and listening at once (within about a tenth of a second), and Claude waits for your typed message instead of asking again by voice.
 
 - **It works during** a voice turn, a spoken update that's still playing ("Give me a few minutes"), and listening while Claude works ("Claude, …").
 - **Only your own window counts.** Typing in another Claude window leaves this one alone.

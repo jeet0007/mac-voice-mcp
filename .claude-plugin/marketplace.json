@@ -15,7 +15,7 @@
       "name": "voice-buddy",
       "displayName": "Voice Buddy",
       "source": "./plugins/voice-buddy",
-      "description": "Companion to Mac Voice for Claude Code: start typing and Claude stops talking and listening at once."
+      "description": "Companion to Mac Voice for Claude Code: an animated buddy that shows when Claude is speaking or listening, and typing that interrupts the voice at once."
     }
   ]
 }
