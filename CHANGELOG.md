@@ -6,8 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [Unreleased]
 
 ### Added
-- **Type to interrupt (Voice Buddy, Claude Code).** A new optional plugin in the same marketplace, `/plugin install voice-buddy@mac-voice-mcp`. Your first keystroke during a voice turn stops Claude talking and listening at once, instead of your message waiting up to 15 seconds for the turn to end, and Claude waits for what you type. It also stops a spoken update that's still playing and listening while Claude works, for your own window only. It's a Claude Code mod (early-access API); if it ever can't stop the voice it says so once, and without it Esc still interrupts.
+- **Voice Buddy (Claude Code), a new optional plugin in the same marketplace:** `/plugin install voice-buddy@mac-voice-mcp`.
+  - **An animated buddy above the prompt** shows what the voice is doing in that window: orange while Claude speaks, blue while it listens, purple while it transcribes, grey while it waits for another voice session, green while it listens for "Claude, …". Coloured blocks in the terminal, a smooth animated shape in the desktop app and VS Code. Inspired by [animated-blobs](https://github.com/xom9ikk/animated-blobs).
+  - **Type to interrupt.** Your first keystroke during a voice turn stops Claude talking and listening at once, instead of your message waiting up to 15 seconds for the turn to end, and Claude waits for what you type. It also stops a spoken update that's still playing and listening while Claude works, for your own window only. It's a Claude Code mod (early-access API); if it ever can't stop the voice it says so once, and without it Esc still interrupts.
 - **voice-mcp stops a voice turn when asked to:** a `voice-mode/stop` file (`{"at": <ms>}`) written during a turn stops the speech and the mic within about a tenth of a second, and Claude is told the user started typing. This is what Voice Buddy writes.
+
+### Changed
+- **`voice-mode/phase.json` is now written by default** (it was opt-in with `VOICE_MCP_PHASE_FILE=1`), for Voice Buddy. `VOICE_MCP_PHASE_FILE=0` turns it off.
 
 ## [0.6.1] - 2026-10-23
 
