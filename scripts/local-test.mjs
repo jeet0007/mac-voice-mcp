@@ -7,6 +7,11 @@
  *   npm run test:local                        this checkout, packed and installed as npm would
  *   npm run test:local -- --compare 0.7.0     the same checks on a published version, side by side
  *   npm run test:local -- --turns 5           more voice turns for steadier numbers (default 3)
+ *   npm run test:local -- --config desktop    use the Claude desktop app's voice-mcp settings
+ *
+ * It uses the VOICE_MCP_* settings from Claude Code (~/.claude/settings.json "env") by default,
+ * so it tests the voice, model and timing you actually use. --config none uses the defaults.
+ * VOICE_MCP_* variables set in the shell override either.
  *
  * The voice turns run by themselves. While the server listens, this script says a known
  * sentence through the speakers with `say`, the mic hears it, and the transcript is scored.
@@ -16,7 +21,7 @@
  * Results are printed as a table and saved to local-test-results/ (gitignored).
  */
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,6 +39,34 @@ const flag = (name, fallback) => {
 };
 const COMPARE = flag("--compare");
 const TURNS = Math.max(1, Number(flag("--turns", "3")));
+const CONFIG_FROM = flag("--config", "code");
+
+/** The VOICE_MCP_* settings Claude starts voice-mcp with, so the test matches real use. */
+function claudeSettings(which) {
+  const home = os.homedir();
+  const readJson = (file) => {
+    try {
+      return JSON.parse(readFileSync(file, "utf8"));
+    } catch {
+      return null;
+    }
+  };
+  const voiceOnly = (env) => Object.fromEntries(Object.entries(env ?? {}).filter(([k]) => k.startsWith("VOICE_MCP_")));
+  if (which === "code") return { source: "~/.claude/settings.json", env: voiceOnly(readJson(path.join(home, ".claude", "settings.json"))?.env) };
+  if (which === "desktop") {
+    const config = readJson(path.join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json"));
+    const server = Object.values(config?.mcpServers ?? {}).find((s) => /voice/i.test(JSON.stringify([s.command, s.args])));
+    return { source: "the Claude desktop app's config", env: voiceOnly(server?.env) };
+  }
+  if (which === "none") return { source: "defaults", env: {} };
+  console.error(`--config must be code, desktop or none (got ${which})`);
+  process.exit(2);
+}
+const SETTINGS = claudeSettings(CONFIG_FROM);
+const SERVER_ENV = { ...process.env, ...SETTINGS.env, ...voiceEnvFromShell() };
+function voiceEnvFromShell() {
+  return Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith("VOICE_MCP_")));
+}
 
 const SENTENCE = "The build passed and all tests are green. Should I open the pull request now?";
 const LONG_REPLY =
@@ -145,6 +178,8 @@ async function childNames(pid) {
     .map(([, ...comm]) => path.basename(comm.join(" ")));
 }
 
+class Skip extends Error {}
+
 // --- The checks, against one server ------------------------------------------------------------
 
 async function testTarget(label, entry, extra = {}) {
@@ -155,7 +190,7 @@ async function testTarget(label, entry, extra = {}) {
     console.log(`  ${ok ? "PASS" : "FAIL"}  ${name}: ${detail}`);
   };
 
-  const transport = new StdioClientTransport({ command: process.execPath, args: [entry], env: { ...process.env }, stderr: "pipe" });
+  const transport = new StdioClientTransport({ command: process.execPath, args: [entry], env: SERVER_ENV, stderr: "pipe" });
   let stderr = "";
   transport.stderr?.on("data", (d) => (stderr += d));
   const client = new Client({ name: "local-test", version: "0" });
@@ -188,7 +223,9 @@ async function testTarget(label, entry, extra = {}) {
     await res.idle();
 
     const setup = await call({ name: "voice_setup", arguments: {} });
-    check("Setup", !setup.isError, setup.isError ? text(setup).slice(0, 200) : "ok");
+    const ready = !setup.isError && /— READY/.test(text(setup));
+    check("Setup", ready, ready ? "ready" : text(setup).slice(0, 600));
+    if (!ready) throw new Skip("voice-mcp isn't set up with these settings, so the audio checks were skipped. Check --config, or run `npm run setup`.");
 
     // Speak only: returns at once and speaks in the background.
     t = performance.now();
@@ -287,12 +324,17 @@ async function testTarget(label, entry, extra = {}) {
       r.afterCancelMs = performance.now() - t;
       check(
         "Cancel",
-        rejected && left.length === 0 && !next.isError,
-        left.length ? `recorder still running: ${left.join(", ")}` : `mic closed; next call answered in ${Math.round(r.afterCancelMs)} ms`,
+        abortedAt !== null && rejected && left.length === 0 && !next.isError,
+        abortedAt === null
+          ? "the turn ended before it started listening"
+          : left.length
+            ? `recorder still running: ${left.join(", ")}`
+            : `mic closed; next call answered in ${Math.round(r.afterCancelMs)} ms`,
       );
     }
   } catch (err) {
-    check("Run", false, `${err instanceof Error ? err.message : err}\n${stderr.slice(-2000)}`);
+    if (err instanceof Skip) console.log(`  ${err.message}`);
+    else check("Run", false, `${err instanceof Error ? err.message : err}\n${stderr.slice(-2000)}`);
   } finally {
     await res.stop();
     Object.assign(r, res.out);
@@ -320,7 +362,7 @@ function table(results) {
     ["Typing stops the voice in", (r) => ms(r.typingStopMs)],
     ["Server memory, idle", (r) => mb(r.rssIdleMB)],
     ["Server memory, peak", (r) => mb(r.rssPeakMB)],
-    ["Child processes, peak", (r) => mb(r.childrenPeakMB)],
+    ["Voice, mic and whisper processes, peak", (r) => mb(r.childrenPeakMB)],
     ["Server CPU time, whole run", (r) => (Number.isFinite(r.cpuSeconds) ? `${r.cpuSeconds.toFixed(2)} s` : "–")],
     ["Checks passed", (r) => `${Object.values(r.checks).filter((c) => c.ok).length}/${Object.keys(r.checks).length}`],
   ];
@@ -333,6 +375,10 @@ function table(results) {
 
 async function main() {
   if (process.platform !== "darwin") console.warn("Not macOS: this test is meant for a Mac's real speakers and mic.");
+  const shown = Object.entries(SETTINGS.env).map(([k, v]) => `${k}=${v}`);
+  console.log(`Settings from ${SETTINGS.source}: ${shown.length ? shown.join(", ") : "none (defaults)"}`);
+  const fromShell = Object.keys(voiceEnvFromShell());
+  if (fromShell.length) console.log(`Overridden from the shell: ${fromShell.join(", ")}`);
   const work = mkdtempSync(path.join(os.tmpdir(), "voice-mcp-local-test-"));
   try {
     console.log("Packing this checkout…");
@@ -355,7 +401,7 @@ async function main() {
     const outDir = path.join(ROOT, "local-test-results");
     mkdirSync(outDir, { recursive: true });
     const file = path.join(outDir, `${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
-    writeFileSync(file, JSON.stringify({ date: new Date().toISOString(), machine: { os: `${os.type()} ${os.release()}`, arch: os.arch(), node: process.version }, results }, null, 2));
+    writeFileSync(file, JSON.stringify({ date: new Date().toISOString(), settings: { source: SETTINGS.source, env: { ...SETTINGS.env, ...voiceEnvFromShell() } }, machine: { os: `${os.type()} ${os.release()}`, arch: os.arch(), node: process.version }, results }, null, 2));
     console.log(`Saved ${path.relative(ROOT, file)}`);
     process.exitCode = results.every((r) => Object.values(r.checks).every((c) => c.ok)) ? 0 : 1;
   } finally {
