@@ -11,3 +11,4 @@ trufflehog-findings.json
 .claude/
 # Written by Claude Code for editors when it loads a mod from a folder
 plugins/*/tsconfig.json
+local-test-results/
