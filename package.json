@@ -30,13 +30,14 @@
     "prepublishOnly": "npm test",
     "audit": "npm audit --omit=dev --audit-level=high && npm audit signatures",
     "preversion": "npm test",
-    "version": "node scripts/sync-version.mjs && git add server.json .claude-plugin/plugin.json"
+    "version": "node scripts/sync-version.mjs && git add server.json .claude-plugin/plugin.json",
+    "test:local": "node scripts/local-test.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.1",
     "zod": "^4.1.0"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@types/node": "^22.0.0",
     "typescript": "^7.0.2"
   },

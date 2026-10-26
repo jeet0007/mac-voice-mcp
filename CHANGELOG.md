@@ -5,6 +5,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+- **One runtime dependency instead of 95.** voice-mcp now speaks MCP over stdio with its own small server (`src/mcp.ts`) instead of `@modelcontextprotocol/sdk`, whose runtime also installs an HTTP server stack (express, hono, cors and others) that a stdio server never runs. The only runtime dependency left is zod, which has none of its own. The tools, prompts and instructions clients see are unchanged, and the tests still drive the server with the official SDK client. This clears most of the supply-chain alerts that scanners such as Socket raised about packages voice-mcp never used.
+
 ## [0.7.0] - 2026-10-23
 
 ### Added

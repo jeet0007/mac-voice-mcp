@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync, lstatSync, readlinkSync, symlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -880,5 +881,84 @@ test("typing stops a spoken update playing in the background, and listening whil
     assert.equal(/^speak-end "Give me a few minutes\."/m.test(sb.readLog()), false, "the update was stopped mid-sentence");
   } finally {
     await client.close();
+  }
+});
+
+// --- The stdio protocol itself (src/mcp.ts) ------------------------------------------------------
+
+test("progress notifications reach the client while a turn runs", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env());
+  try {
+    const messages = [];
+    const r = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Ready?" } }, undefined, {
+      onprogress: (p) => messages.push(p.message),
+    });
+    assert.equal(r.content[0].text, "Stub transcript from the server.");
+    assert.ok(messages.includes("speaking") && messages.includes("listening"), `got ${JSON.stringify(messages)}`);
+  } finally {
+    await client.close();
+  }
+});
+
+test("cancelling a call stops the recorder, and the next call works", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "silent", VOICE_MCP_START_TIMEOUT_SECONDS: "60" }));
+  try {
+    const controller = new AbortController();
+    const call = client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Shall I start?" } }, undefined, { signal: controller.signal });
+    assert.ok(await waitFor(() => /^rec -/m.test(sb.readLog())), "listening");
+    controller.abort();
+    await assert.rejects(call);
+    assert.ok(await waitFor(() => /^rec stopped$/m.test(sb.readLog())), "the recorder was stopped");
+    const r = await client.callTool({ name: "voice_setup", arguments: {} });
+    assert.equal(!!r.isError, false, "the voice lock was released");
+  } finally {
+    await client.close();
+  }
+});
+
+test("raw JSON-RPC: version negotiation, errors, notifications, bad arguments", async () => {
+  const sb = sandbox();
+  const child = spawn(process.execPath, [ENTRY], { env: sb.env(), stdio: ["pipe", "pipe", "ignore"] });
+  const replies = [];
+  let buffer = "";
+  child.stdout.on("data", (d) => {
+    buffer += d;
+    let i;
+    while ((i = buffer.indexOf("\n")) >= 0) {
+      replies.push(JSON.parse(buffer.slice(0, i)));
+      buffer = buffer.slice(i + 1);
+    }
+  });
+  const send = (m) => child.stdin.write((typeof m === "string" ? m : JSON.stringify({ jsonrpc: "2.0", ...m })) + "\r\n");
+  const reply = async (id) => {
+    assert.ok(await waitFor(() => replies.some((r) => r.id === id)), `reply ${id}`);
+    return replies.find((r) => r.id === id);
+  };
+  try {
+    const init = (id, protocolVersion) => send({ id, method: "initialize", params: { protocolVersion, capabilities: {}, clientInfo: { name: "raw", version: "0" } } });
+    init(1, "2024-11-05");
+    assert.equal((await reply(1)).result.protocolVersion, "2024-11-05", "a known version is kept");
+    init(2, "1999-01-01");
+    assert.equal((await reply(2)).result.protocolVersion, "2025-11-25", "an unknown one gets the newest");
+    send({ method: "notifications/initialized" });
+    send("{not json");
+    assert.equal((await reply(null)).error.code, -32700);
+    send({ id: "s", method: "resources/list" });
+    assert.equal((await reply("s")).error.code, -32601);
+    send({ id: 3, method: "tools/call", params: { name: "speak_and_listen", arguments: { text_to_speak: "" } } });
+    const bad = await reply(3);
+    assert.equal(bad.result.isError, true);
+    assert.match(bad.result.content[0].text, /text_to_speak/);
+    send({ id: 4, method: "prompts/get", params: { name: "voice_mode", arguments: { task: "  fix the build " } } });
+    assert.match((await reply(4)).result.messages[0].content.text, /fix the build/);
+    send({ id: 5, method: "ping" });
+    assert.deepEqual((await reply(5)).result, {});
+    assert.equal(replies.length, 7, "notifications get no reply");
+  } finally {
+    child.kill();
   }
 });

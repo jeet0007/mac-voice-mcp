@@ -9,9 +9,23 @@ npm run audit          # known-vulnerability and signature checks on dependencie
 npm run setup          # check what's installed; offers to install what's missing
 npm run test:voice     # one real speak → listen → transcribe turn
 npm run doctor         # objective self-check on this Mac: PASS / WARN / FAIL per stage, JSON report
+npm run test:local     # the full server on this Mac's speakers and mic, with speed and memory numbers
 npm run dev:plugin     # try this checkout in Claude Code as the "mac-voice-mcp-dev" plugin
 npm run inspect        # MCP Inspector
 ```
+
+## Testing on your Mac before a merge
+
+CI has no speakers or mic, so it runs everything against stub binaries. Before merging anything that touches audio, timing or the protocol, run the real thing:
+
+```bash
+npm run test:local                       # this checkout
+npm run test:local -- --compare 0.7.0    # side by side with a published version
+```
+
+It packs this checkout and installs it the way npm users get it, starts the server, and talks to it over MCP as Claude does. The voice turns run by themselves: while the server listens, the script says a known sentence through the speakers and scores the transcript. It also checks speak-only replies, typing to interrupt, and cancelling. It prints a table of install time and size, startup, reply time after you stop talking, transcription time, word errors, and memory and CPU use, and saves it to `local-test-results/`.
+
+Turn the volume up, keep the room quiet, and stop voice mode in other sessions while it runs. It uses the settings in your shell, not your Claude config, so set the ones you use, for example `VOICE_MCP_VOICE="Voice 4" npm run test:local`.
 
 | Module | Responsibility |
 |---|---|
@@ -25,6 +39,7 @@ npm run inspect        # MCP Inspector
 | `stt.ts` | The warm `whisper-server` with orphan guard, and the `whisper-cli` fallback |
 | `setup.ts` | Requirement checks and consent-based background installs |
 | `lock.ts` | One voice turn at a time across every session on the Mac |
+| `mcp.ts` | A small MCP server over stdio: JSON-RPC, tools, prompts, progress, cancellation |
 | `voice.ts`, `server.ts`, `index.ts` | The round trip, the MCP tools and prompts, and the CLI |
 | `skills/`, `hooks/` | The Claude Code plugin's `/mac-voice-mcp:talk` and `:setup` commands, the `voice-help` skill, and the stay-in-voice hook |
 

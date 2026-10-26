@@ -1,12 +1,9 @@
 /** MCP wiring: two tools (speak_and_listen, voice_setup) and two prompts (setup, voice_mode). */
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import type { CallToolResult, ServerNotification, ServerRequest } from "@modelcontextprotocol/sdk/types.js";
-import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { z } from "zod";
 import { CONFIG, DEFAULT_LISTEN_SECONDS, log, MAX_LISTEN_SECONDS, PKG } from "./config.js";
 import { stopKokoro } from "./kokoro.js";
 import { workListener } from "./worklisten.js";
+import { type CallToolResult, StdioMcpServer } from "./mcp.js";
 import { locateModel } from "./model.js";
 import { activeChildren, SetupError } from "./proc.js";
 import { runSetupFlow } from "./setup.js";
@@ -14,28 +11,8 @@ import { stopWhisperServer } from "./stt.js";
 import { SERVER_INSTRUCTIONS, SETUP_PROMPT, SETUP_TOOL_DESCRIPTION, SPEAK_TOOL_DESCRIPTION, VOICE_MODE_PROMPT } from "./texts.js";
 import { exclusive, finishSpeaking, speakAndListen } from "./voice.js";
 
-type Extra = RequestHandlerExtra<ServerRequest, ServerNotification>;
-
-/**
- * MCP progress notifications, when the client asked for them (it sent a progressToken).
- * They show what's happening and keep clients that reset their timeout on progress happy.
- */
-function progressReporter(extra: Extra): ((message: string) => void) | undefined {
-  const token = extra._meta?.progressToken;
-  if (token === undefined) return undefined;
-  let progress = 0;
-  return (message) => {
-    extra
-      .sendNotification({ method: "notifications/progress", params: { progressToken: token, progress: ++progress, message } })
-      .catch(() => {});
-  };
-}
-
-export function createServer(): McpServer {
-  const server = new McpServer(
-    { name: "voice-mcp", title: "Voice bridge", version: PKG.version },
-    { instructions: SERVER_INSTRUCTIONS },
-  );
+export function createServer(): StdioMcpServer {
+  const server = new StdioMcpServer({ name: "voice-mcp", title: "Voice bridge", version: PKG.version }, SERVER_INSTRUCTIONS);
 
   server.registerTool(
     "speak_and_listen",
@@ -62,8 +39,7 @@ export function createServer(): McpServer {
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
-    async ({ text_to_speak, listen_seconds, listen }, extra): Promise<CallToolResult> => {
-      const progress = progressReporter(extra);
+    async ({ text_to_speak, listen_seconds, listen }, { signal, progress }): Promise<CallToolResult> => {
       const phaseMessage = (phase: string) =>
         phase === "waiting" ? "waiting for another voice session on this Mac to finish" : phase;
       try {
@@ -71,7 +47,7 @@ export function createServer(): McpServer {
           speakAndListen(text_to_speak, {
             listenSeconds: listen_seconds ?? DEFAULT_LISTEN_SECONDS,
             listen,
-            signal: extra.signal,
+            signal,
             onPhase: (phase) => progress?.(phaseMessage(phase)),
           }),
         );
@@ -108,11 +84,11 @@ export function createServer(): McpServer {
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ install, kokoro }, extra): Promise<CallToolResult> => {
+    async ({ install, kokoro }, { progress }): Promise<CallToolResult> => {
       try {
         const outcome = await exclusive(async () => {
           await finishSpeaking(); // its checks use the speaker too
-          return runSetupFlow({ install: install === true, kokoro: kokoro === true, onProgress: progressReporter(extra) });
+          return runSetupFlow({ install: install === true, kokoro: kokoro === true, onProgress: progress });
         });
         return { content: [{ type: "text", text: outcome.report }] };
       } catch (err) {
@@ -150,7 +126,6 @@ export function createServer(): McpServer {
 
 export async function startServer(): Promise<void> {
   const server = createServer();
-  const transport = new StdioServerTransport();
 
   let shuttingDown = false;
   const shutdown = async (code = 0) => {
@@ -160,18 +135,14 @@ export async function startServer(): Promise<void> {
     stopWhisperServer();
     stopKokoro();
     for (const child of activeChildren) child.kill("SIGTERM");
-    try {
-      await server.close();
-    } catch {
-      /* ignore */
-    }
+    server.close();
     process.exit(code);
   };
   process.stdin.on("close", () => void shutdown(0));
   process.on("SIGINT", () => void shutdown(0));
   process.on("SIGTERM", () => void shutdown(0));
 
-  await server.connect(transport);
+  server.connect();
   log(`${PKG.name} v${PKG.version} ready on stdio (model: ${CONFIG.modelPath ?? CONFIG.modelName}, language: ${CONFIG.language})`);
   if (process.stdin.isTTY) {
     log("This is an MCP server and expects an MCP client on stdin. Try `setup` or `test` instead, or see --help.");
