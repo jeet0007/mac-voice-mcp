@@ -240,6 +240,24 @@ test("setup reuses a whisper.cpp built from source that isn't on PATH", async ()
   }
 });
 
+test("settings with shell characters reach whisper-server literally (its orphan-guard shell never parses them)", async () => {
+  const sb = sandbox();
+  const pwned = path.join(sb.dir, "pwned");
+  const prompt = `$(touch ${pwned}) \`touch ${pwned}\`; touch ${pwned} && echo "double" 'single' | cat > ${pwned} *`;
+  const model = fakeModel(path.join(sb.dir, `models $(touch ${pwned}) ;`));
+  const { client } = await connect(sb.env({ VOICE_MCP_WHISPER_PROMPT: prompt, VOICE_MCP_WHISPER_MODEL_PATH: model }));
+  try {
+    const r = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "hi" } });
+    assert.equal(r.content[0].text, "Stub transcript from the server.");
+    const start = sb.readLog().split("\n").find((l) => l.startsWith("whisper-server start "));
+    assert.ok(start?.includes(`-m ${model} `), start);
+    assert.ok(start?.endsWith(`--prompt ${prompt}`), start);
+    assert.equal(existsSync(pwned), false, "nothing in the settings ran as a command");
+  } finally {
+    await client.close();
+  }
+});
+
 // --- One voice turn at a time across sessions, and speaking without listening ----------------
 
 /** The kinds of audio events in the stub log, in order: speak / rec / transcribe. */
