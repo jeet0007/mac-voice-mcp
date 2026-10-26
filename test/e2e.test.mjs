@@ -228,8 +228,8 @@ test("setup reuses a whisper.cpp built from source that isn't on PATH", async ()
   const { client } = await connect(sb.env());
   try {
     const check = text(await client.callTool({ name: "voice_setup", arguments: {} }));
-    assert.match(check, /READY/);
-    assert.match(check, new RegExp(`Speech-to-text: whisper.cpp — whisper-cli \\(${buildDir.replace(/[/.]/g, "\\$&")}`));
+    assert.match(check, /— READY/);
+    assert.ok(check.includes(`Speech-to-text: whisper.cpp — whisper-cli (${buildDir}`), check);
     assert.match(check, /fast mode via whisper-server/);
     assert.match(check, /Speech model: .*reused/);
     const r = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "hi" } });

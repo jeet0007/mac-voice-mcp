@@ -8,7 +8,8 @@ const write = (p, data) => writeFileSync(p, `${JSON.stringify(data, null, 2)}\n`
 const { name, version } = read("package.json");
 
 // Refuse to tag a release the changelog doesn't describe (npm version then stops before committing).
-const heading = new RegExp(`^## \\[${version.replace(/\./g, "\\.")}\\] - \\d{4}-\\d{2}-\\d{2}$`, "m");
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const heading = new RegExp(`^## \\[${escapeRegExp(version)}\\] - \\d{4}-\\d{2}-\\d{2}$`, "m");
 if (!heading.test(readFileSync("CHANGELOG.md", "utf8"))) {
   console.error(`CHANGELOG.md has no "## [${version}] - YYYY-MM-DD" section. Add one (move the Unreleased notes into it), then run npm version again.`);
   process.exit(1);
