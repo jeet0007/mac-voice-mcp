@@ -58,7 +58,7 @@ writeFileSync(path.join(dir, ".claude-plugin", "plugin.json"), JSON.stringify(pl
 
 // Skills: same content, pointed at the dev plugin's command and tool names.
 const rename = (text) =>
-  text.replaceAll(`mcp__plugin_${NAME}_`, `mcp__plugin_${DEV}_`).replace(new RegExp(`/${NAME}:`, "g"), `/${DEV}:`);
+  text.replaceAll(`mcp__plugin_${NAME}_`, `mcp__plugin_${DEV}_`).replaceAll(`/${NAME}:`, `/${DEV}:`);
 for (const skill of readdirSync(path.join(ROOT, "skills"))) {
   const src = path.join(ROOT, "skills", skill, "SKILL.md");
   if (!existsSync(src)) continue;
