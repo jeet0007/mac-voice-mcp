@@ -6,7 +6,7 @@
  *   3. the same model elsewhere on this machine → symlinked into the cache
  *   4. a one-time download — only via voice_setup(install=true) / `setup`
  */
-import { closeSync, createWriteStream, existsSync, lstatSync, openSync, readSync, statSync } from "node:fs";
+import { closeSync, createWriteStream, existsSync, fstatSync, lstatSync, openSync, readSync } from "node:fs";
 import { mkdir, rename, rm, symlink, unlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -36,8 +36,9 @@ export function modelFile(): string {
 export function isGgmlModel(file: string): boolean {
   let fd: number | undefined;
   try {
-    if (statSync(file).size < 1_000_000) return false;
+    // Open first and check the open file, so the size and the header come from the same file.
     fd = openSync(file, "r");
+    if (fstatSync(fd).size < 1_000_000) return false;
     const head = Buffer.alloc(4);
     return readSync(fd, head, 0, 4, 0) === 4 && head.readUInt32LE(0) === 0x67676d6c;
   } catch {

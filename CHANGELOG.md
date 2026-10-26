@@ -5,8 +5,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-26
+
 ### Changed
 - **One runtime dependency instead of 95.** voice-mcp now speaks MCP over stdio with its own small server (`src/mcp.ts`) instead of `@modelcontextprotocol/sdk`, whose runtime also installs an HTTP server stack (express, hono, cors and others) that a stdio server never runs. The only runtime dependency left is zod, which has none of its own. The tools, prompts and instructions clients see are unchanged, and the tests still drive the server with the official SDK client. This clears most of the supply-chain alerts that scanners such as Socket raised about packages voice-mcp never used.
+- **Installs and starts faster, with less memory.** Measured on a Mac against 0.7.0: install 5.8 s → 0.9 s (cold npm cache), startup 82 → 51 ms, and the server's idle memory 76 → 63 MB. Speaking, listening and transcribing take the same time as before.
 
 ## [0.7.0] - 2026-10-23
 
@@ -164,7 +167,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   - `voice_setup`: checks first, installs only what's missing, and only after you agree.
   - The `setup` and `voice_mode` prompts.
 
-[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.5.0...v0.6.0
