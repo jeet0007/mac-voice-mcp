@@ -6,6 +6,7 @@ import { SPEECH_RULES } from "../dist/texts.js";
 
 const json = (p) => JSON.parse(readFileSync(new URL(`../${p}`, import.meta.url), "utf8"));
 const text = (p) => readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const pkg = json("package.json");
 
 test("package.json, package-lock.json, server.json and the plugin all carry the same version", () => {
@@ -23,7 +24,7 @@ test("package.json, package-lock.json, server.json and the plugin all carry the 
 });
 
 test("the changelog has an entry for this version", () => {
-  assert.match(text("CHANGELOG.md"), new RegExp(`^## \\[${pkg.version.replace(/\./g, "\\.")}\\] - \\d{4}-\\d{2}-\\d{2}$`, "m"));
+  assert.match(text("CHANGELOG.md"), new RegExp(`^## \\[${escapeRegExp(pkg.version)}\\] - \\d{4}-\\d{2}-\\d{2}$`, "m"));
 });
 
 test("plugin skills use the plugin's real tool names and the current speaking rules", () => {
