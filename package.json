@@ -26,7 +26,7 @@
     "doctor": "node dist/index.js doctor",
     "dev:plugin": "node scripts/dev-plugin.mjs",
     "inspect": "npx -y @modelcontextprotocol/inspector node dist/index.js",
-    "prepare": "npm run build",
+    "prepare": "npm run build && node scripts/install-hooks.mjs",
     "prepublishOnly": "npm test",
     "audit": "npm audit --omit=dev --audit-level=high && npm audit signatures",
     "preversion": "npm test",

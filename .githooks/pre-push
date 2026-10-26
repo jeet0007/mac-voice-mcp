@@ -1,0 +1,5 @@
+#!/bin/sh
+# Runs the full test suite before every push, including the timing limits CI skips
+# (shared CI runners are too uneven for them). Skip once with: git push --no-verify
+echo "pre-push: running npm test (skip with --no-verify)…"
+exec npm test --silent
