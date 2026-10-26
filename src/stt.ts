@@ -139,6 +139,10 @@ class WarmWhisperServer {
     // Orphan guard: the server runs under a tiny shell that waits on our stdin pipe
     // and kills the server when that pipe closes — i.e. whenever this process exits,
     // even if it's killed hard. `detached` gives it a process group we can stop as one.
+    // The script is a fixed string. `bin` and `args` (which include settings such as the
+    // model path and VOICE_MCP_WHISPER_PROMPT) reach it as positional parameters, and "$@"
+    // passes each one on as a single word: the shell never parses or expands them. A test
+    // in e2e.test.mjs checks this with shell characters in those settings.
     const child = IS_WIN
       ? spawn(bin, args, { stdio: ["ignore", "ignore", "pipe"], windowsHide: true })
       : spawn(
