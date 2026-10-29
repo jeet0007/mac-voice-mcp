@@ -9,6 +9,9 @@
  *   Stop                            voice mode ON → send Claude back to reply with speak_and_listen,
  *                                   at most once per spoken answer, so it can never loop.
  *   SessionEnd                      clean up.
+ *   PostToolUse(call, start)        a call began in this session: note it in call.json, so what the
+ *                                   user says on it reaches this session (and not another window's).
+ *                                   SessionEnd removes call.json, which ends the call. Typing doesn't.
  *
  * Talking while Claude works: after a spoken answer the hook marks this session in listening.state,
  * and the MCP server keeps listening for "Claude, …" (src/worklisten.ts), leaving what it hears in
@@ -43,6 +46,7 @@ export const NOT_HEARD_PREFIXES = [
   "voice-mcp is not set up yet:",
   "voice-mcp error:",
   "Another voice session on this Mac (another Claude window",
+  "(You're on a call with the user",
 ];
 
 export function stateDir(env = process.env) {
@@ -90,6 +94,7 @@ export function heardUser(toolInput, toolResponse) {
 }
 
 const isSpeakTool = (name) => /speak_and_listen$/.test(name ?? "");
+const isCallTool = (name) => /voice-mcp__call$/.test(name ?? "");
 
 // --- Talking while Claude works (shared with src/worklisten.ts) ---------------------------------
 
@@ -109,9 +114,26 @@ function clearListening(dir, session) {
   if (readListening(dir)?.session === session) rmSync(listeningFile(dir), { force: true });
 }
 
-/** Take what the user said while this session worked (oldest first), if this is the session listening. */
+// --- A call (shared with src/call.ts) ------------------------------------------------------------
+
+const callFile = (dir) => path.join(dir, "call.json");
+
+function readCall(dir) {
+  try {
+    return JSON.parse(readFileSync(callFile(dir), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/** Is this session on a call? */
+export function onCall(dir, session) {
+  return readCall(dir)?.session === session;
+}
+
+/** Take what the user said while this session worked (oldest first), if this is the session listening or on a call. */
 export function takeInterjections(dir, session, now = Date.now()) {
-  if (readListening(dir)?.session !== session) return [];
+  if (readListening(dir)?.session !== session && !onCall(dir, session)) return [];
   let names;
   try {
     names = readdirSync(inboxDir(dir)).filter((n) => n.endsWith(".json")).sort();
@@ -132,12 +154,12 @@ export function takeInterjections(dir, session, now = Date.now()) {
   return out;
 }
 
-export function interjectionReason(texts) {
+export function interjectionReason(texts, { call = false } = {}) {
   const said = texts.map((t) => (t ? `"${t}"` : "(only your name: they want to talk)")).join(", then ");
   return (
     `While you were working, the user said by voice: ${said}. ` +
     "Take it into account now: adjust what you're doing if it changes the plan. " +
-    "Briefly acknowledge it by voice at your next natural pause (speak_and_listen), not in a separate turn right away unless they asked a question."
+    `Briefly acknowledge it by voice at your next natural pause (${call ? "say" : "speak_and_listen"}), not in a separate turn right away unless they asked a question.`
   );
 }
 
@@ -153,12 +175,22 @@ export function handle(input, { env = process.env, now = Date.now() } = {}) {
 
   switch (input.hook_event_name) {
     case "PostToolUse": {
+      if (isCallTool(input.tool_name)) {
+        const started = readCall(dir);
+        if (input.tool_input?.action === "start" && input.tool_response?.isError !== true && started) {
+          // The call replaces voice mode: no nudges back to speak_and_listen while it's on.
+          clearState(dir, session);
+          clearListening(dir, session);
+          writeFileSync(callFile(dir), JSON.stringify({ ...started, session }));
+        }
+        return { exitCode: 0 };
+      }
       if (!isSpeakTool(input.tool_name)) {
         // Any other tool: hand over what the user said meanwhile, if anything. Not to a subagent
         // (its tool calls fire this hook too, with agent_id set): the words are for the main Claude.
         if (input.agent_id) return { exitCode: 0 };
         const said = takeInterjections(dir, session, now);
-        return said.length ? { exitCode: 2, stderr: interjectionReason(said) } : { exitCode: 0 };
+        return said.length ? { exitCode: 2, stderr: interjectionReason(said, { call: onCall(dir, session) }) } : { exitCode: 0 };
       }
       if (heardUser(input.tool_input, input.tool_response)) {
         if (stayInVoice) writeState(dir, session, { on: true, at: now, nudged: false });
@@ -182,14 +214,18 @@ export function handle(input, { env = process.env, now = Date.now() } = {}) {
       }
       return { exitCode: 0 };
     case "UserPromptSubmit":
+      clearState(dir, session);
+      clearListening(dir, session);
+      return { exitCode: 0 };
     case "SessionEnd":
       clearState(dir, session);
       clearListening(dir, session);
+      if (onCall(dir, session)) rmSync(callFile(dir), { force: true }); // the server notices and ends the call
       return { exitCode: 0 };
     case "Stop": {
       // Something said while Claude worked comes first, even after the one nudge per answer.
       const said = takeInterjections(dir, session, now);
-      if (said.length) return { exitCode: 2, stderr: interjectionReason(said) };
+      if (said.length) return { exitCode: 2, stderr: interjectionReason(said, { call: onCall(dir, session) }) };
       const s = stayInVoice ? readState(dir, session) : null;
       // Let it stop unless voice mode is on, fresh, and we haven't already sent it back since the last answer.
       if (!stayInVoice || input.stop_hook_active || !s?.on || now - s.at >= EXPIRE_MS || s.nudged) {

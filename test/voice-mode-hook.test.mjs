@@ -11,6 +11,7 @@ import { handle, heardUser, NOT_HEARD_PREFIXES, STOP_REASON } from "../hooks/voi
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HOOK = path.join(ROOT, "hooks", "voice-mode.mjs");
 const TOOL = "mcp__plugin_mac-voice-mcp_voice-mcp__speak_and_listen";
+const CALL_TOOL = "mcp__plugin_mac-voice-mcp_voice-mcp__call";
 const reply = (text) => ({ content: [{ type: "text", text }] });
 const heard = reply("Yes, go ahead and deploy it.");
 
@@ -83,7 +84,7 @@ test("the user saying a trigger phrase doesn't end voice mode — only how the r
 });
 
 test("the hook's prefixes match what the server actually says", () => {
-  const src = ["src/voice.ts", "src/lock.ts", "src/server.ts"].map((f) => readFileSync(path.join(ROOT, f), "utf8")).join("\n");
+  const src = ["src/voice.ts", "src/lock.ts", "src/server.ts", "src/texts.ts"].map((f) => readFileSync(path.join(ROOT, f), "utf8")).join("\n");
   for (const p of NOT_HEARD_PREFIXES) assert.ok(src.includes(p), `server source no longer contains: ${p}`);
 });
 
@@ -132,12 +133,14 @@ test("hooks.json: speak_and_listen updates voice mode under any server scope; ev
       }
     }
   }
-  // speak_and_listen (under any server scope) updates voice mode; every other tool only runs the cheap inbox check.
+  // speak_and_listen and call (under any server scope) update voice mode; every other tool only runs the cheap inbox check.
   for (const g of [cfg.hooks.PostToolUse[0], cfg.hooks.PostToolUseFailure[0]]) {
     const matcher = new RegExp(`^(?:${g.matcher})$`);
     assert.match(TOOL, matcher);
+    assert.match(CALL_TOOL, matcher);
     assert.match("mcp__voice-mcp__speak_and_listen", matcher);
     assert.doesNotMatch("mcp__plugin_mac-voice-mcp_voice-mcp__voice_setup", matcher);
+    assert.doesNotMatch("mcp__plugin_mac-voice-mcp_voice-mcp__say", matcher);
   }
   assert.equal(cfg.hooks.PostToolUse[1].matcher, undefined, "the inbox check runs after every tool");
 });
@@ -259,4 +262,49 @@ test("when the user starts typing during a voice turn, voice mode ends: no nudge
   spoke(reply("(The user started typing instead of answering by voice, so voice-mcp stopped speaking and listening.)"));
   assert.deepEqual(run("Stop"), { exitCode: 0 });
   assert.equal(existsSyncW(path.join(env.VOICE_MCP_CACHE_DIR, "voice-mode", "listening.state")), false, "and the mic stays closed");
+});
+
+// --- A call ----------------------------------------------------------------------------------
+
+/** What the server writes at call start (src/call.ts). */
+function startCall(env, session, run) {
+  const file = path.join(env.VOICE_MCP_CACHE_DIR, "voice-mode", "call.json");
+  mkdirSyncW(path.dirname(file), { recursive: true });
+  writeFileSyncW(file, JSON.stringify({ pid: 123, startedAt: 1, duplex: "half" }));
+  run("PostToolUse", { tool_name: CALL_TOOL, tool_input: { action: "start" }, tool_response: reply("The call is on: …") });
+  return file;
+}
+
+test("call start marks the call as this session's; what the user says on it is handed over mid-turn, to this session only", () => {
+  const { env, run, spoke } = setup();
+  spoke(); // voice mode was on: the call replaces it
+  const file = startCall(env, "s1", run);
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { pid: 123, startedAt: 1, duplex: "half", session: "s1" });
+  assert.deepEqual(run("Stop"), { exitCode: 0 }, "no nudge back to speak_and_listen during a call");
+  leaveInInbox(env, "use the other branch");
+  const other = handle({ session_id: "s2", hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: {}, tool_response: "ok" }, { env });
+  assert.deepEqual(other, { exitCode: 0 }, "another session doesn't get it");
+  const r = run("PostToolUse", { tool_name: "Bash", tool_input: {}, tool_response: "ok" });
+  assert.equal(r.exitCode, 2);
+  assert.match(r.stderr, /the user said by voice: "use the other branch".*next natural pause \(say\)/);
+  assert.deepEqual(run("PostToolUse", { tool_name: "Bash", tool_input: {}, tool_response: "ok" }), { exitCode: 0 }, "delivered once");
+});
+
+test("typing keeps the call; the session ending removes call.json (the server then hangs up)", () => {
+  const { env, run } = setup();
+  const file = startCall(env, "s1", run);
+  run("UserPromptSubmit", { prompt: "also check the tests" });
+  assert.equal(JSON.parse(readFileSync(file, "utf8")).session, "s1");
+  handle({ session_id: "s2", hook_event_name: "SessionEnd" }, { env });
+  assert.ok(existsSyncW(file), "another session ending leaves the call alone");
+  run("SessionEnd");
+  assert.equal(existsSyncW(file), false);
+});
+
+test("a failed call start, or call end, leaves call.json alone", () => {
+  const { env, run } = setup();
+  run("PostToolUse", { tool_name: CALL_TOOL, tool_input: { action: "start" }, tool_response: { content: [{ type: "text", text: "voice-mcp is not set up yet: …" }], isError: true } });
+  assert.equal(existsSyncW(path.join(env.VOICE_MCP_CACHE_DIR, "voice-mode", "call.json")), false);
+  run("PostToolUse", { tool_name: CALL_TOOL, tool_input: { action: "end" }, tool_response: reply("(The call ended.") });
+  assert.equal(existsSyncW(path.join(env.VOICE_MCP_CACHE_DIR, "voice-mode", "call.json")), false);
 });
