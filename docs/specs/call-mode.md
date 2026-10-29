@@ -100,8 +100,8 @@ Optional later: Silero VAD when onnxruntime is already in the Kokoro cache.
 | When | Route |
 |---|---|
 | Claude working (mid-turn) | Existing PostToolUse `additionalContext` from the inbox (also `say` results) |
-| Claude idle (Claude Code) | **Decided by Phase 0**: (A) cross-session messaging socket, self-message; (B) Voice Buddy mod `$.prompt.submit({ text, asUser: true })`; (C) Stop hook that waits for the next utterance and blocks with it (re-armed each turn; mind the 8-consecutive-block cap and 600 s default timeout) |
-| Claude idle (Desktop, Cursor, or if A–C fail) | Claude keeps calling `listen` (call rules say: always end a turn with `listen`) |
+| Claude idle (Claude Code with Voice Buddy) | **Voice Buddy's mod** submits the utterance with `$.prompt.submit({ text, asUser: true })` (Phase 0 route B: 20/20, turn starts in 0.14 s) |
+| Claude idle (no Voice Buddy, Desktop, Cursor) | Claude keeps calling `listen` (call rules say: always end a turn with `listen`) |
 
 Channels are the purpose-built route but need `--dangerously-load-development-channels` during the research
 preview, so they're an opt-in extra, not the default.
@@ -116,11 +116,23 @@ your OK on screen" so the call doesn't silently stall.
 
 New mood "on a call" (with duration) for the calling window; speaking/listening colours as today.
 
+## Phase 0 results (2026-10-29, Claude Code 2.1.312, Jeet's Mac)
+
+Spikes in `scripts/spikes/` (throwaway; delete in Phase 1). 20 scripted utterances into an idle session each.
+
+| Route | Result |
+|---|---|
+| A: `$.session.send` to its own session id | **Refused:** "no live session on this machine has id …" (self-messages aren't allowed) |
+| B: mod `$.prompt.submit({ text, asUser: true })` | **20/20 delivered; end of speech → turn start median 0.14 s, p90 0.18 s, max 0.20 s**; reply ~2.5 s (model time) |
+| C: Stop hook waits, then `decision: block` | Delivers, but each utterance renders as "Stop hook error: …", and after 9 consecutive blocks Claude Code overrides and ends the turn (raisable with `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`). Not used |
+
+**Decision:** idle delivery goes through Voice Buddy's mod (route B); `listen` is the fallback. Mods are early
+access, so call mode must work (degraded) without them. onnxruntime-node 1.21.0 is already in the Kokoro
+cache, so Silero VAD needs no new download for Kokoro users.
+
 ## Phases
 
-0. **Spikes on Jeet's Mac (decide delivery):** A, B, C each deliver 20 scripted utterances into an idle
-   Claude Code 2.1.310 session. Measure: delivered/20, end of speech → Claude starts (s), any UI glitches.
-   Pick the best; keep `listen` as fallback. Also: is onnxruntime-node present in the Kokoro cache?
+0. ~~Spikes: decide idle delivery.~~ Done: route B (above).
 1. **Call engine + tools + skill:** lifecycle, mic engine, queue, hang-up phrases, idle timeout, `call`/`say`/
    `listen`, chosen delivery route, half duplex, mic lock for the call, `/mac-voice-mcp:call` and `:hangup`.
 2. **Headphones + barge-in:** duplex auto-detect, pause/resume, filler filter.
@@ -145,8 +157,8 @@ New mood "on a call" (with duration) for the calling window; speaking/listening 
 
 ## Risks
 
-- Phase 0 routes are early-access or undocumented (mods API, socket payload); keep the `listen` fallback.
-- Stop-hook route: 8-block cap and timeouts; UI behaviour while a hook waits is undocumented.
+- Idle delivery depends on the mods API (early access): if it changes, calls fall back to `listen`.
+  Voice Buddy must handle `$.prompt.submit` failing (toast once, fall back).
 - `system_profiler` is slow (~1 s); fine once per call, not for polling.
 - Kokoro pause/resume via process signals needs care with SoX buffers.
 - Cowork bridge: tool calls over 60 s fail; `listen` waits 40 s at most.
