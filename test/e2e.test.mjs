@@ -77,14 +77,14 @@ const assertQuick = (since, limitMs = 1500) => {
   assert.ok(Date.now() - since < limitMs, `took ${Date.now() - since} ms`);
 };
 
-test("lists two tools, two prompts, and compact server instructions", async () => {
+test("lists the tools, the prompts, and compact server instructions", async () => {
   const sb = sandbox();
   const { client } = await connect(sb.env());
   try {
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-    assert.deepEqual(tools, ["speak_and_listen", "voice_setup"]);
+    assert.deepEqual(tools, ["call", "listen", "say", "speak_and_listen", "voice_setup"]);
     const prompts = (await client.listPrompts()).prompts.map((p) => p.name).sort();
-    assert.deepEqual(prompts, ["setup", "voice_mode"]);
+    assert.deepEqual(prompts, ["call", "setup", "voice_mode"]);
     assert.ok(Buffer.byteLength(client.getInstructions() ?? "") < 2048, "Claude Code truncates instructions at 2 KB");
   } finally {
     await client.close();
@@ -960,6 +960,119 @@ test("cancelling a call stops the recorder, and the next call works", async () =
     assert.equal(!!r.isError, false, "the voice lock was released");
   } finally {
     await client.close();
+  }
+});
+
+// --- A call: the mic stays open until the user hangs up ---------------------------------------
+
+const callFile = (sb) => path.join(voiceModeDir(sb), "call.json");
+const recs = (sb) => sb.readLog().match(/^rec -/gm)?.length ?? 0;
+
+test("a call: one recorder throughout, listen hears the user, say returns at once, call end hangs up", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "call" }));
+  try {
+    const started = await client.callTool({ name: "call", arguments: { action: "start" } });
+    assert.equal(started.isError, false);
+    assert.match(text(started), /^The call is on: the microphone stays open until the user hangs up\./);
+    assert.equal(JSON.parse(readFileSync(callFile(sb), "utf8")).duplex, "half");
+    assert.match(sb.readLog(), /^speak "I'm here\."/m);
+    assert.match(text(await client.callTool({ name: "call", arguments: { action: "start" } })), /A call is already on/);
+
+    const heard = await client.callTool({ name: "listen", arguments: {} });
+    assert.equal(heard.content[0].text, "Stub transcript from the server.");
+
+    const t = Date.now();
+    const said = await client.callTool({ name: "say", arguments: { text: "Working on it." } });
+    assertQuick(t);
+    assert.equal(said.isError, false);
+    assert.match(sb.readLog(), /^speak "Working on it\."/m);
+    // The second utterance was said while Claude worked: the next say or listen passes it on.
+    assert.ok(await waitFor(() => inboxTexts(sb).length > 0 || /the user said by voice/.test(text(said))));
+    const next = await client.callTool({ name: "say", arguments: { text: "Done." } });
+    assert.match(`${text(said)}\n${text(next)}`, /the user said by voice: "Stub transcript from the server\."/);
+
+    const onCall = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Hello?" } });
+    assert.match(onCall.content[0].text, /^\(You're on a call with the user: speak with say/);
+    assert.equal(recs(sb), 1, "one recorder for the whole call");
+
+    const ended = await client.callTool({ name: "call", arguments: { action: "end" } });
+    assert.match(text(ended), /^\(The call ended\./);
+    assert.ok(await waitFor(() => /^rec stopped$/m.test(sb.readLog()), 1000), "the recorder stopped within a second");
+    assert.ok(await waitFor(() => /^speak "Bye\."/m.test(sb.readLog())), "said bye");
+    assert.ok(!existsSync(callFile(sb)), "call.json removed");
+    assert.deepEqual(inboxTexts(sb), [], "nothing kept");
+    assert.ok(!existsSync(path.join(sb.home, ".cache", "mac-voice-mcp", "mic.lock")), "the mic lock is released");
+    const after = await client.callTool({ name: "listen", arguments: { wait_seconds: 1 } });
+    assert.match(after.content[0].text, /^\(The call ended: Claude ended the call\. Don't call listen or say again/);
+    assert.match(text(await client.callTool({ name: "say", arguments: { text: "Still there?" } })), /^\(The call ended: Claude ended the call/);
+  } finally {
+    await client.close();
+  }
+});
+
+test("saying 'hang up' ends the call: recorder stopped within a second, bye said, nothing left behind", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "call", STUB_TRANSCRIPT: "Hang up." }));
+  try {
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    assert.ok(await waitFor(() => /whisper-server inference/.test(sb.readLog())), "heard something");
+    const t = Date.now();
+    assert.ok(await waitFor(() => /^rec stopped$/m.test(sb.readLog()), 1500), "the recorder stopped");
+    assertQuick(t, 1000);
+    assert.ok(await waitFor(() => /^speak "Bye\."/m.test(sb.readLog())), "said bye");
+    assert.ok(await waitFor(() => !existsSync(callFile(sb))), "call.json removed");
+    assert.deepEqual(inboxTexts(sb), [], "the hang-up itself is not kept");
+    const r = await client.callTool({ name: "listen", arguments: { wait_seconds: 1 } });
+    assert.match(r.content[0].text, /^\(The call ended: the user hung up\./);
+  } finally {
+    await client.close();
+  }
+});
+
+test("silence never ends a call before the idle limit; after it the call ends by itself", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  // 3 s: past two of the 15-second (1.5 s at the stub's speed) windows a voice turn would give up after.
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "silent", VOICE_MCP_CALL_IDLE_MINUTES: "0.05" }));
+  try {
+    const t0 = Date.now();
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    const t = Date.now();
+    const nothing = await client.callTool({ name: "listen", arguments: { wait_seconds: 1 } });
+    assert.equal(nothing.content[0].text, "(still on the call, nothing said) Call listen again to keep waiting, or say something.");
+    assert.ok(Date.now() - t >= 1000, "waited the whole second");
+    await new Promise((r) => setTimeout(r, Math.max(0, t0 + 2000 - Date.now())));
+    assert.ok(existsSync(callFile(sb)), "still on the call after 2 s of silence");
+    assert.doesNotMatch(sb.readLog(), /^rec stopped$/m);
+    assert.ok(await waitFor(() => /^rec stopped$/m.test(sb.readLog()), 3000), "ended after the idle limit");
+    assert.ok(await waitFor(() => !existsSync(callFile(sb))), "call.json removed");
+    assert.deepEqual(inboxTexts(sb), []);
+    const r = await client.callTool({ name: "listen", arguments: { wait_seconds: 1 } });
+    assert.match(r.content[0].text, /^\(The call ended: nobody said anything for 0 minutes\./);
+  } finally {
+    await client.close();
+  }
+});
+
+test("another window's voice turn during a call gives up at once, saying the user is on a call", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const a = await connect(sb.env({ STUB_SCENARIO: "silent" }));
+  const b = await connect(sb.env({ STUB_SCENARIO: "silent" }));
+  try {
+    await a.client.callTool({ name: "call", arguments: { action: "start" } });
+    const t = Date.now();
+    const r = await b.client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Hello?" } });
+    assertQuick(t);
+    assert.equal(r.isError, true);
+    assert.match(text(r), /^The user is on a call in another window/);
+    assert.equal(sb.readLog().match(/^speak /gm).length, 1, "only the call's greeting was spoken");
+  } finally {
+    await a.client.close();
+    await b.client.close();
   }
 });
 

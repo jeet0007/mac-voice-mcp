@@ -20,7 +20,7 @@ export interface VoiceResult {
 }
 
 /** Everything speak_and_listen needs, checked before saying a word. Never installs anything. */
-async function preflight(): Promise<{ model: string }> {
+export async function preflight(): Promise<{ model: string }> {
   if (!findRecorder()) throw new SetupError(RECORDER_MISSING);
   if (!findWhisperCli() && !findWhisperServer()) throw new SetupError(STT_MISSING);
   return { model: await ensureModel({ download: false }) };
@@ -55,7 +55,7 @@ export const USER_TYPED =
 const STOP_POLL_MS = 100;
 
 /** Abort when the user starts typing (a stop signal at or after `since`), or when `signal` aborts. */
-function watchForTyping(since: number, signal?: AbortSignal) {
+export function watchForTyping(since: number, signal?: AbortSignal) {
   const ctl = new AbortController();
   let typed = false;
   const onAbort = () => ctl.abort();
@@ -84,6 +84,17 @@ function watchForTyping(since: number, signal?: AbortSignal) {
 /** Wait for a spoken update to finish (another turn needs the speaker). */
 export async function finishSpeaking(): Promise<void> {
   await speaking;
+}
+
+/** Speech playing outside a voice turn (a spoken update, a call's `say`): the next turn waits for it. */
+export function trackSpeaking(done: Promise<unknown>): void {
+  const tracked: Promise<void> = done.then(
+    () => {},
+    () => {},
+  ).finally(() => {
+    if (speaking === tracked) speaking = null;
+  });
+  speaking = tracked;
 }
 
 export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {}): Promise<VoiceResult> {
@@ -181,10 +192,7 @@ async function speakInBackground(
       // It counts from when this call returned, which is when the plugin's hook marked the session.
       if (o.keepListening && !failure && !typing.typed) workListener.start(t0);
     });
-  const tracked: Promise<void> = done.finally(() => {
-    if (speaking === tracked) speaking = null;
-  });
-  speaking = tracked;
+  trackSpeaking(done);
 
   // Fails right away (no voice installed, bad setup)? Then say so now, as before.
   await Promise.race([done, sleep(EARLY_FAILURE_MS)]);

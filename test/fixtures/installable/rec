@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Stub SoX `rec`: streams synthetic 16 kHz mono s16le audio to stdout at 10x real time.
-// STUB_SCENARIO: answer | cough | silent | zero | long
+// STUB_SCENARIO: answer | cough | silent | zero | long | call
 // STUB_SCENARIO_LATER: another scenario for every recording after the first (e.g. silence while Claude works).
 const fs = require("fs");
 // First, so a stop that comes while the audio below is still being built is logged too.
@@ -26,6 +26,8 @@ const script = {
   silent: () => [],
   zero: () => [],
   long: () => [noise(0.5), speech(60)],
+  // Two utterances, the first after the call's greeting and the second 2 s (real time) later, then silence for good.
+  call: () => [noise(5), speech(1.5), noise(20), speech(1.5), noise(2.5)],
 }[scenario]();
 const frames = [];
 for (const part of script) for (let i = 0; i < part.length; i += 480) frames.push(part.slice(i, i + 480));

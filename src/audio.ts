@@ -1,7 +1,8 @@
 /** Speaking (native TTS), the mic chimes, and listening for one conversational turn. */
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { CONFIG, debug, IS_MAC, IS_WIN, log } from "./config.js";
 import { Endpointer, FRAME_BYTES, FRAME_MS, wavHeader, type EndReason, type EndpointerDiagnostics } from "./endpointer.js";
 import { KokoroError, kokoroEnabled, speakKokoro, synthesizeKokoroToFile } from "./kokoro.js";
@@ -485,4 +486,92 @@ export async function listenForTurn(maxSeconds: number, outFile: string, signal?
     speechSeconds: endpointer.speechSeconds,
     levels: endpointer.diagnostics(),
   };
+}
+
+/** One utterance is at most this long; after this much silence the endpointer is started afresh, so nothing piles up. */
+const UTTERANCE_MAX_MS = 60_000;
+
+export interface ContinuousOptions {
+  /** Frames are dropped while this is true (our own speech is playing: half duplex). */
+  muted: () => boolean;
+  /** Each utterance, as a trimmed 16 kHz mono WAV in `dir`, in order. Not awaited. */
+  onUtterance: (wav: string) => void;
+  dir: string;
+}
+
+/**
+ * Keep the mic open until `signal` aborts (one recorder for the whole call), cutting what it hears
+ * into utterances with a fresh Endpointer each: no start timeout, so silence never ends it.
+ * Rejects if the recorder stops on its own.
+ */
+export async function listenContinuously(signal: AbortSignal, opts: ContinuousOptions): Promise<void> {
+  const recorder = findRecorder();
+  if (!recorder) throw new SetupError(RECORDER_MISSING);
+  const fresh = () =>
+    new Endpointer({
+      maxMs: UTTERANCE_MAX_MS,
+      startTimeoutMs: UTTERANCE_MAX_MS,
+      endSilenceMs: CONFIG.endSilenceMs,
+      marginDb: CONFIG.speechMarginDb,
+      minSpeechDb: CONFIG.minSpeechDb,
+    });
+  let endpointer = fresh();
+  let frames: Buffer[] = [];
+  let pending: Buffer = Buffer.alloc(0);
+  let count = 0;
+  let stderr = "";
+
+  const args = recorderArgs(recorder);
+  debug("exec:", recorder.bin, args.join(" "));
+  const child = spawn(recorder.bin, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+  activeChildren.add(child);
+  const stop = () => {
+    if (child.exitCode === null) child.kill("SIGTERM");
+    setTimeout(() => child.exitCode === null && child.kill("SIGKILL"), 800).unref();
+  };
+  if (signal.aborted) stop();
+  signal.addEventListener("abort", stop, { once: true });
+
+  child.stderr!.setEncoding("utf8").on("data", (d: string) => (stderr = (stderr + d).slice(-4000)));
+  child.stdout!.on("data", (chunk: Buffer) => {
+    pending = pending.length ? Buffer.concat([pending, chunk]) : chunk;
+    let off = 0;
+    while (pending.length - off >= FRAME_BYTES) {
+      const frame = Buffer.from(pending.subarray(off, off + FRAME_BYTES));
+      off += FRAME_BYTES;
+      if (opts.muted()) {
+        // Whatever was being said is cut: the speaker's echo would end up in it anyway.
+        if (frames.length) {
+          endpointer = fresh();
+          frames = [];
+        }
+        continue;
+      }
+      frames.push(frame);
+      const reason = endpointer.push(frame);
+      if (!reason) continue;
+      if (reason !== "no-speech") {
+        const [first, last] = endpointer.trimRange(frames.length);
+        const pcm = Buffer.concat(frames.slice(first, last));
+        const wav = path.join(opts.dir, `${++count}.wav`);
+        writeFileSync(wav, Buffer.concat([wavHeader(pcm.length), pcm]));
+        opts.onUtterance(wav);
+      }
+      endpointer = fresh();
+      frames = [];
+    }
+    pending = pending.subarray(off);
+  });
+
+  const code = await new Promise<number | null>((resolve, reject) => {
+    child.on("error", (err) => {
+      activeChildren.delete(child);
+      reject(err);
+    });
+    child.on("close", (c) => {
+      activeChildren.delete(child);
+      resolve(c);
+    });
+  }).finally(() => signal.removeEventListener("abort", stop));
+  if (!signal.aborted) throw new Error(`The recorder stopped (exit ${code}): ${tail(stderr) || "no output"}`);
 }
