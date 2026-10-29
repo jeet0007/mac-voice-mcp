@@ -1,1 +1,0 @@
-{ "name": "call-spike-stop", "version": "0.0.0", "description": "Throwaway call-mode Phase 0 spike: route C, a Stop hook that waits for the next utterance and blocks with it." }

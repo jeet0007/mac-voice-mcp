@@ -1,1 +1,0 @@
-{ "name": "call-spike-idle", "version": "0.0.0", "description": "Throwaway call-mode Phase 0 spike: routes A ($.session.send to itself) and B ($.prompt.submit asUser)." }
