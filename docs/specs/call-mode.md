@@ -133,8 +133,8 @@ cache, so Silero VAD needs no new download for Kokoro users.
 ## Phases
 
 0. ~~Spikes: decide idle delivery.~~ Done: route B (above).
-1. **Call engine + tools + skill:** lifecycle, mic engine, queue, hang-up phrases, idle timeout, `call`/`say`/
-   `listen`, chosen delivery route, half duplex, mic lock for the call, `/mac-voice-mcp:call` and `:hangup`.
+1. ~~**Call engine + tools + skill:** lifecycle, mic engine, queue, hang-up phrases, idle timeout, `call`/`say`/
+   `listen`, chosen delivery route, half duplex, mic lock for the call, `/mac-voice-mcp:call` and `:hangup`.~~ Done.
 2. **Headphones + barge-in:** duplex auto-detect, pause/resume, filler filter.
 3. **Polish:** thinking sound, Notification hook, Voice Buddy call mood.
 4. **Tests, docs, release:** stub e2e (continuous `rec` stub scenarios), `test:local` call scenario,

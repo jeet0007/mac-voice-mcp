@@ -30,10 +30,12 @@ test("the changelog has an entry for this version", () => {
 test("plugin skills use the plugin's real tool names and the current speaking rules", () => {
   const talk = text("skills/talk/SKILL.md");
   for (const line of SPEECH_RULES.split("\n")) assert.ok(talk.includes(line), `skills/talk is missing: ${line}`);
-  for (const skill of ["talk", "setup"]) {
+  const call = text("skills/call/SKILL.md");
+  for (const line of SPEECH_RULES.replace("text_to_speak", "text").split("\n")) assert.ok(call.includes(line), `skills/call is missing: ${line}`);
+  for (const skill of ["talk", "setup", "call", "hangup"]) {
     const body = text(`skills/${skill}/SKILL.md`);
     for (const tool of body.match(/mcp__\S+/g) ?? []) {
-      assert.match(tool, /^mcp__plugin_mac-voice-mcp_voice-mcp__(speak_and_listen|voice_setup)$/, `${skill}: ${tool}`);
+      assert.match(tool, /^mcp__plugin_mac-voice-mcp_voice-mcp__(speak_and_listen|voice_setup|call|say|listen)$/, `${skill}: ${tool}`);
     }
   }
 });
