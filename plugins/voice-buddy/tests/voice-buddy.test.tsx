@@ -143,6 +143,104 @@ test('while voice-mcp listens for "Claude, …" here, the buddy says so', async 
   await ui.unmount()
 })
 
+// --- A call: what the user says while Claude is idle becomes their next message --------------
+
+const CALL = 'mcp__plugin_mac-voice-mcp_voice-mcp__call'
+const DIR = '/home/me/.cache/mac-voice-mcp/voice-mode'
+const INBOX = `${DIR}/inbox`
+
+/** The engine on a call: call.json exists, the inbox holds `entries`, and submits and toasts are recorded. */
+function callEngine(on: Parameters<Parameters<typeof test>[1]>[1], entries: Record<string, string>, submit: () => unknown = () => ({ text: '' })) {
+  mock.env(on, { HOME: '/home/me' })
+  const clock = mock.clock(on, { now: 1_000_000 })
+  const files: Record<string, string> = {}
+  for (const [name, text] of Object.entries(entries)) files[`${INBOX}/${name}`] = JSON.stringify({ text, at: 1 })
+  const submitted: string[] = []
+  const toasts: string[] = []
+  on('session.id', () => ({ value: 's1' }))
+  on('tool.call', () => ({ result: {} }))
+  on('prompt.edit', (_, e) => ({ text: e.text, cursor: e.cursor }))
+  on('fs.exists', (_, e) => ({ value: e.path === `${DIR}/call.json` }))
+  on('fs.list', (_, e) => {
+    if (e.path !== INBOX) throw new Error('ENOENT')
+    const value = Object.keys(files).map((f) => ({ name: f.slice(INBOX.length + 1), kind: 'file' as const, size: files[f]!.length, mtimeMs: 1, isLink: false }))
+    return { value }
+  })
+  on('fs.read', (_, e) => {
+    if (e.path in files) return { value: files[e.path]! }
+    throw new Error('ENOENT')
+  })
+  on('fs.write', (_, e) => {
+    files[e.path] = e.text
+    return { value: undefined }
+  })
+  on('prompt.submit', (_, e) => {
+    const origin = e.origin as { kind?: unknown; asUser?: unknown }
+    submitted.push(JSON.stringify({ text: e.text, origin: origin.kind, asUser: origin.asUser }))
+    return submit() as never
+  })
+  on('ui.toast', (_, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  return { clock, files, submitted, toasts }
+}
+
+test('call start tells Claude that Voice Buddy delivers what the user says while it is idle', async ($, on) => {
+  callEngine(on, {})
+  const r = await $.tool.call({ tool: CALL, action: 'start' } as never)
+  expect(r.context?.join(' ')).toMatch(/whatever the user says on the call while you are idle is handed to you as a new message/)
+  const again = await $.tool.call({ tool: CALL, action: 'end' } as never)
+  expect(again.context).toBeUndefined()
+})
+
+test('on a call with Claude idle, an inbox entry is submitted as the user and its file blanked', async ($, on) => {
+  const { clock, files, submitted } = callEngine(on, { '1000-a.json': 'use the other branch' })
+  await $.tool.call({ tool: CALL, action: 'start' } as never)
+  await clock.advance(200)
+  expect(submitted).toEqual([JSON.stringify({ text: 'use the other branch', origin: 'plugin', asUser: true })])
+  expect(files[`${INBOX}/1000-a.json`]).toBe('')
+  await clock.advance(200)
+  expect(submitted.length).toBe(1)
+})
+
+test('while a main turn runs nothing is submitted; after it, the inbox is delivered oldest first', async ($, on) => {
+  const { clock, submitted } = callEngine(on, { '1001-b.json': 'and run the tests', '1000-a.json': 'use the other branch' })
+  await $.tool.call({ tool: CALL, action: 'start' } as never)
+  await $.turn.start({ text: 'hi', turnId: 't1' } as never)
+  await clock.advance(400)
+  expect(submitted).toEqual([])
+  await $.turn.start({ text: '', turnId: 'a1', agentId: 'sub' } as never) // a subagent's turn changes nothing
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+  await clock.advance(200)
+  expect(submitted).toEqual([JSON.stringify({ text: 'use the other branch\nand run the tests', origin: 'plugin', asUser: true })])
+})
+
+test('if submitting fails, the entries are put back, a toast says so once, and idle delivery stops for this call', async ($, on) => {
+  const { clock, files, submitted, toasts } = callEngine(on, { '1000-a.json': 'use the other branch' }, () => {
+    throw new Error('no prompt here')
+  })
+  await $.tool.call({ tool: CALL, action: 'start' } as never)
+  await clock.advance(200)
+  expect(submitted.length).toBe(1)
+  expect(JSON.parse(files[`${INBOX}/1000-a.json`]!).text).toBe('use the other branch')
+  expect(toasts.length).toBe(1)
+  expect(toasts[0]).toMatch(/^voice-buddy can't pass on what you say while Claude is idle \(.*\); Claude hears it at its next tool call or listen$/)
+  await clock.advance(600)
+  expect(submitted.length).toBe(1)
+  expect(toasts.length).toBe(1)
+})
+
+test('typing during a call writes the stop file', async ($, on) => {
+  const { clock, files } = callEngine(on, {})
+  await $.tool.call({ tool: CALL, action: 'start' } as never)
+  await $.prompt.edit(key('h'))
+  await clock.settle()
+  expect(files[`${DIR}/stop`]).toBe(JSON.stringify({ at: 1_000_000 }))
+})
+
 test('the blob loops seamlessly, and its frames fit the Raster', async () => {
   for (const look of Object.values(LOOKS)) expect(blobPath(1, look, 20, 20, 14)).toBe(blobPath(0, look, 20, 20, 14))
   const cells = blobCells('speaking', 0.3, 8, 4)
