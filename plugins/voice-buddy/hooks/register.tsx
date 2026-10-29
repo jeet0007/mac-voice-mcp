@@ -274,7 +274,8 @@ export const register: Register = on => {
 
   // Enter with text already in the box (typed before the turn began, or a queued prompt).
   on('prompt.submit', ($, e, next) => {
-    noticeTyping($)
+    // A prompt a plugin submitted (ours hands over what the user said on a call) isn't the user typing.
+    if (e.origin.kind !== 'plugin') noticeTyping($)
     return next(e)
   }).catch(($, e, next) => next(e)) // never in the way of the prompt
 

@@ -204,6 +204,8 @@ test('on a call with Claude idle, an inbox entry is submitted as the user and it
   expect(files[`${INBOX}/1000-a.json`]).toBe('')
   await clock.advance(200)
   expect(submitted.length).toBe(1)
+  // Handing over the user's words is not the user typing: it must not stop Claude's voice.
+  expect(files[`${DIR}/stop`]).toBeUndefined()
 })
 
 test('while a main turn runs nothing is submitted; after it, the inbox is delivered oldest first', async ($, on) => {
