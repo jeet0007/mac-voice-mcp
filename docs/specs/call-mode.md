@@ -148,7 +148,7 @@ cache, so Silero VAD needs no new download for Kokoro users.
      Without Voice Buddy, a stop phrase is delivered like other words.
    - Acceptance: with the rule, a "how's it going?" during a 60 s test run reaches Claude in ≤ 5 s;
      "stop" during a foreground command ends the turn in ≤ 1 s and Claude replies to it.
-2. **Headphones + barge-in:** duplex auto-detect, pause/resume, filler filter.
+2. ~~**Headphones + barge-in:** duplex auto-detect, pause/resume, filler filter.~~ Done.
 3. **Polish:** thinking sound, Notification hook, Voice Buddy call mood.
 4. **Tests, docs, release:** stub e2e (continuous `rec` stub scenarios), `test:local` call scenario,
    docs (usage, configuration), changelog → 0.8.0.

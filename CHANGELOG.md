@@ -5,6 +5,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- **Talk over Claude on a call, with headphones.** When the Mac's sound goes to headphones, the mic stays open while Claude speaks. A quarter second of your voice pauses Claude. Say something real and the rest of its reply is dropped, and Claude hears what you said and roughly how far it got. A filler such as "mm-hmm", a cough, or nothing real within 2 s lets it carry on from where it paused. On speakers the mic stays muted while Claude speaks, as before. `VOICE_MCP_CALL_DUPLEX` (`auto`, `full`, `half`) overrides the headphone check.
+
 ## [0.7.1] - 2026-10-26
 
 ### Changed
