@@ -259,6 +259,41 @@ export async function chime(kind: "start" | "stop"): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Headphones (call duplex)
+// ---------------------------------------------------------------------------
+
+/**
+ * Does `system_profiler SPAudioDataType -json` say the default output is headphones? The built-in
+ * jack's headphones, or Bluetooth unless its name says speaker (AirPods yes, a Bluetooth speaker no).
+ */
+export function headphonesFromProfile(json: unknown): boolean {
+  type Item = { _name?: string; coreaudio_default_audio_output_device?: string; coreaudio_device_transport?: string; coreaudio_output_source?: string };
+  const groups = (json as { SPAudioDataType?: { _items?: Item[] }[] } | null)?.SPAudioDataType ?? [];
+  const out = groups.flatMap((g) => g._items ?? []).find((i) => i.coreaudio_default_audio_output_device === "spaudio_yes");
+  if (!out) return false;
+  if (/headphone/i.test(out.coreaudio_output_source ?? "")) return true;
+  return out.coreaudio_device_transport === "coreaudio_device_type_bluetooth" && !/speaker/i.test(out._name ?? "");
+}
+
+/**
+ * Can a call keep the mic open while Claude speaks? VOICE_MCP_CALL_DUPLEX, or for auto: full on
+ * headphones (no echo to hear back), half otherwise. Read once per call: system_profiler takes about a second.
+ */
+export async function detectDuplex(): Promise<"full" | "half"> {
+  if (CONFIG.callDuplex !== "auto") return CONFIG.callDuplex;
+  if (!IS_MAC) return "half";
+  try {
+    const bin = which("system_profiler") ?? "/usr/sbin/system_profiler";
+    const r = await run(bin, ["SPAudioDataType", "-json"], { timeoutMs: 5000 });
+    if (r.code !== 0) throw new Error(`exit ${r.code}: ${tail(r.stderr) || "no output"}`);
+    return headphonesFromProfile(JSON.parse(r.stdout)) ? "full" : "half";
+  } catch (e) {
+    log(`Couldn't tell whether headphones are on, so the call mutes the mic while Claude speaks: ${e instanceof Error ? e.message : String(e)}`);
+    return "half";
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Listening
 // ---------------------------------------------------------------------------
 

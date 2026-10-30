@@ -5,7 +5,8 @@
  * One recorder runs for the whole call (src/audio.ts listenContinuously). Each utterance is
  * transcribed on this Mac, checked for a hang-up phrase, and left in the inbox for `listen`, `say`,
  * the plugin hook or Voice Buddy to hand to Claude. The call holds the mic lock throughout, so
- * other windows' voice turns give up at once. While `say` plays, the mic is gated (half duplex).
+ * other windows' voice turns give up at once. On speakers the mic is gated while `say` plays (half
+ * duplex); on headphones it stays open, so the user can interrupt (full duplex, barge-in below).
  *
  * It ends when the user says "hang up", when Claude calls `call end`, after
  * VOICE_MCP_CALL_IDLE_MINUTES (default 30) without a word either way, when call.json disappears
@@ -17,7 +18,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import * as files from "../hooks/voice-files.mjs";
-import { listenContinuously, speak } from "./audio.js";
+import { detectDuplex, listenContinuously, speak } from "./audio.js";
 import { CONFIG, debug, envNum, log, PKG } from "./config.js";
 import { acquireMicLock } from "./lock.js";
 import { ensureModel } from "./model.js";
@@ -68,6 +69,8 @@ export class Call {
   private loop: Promise<void> | null = null;
   private watch: NodeJS.Timeout | null = null;
   private lastActivity = 0;
+  /** Resolved at call start (VOICE_MCP_CALL_DUPLEX, or headphones detected). */
+  private duplex: "full" | "half" = "half";
   /** Mic frames are dropped until then (our own speech, plus its echo). */
   private muteUntil = 0;
   /** `say` calls play one after another. */
@@ -88,6 +91,7 @@ export class Call {
   async start(signal?: AbortSignal): Promise<"started" | "already"> {
     if (this.state === "on") return "already";
     while (this.state === "ending") await sleep(50);
+    const duplex = await detectDuplex(); // before taking the mic, so a call end meanwhile still cancels the wait
     const release = await acquireMicLock({ signal, call: true });
     const ctl = new AbortController();
     this.release = release;
@@ -95,10 +99,11 @@ export class Call {
     this.state = "on";
     this.endedBecause = "";
     this.missed = null;
-    this.lastActivity = Date.now();
     this.muteUntil = 0;
+    this.duplex = duplex;
+    this.lastActivity = Date.now();
     mkdirSync(voiceModeDir(), { recursive: true });
-    writeFileSync(callFile(), JSON.stringify({ pid: process.pid, startedAt: this.lastActivity, duplex: "half" }));
+    writeFileSync(callFile(), JSON.stringify({ pid: process.pid, startedAt: this.lastActivity, duplex: this.duplex }));
     this.watch = setInterval(() => this.tick(), WATCH_MS);
     this.loop = this.run(ctl.signal).catch((e: unknown) => {
       if (this.ctl !== ctl || e instanceof CancelledError) return;
@@ -199,7 +204,7 @@ export class Call {
     try {
       await listenContinuously(signal, {
         dir,
-        muted: () => Date.now() < this.muteUntil,
+        muted: () => this.duplex === "half" && Date.now() < this.muteUntil,
         onUtterance: (wav) => {
           this.transcribing = this.transcribing.then(() => this.heard(wav, model, signal)).catch((e: unknown) => this.notHeard(e, model, signal));
         },

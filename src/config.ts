@@ -111,6 +111,12 @@ export const CONFIG = {
   /** ffmpeg avfoundation audio input (macOS fallback recorder). ":default" follows the input chosen in System Settings. */
   ffmpegDevice: process.env.VOICE_MCP_FFMPEG_DEVICE?.trim() || ":default",
 
+  // --- Calls
+  /** Can the mic stay open while Claude speaks: auto (default: on headphones) | full (yes, so you can interrupt) | half (no: speakers). */
+  callDuplex: (["full", "half"].includes(process.env.VOICE_MCP_CALL_DUPLEX?.trim().toLowerCase() ?? "")
+    ? process.env.VOICE_MCP_CALL_DUPLEX!.trim().toLowerCase()
+    : "auto") as "auto" | "full" | "half",
+
   // --- Speech-to-text
   /** whisper.cpp model name (tiny.en, base.en, small.en, large-v3-turbo-q5_0, ...). */
   modelName,

@@ -1029,6 +1029,20 @@ test("a call: one recorder throughout, listen hears the user, say returns at onc
   }
 });
 
+test("on headphones a call keeps the mic open while Claude speaks (full duplex); VOICE_MCP_CALL_DUPLEX overrides", async () => {
+  for (const [env, duplex] of [[{ STUB_HEADPHONES: "1" }, "full"], [{ STUB_HEADPHONES: "1", VOICE_MCP_CALL_DUPLEX: "half" }, "half"]]) {
+    const sb = sandbox();
+    fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+    const { client } = await connect(sb.env({ STUB_SCENARIO: "silent", ...env }));
+    try {
+      await client.callTool({ name: "call", arguments: { action: "start" } });
+      assert.equal(JSON.parse(readFileSync(callFile(sb), "utf8")).duplex, duplex, JSON.stringify(env));
+    } finally {
+      await client.close();
+    }
+  }
+});
+
 test("call end while the start still waits for the mic: the call never starts", async () => {
   const sb = sandbox();
   const cache = path.join(sb.home, ".cache", "mac-voice-mcp");
