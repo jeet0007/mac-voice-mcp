@@ -14,7 +14,7 @@
  * (the plugin hook removes it when the session ends), when the recorder fails, or at shutdown.
  * Ending stops the recorder within a second and empties the inbox. Nothing is spoken: Claude notes it on screen.
  */
-import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -32,6 +32,9 @@ import { trackSpeaking } from "./voice.js";
 
 /** Shared with the plugin hook and Voice Buddy: who is on a call, and which session it belongs to. */
 export const callFile = () => files.callFile(voiceModeDir());
+
+/** Present while the user has muted the call (the floating bubble's mute button): the mic hears nothing. */
+export const muteFile = () => path.join(voiceModeDir(), "mute");
 
 /** The last speech-to-text failure on a call, kept for debugging (and a future /issue). */
 export const sttFailureFile = () => path.join(CONFIG.cacheDir, "last-stt-failure.json");
@@ -76,6 +79,8 @@ export class Call {
   private duplex: "full" | "half" = "half";
   /** Mic frames are dropped until then (our own speech, plus its echo). */
   private muteUntil = 0;
+  /** The user muted the call (muteFile), refreshed every tick. */
+  private userMuted = false;
   /** `say` calls play one after another. */
   private speaking: Promise<void> = Promise.resolve();
   /** The user talking over `say` (full duplex). A fresh one each call. */
@@ -105,6 +110,8 @@ export class Call {
     this.endedBecause = "";
     this.missed = null;
     this.muteUntil = 0;
+    this.userMuted = false;
+    rmSync(muteFile(), { force: true });
     this.bargeIn = new BargeIn(pauseSpeech);
     this.duplex = duplex;
     this.lastActivity = Date.now();
@@ -136,6 +143,7 @@ export class Call {
     this.bargeIn.end();
     takeInbox();
     rmSync(callFile(), { force: true });
+    rmSync(muteFile(), { force: true });
     showPhase(null);
     release!();
     for (const wake of this.wakers) wake();
@@ -212,7 +220,7 @@ export class Call {
     try {
       await listenContinuously(signal, {
         dir,
-        muted: () => this.duplex === "half" && Date.now() < this.muteUntil,
+        muted: () => this.userMuted || (this.duplex === "half" && Date.now() < this.muteUntil),
         onUtterance: (wav) => {
           const from = this.bargeIn.utterance();
           this.transcribing = this.transcribing
@@ -267,6 +275,7 @@ export class Call {
   private tick(): void {
     if (!this.on) return;
     this.bargeIn.settle(); // backs up its timer, which may fire a moment early
+    this.userMuted = existsSync(muteFile());
     if (Date.now() - this.lastActivity > IDLE_MS) {
       void this.end(`nobody said anything for ${Math.round(IDLE_MS / 60_000)} minutes`);
       return;
