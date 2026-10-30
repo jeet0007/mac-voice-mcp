@@ -135,6 +135,19 @@ cache, so Silero VAD needs no new download for Kokoro users.
 0. ~~Spikes: decide idle delivery.~~ Done: route B (above).
 1. ~~**Call engine + tools + skill:** lifecycle, mic engine, queue, hang-up phrases, idle timeout, `call`/`say`/
    `listen`, chosen delivery route, half duplex, mic lock for the call, `/mac-voice-mcp:call` and `:hangup`.~~ Done.
+1.5. **Talk while Claude works (found testing Phase 1):** a foreground command (a ~1 min test run) blocks
+   Claude, and the hook can only hand over the user's words between steps, so nothing reached Claude
+   until the tests finished.
+   - **Call rule:** during a call, start long commands (tests, builds, installs, servers) in the background
+     (Bash `run_in_background`), say what's running ("Tests are running, I'll tell you when they're done"),
+     and check back; keep each step short so the user's words get through within seconds.
+   - **Voice stop, like Esc:** if the user says a stop phrase on a call while a turn runs ("stop",
+     "wait", "hold on", "Claude stop", "cancel that"; whole utterance, like hang-up phrases, not "don't
+     stop"), Voice Buddy aborts the running turn with `$.turn.abort({ turnId })` (turnId from
+     `turn.start`), then submits what the user said. Any other speech waits for the next step as now.
+     Without Voice Buddy, a stop phrase is delivered like other words.
+   - Acceptance: with the rule, a "how's it going?" during a 60 s test run reaches Claude in ≤ 5 s;
+     "stop" during a foreground command ends the turn in ≤ 1 s and Claude replies to it.
 2. **Headphones + barge-in:** duplex auto-detect, pause/resume, filler filter.
 3. **Polish:** thinking sound, Notification hook, Voice Buddy call mood.
 4. **Tests, docs, release:** stub e2e (continuous `rec` stub scenarios), `test:local` call scenario,
