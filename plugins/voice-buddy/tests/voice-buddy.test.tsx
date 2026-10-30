@@ -235,6 +235,19 @@ test('if submitting fails, the entries are put back, a toast says so once, and i
   expect(toasts.length).toBe(1)
 })
 
+test("after a reload mid-call, this window's call is picked up again from call.json; another window's isn't", async ($, on) => {
+  const { clock, files, submitted } = callEngine(on, { '1000-a.json': 'are you still there' })
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  files[`${DIR}/call.json`] = JSON.stringify({ pid: 1, session: 's2' })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true } as never)
+  await clock.advance(400)
+  expect(submitted).toEqual([])
+  files[`${DIR}/call.json`] = JSON.stringify({ pid: 1, session: 's1' })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true } as never)
+  await clock.advance(400)
+  expect(submitted).toEqual([JSON.stringify({ text: 'are you still there', origin: 'plugin', asUser: true })])
+})
+
 test('typing during a call writes the stop file', async ($, on) => {
   const { clock, files } = callEngine(on, {})
   await $.tool.call({ tool: CALL, action: 'start' } as never)

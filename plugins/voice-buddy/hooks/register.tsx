@@ -187,6 +187,21 @@ async function deliverInbox($: EngineInterface): Promise<void> {
   }
 }
 
+/** After a reload, which forgets the call start it saw: pick the call back up if it's this window's. */
+async function resumeCall($: EngineInterface): Promise<void> {
+  const dir = await voiceModeDir($)
+  if (!dir) return
+  try {
+    const call = JSON.parse(await $.fs.read(`${dir}/call.json`)) as { session?: unknown }
+    if (call.session !== (await $.session.id())) return
+  } catch {
+    return // no call
+  }
+  onCall = true
+  deliveryBroken = false
+  watchInbox($)
+}
+
 function watchInbox($: EngineInterface): void {
   if (inboxTimer) return
   inboxTimer = $.clock.every(INBOX_POLL_MS, () => {
@@ -280,8 +295,10 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e)) // never in the way of the prompt
 
   // A new window, or a reload, while voice-mcp listens for "Claude, …" here: show the buddy.
-  on('session.start', ($, e, next) => {
+  // After a reload mid-call, carry on delivering what the user says.
+  on('session.start', async ($, e, next) => {
     animate($)
+    await resumeCall($).catch(() => {})
     return next(e)
   })
 
