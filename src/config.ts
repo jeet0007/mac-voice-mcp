@@ -5,6 +5,7 @@
 import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { cacheRoot } from "../hooks/voice-files.mjs";
 
 export const PKG = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { name: string; version: string };
 
@@ -50,9 +51,7 @@ function whisperPrompt(): string | undefined {
 }
 
 /** Everything this server ever downloads or links lives here, shared by every version and every client. */
-const CACHE_ROOT =
-  process.env.VOICE_MCP_CACHE_DIR?.trim() ||
-  path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache"), "mac-voice-mcp");
+const CACHE_ROOT = cacheRoot();
 
 export const CONFIG = {
   /** Models, the mic lock and hook state live here. */

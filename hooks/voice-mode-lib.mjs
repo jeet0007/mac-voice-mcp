@@ -21,9 +21,9 @@
  * State is one small file per Claude Code session, and expires after 30 idle minutes.
  * VOICE_MCP_STAY_IN_VOICE=0 in Claude Code's environment (settings.json "env") turns it off.
  */
-import { mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
-import os from "node:os";
+import { mkdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { cacheRoot, callFile, isAlive, listeningFile, readJson, takeInbox, voiceModeDir } from "./voice-files.mjs";
 
 const EXPIRE_MS = 30 * 60_000;
 
@@ -49,20 +49,9 @@ export const NOT_HEARD_PREFIXES = [
   "(You're on a call with the user",
 ];
 
-export function stateDir(env = process.env) {
-  const cache = env.VOICE_MCP_CACHE_DIR?.trim() || path.join(env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache"), "mac-voice-mcp");
-  return path.join(cache, "voice-mode");
-}
-
 const stateFile = (dir, sessionId) => path.join(dir, `${String(sessionId).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 100)}.json`);
 
-function readState(dir, sessionId) {
-  try {
-    return JSON.parse(readFileSync(stateFile(dir, sessionId), "utf8"));
-  } catch {
-    return null;
-  }
-}
+const readState = (dir, sessionId) => readJson(stateFile(dir, sessionId));
 
 function writeState(dir, sessionId, state) {
   mkdirSync(dir, { recursive: true });
@@ -98,17 +87,7 @@ const isCallTool = (name) => /voice-mcp__call$/.test(name ?? "");
 
 // --- Talking while Claude works (shared with src/worklisten.ts) ---------------------------------
 
-const INBOX_MAX_AGE_MS = 15 * 60_000;
-const listeningFile = (dir) => path.join(dir, "listening.state");
-const inboxDir = (dir) => path.join(dir, "inbox");
-
-function readListening(dir) {
-  try {
-    return JSON.parse(readFileSync(listeningFile(dir), "utf8"));
-  } catch {
-    return null;
-  }
-}
+const readListening = (dir) => readJson(listeningFile(dir));
 
 function clearListening(dir, session) {
   if (readListening(dir)?.session === session) rmSync(listeningFile(dir), { force: true });
@@ -116,14 +95,14 @@ function clearListening(dir, session) {
 
 // --- A call (shared with src/call.ts) ------------------------------------------------------------
 
-const callFile = (dir) => path.join(dir, "call.json");
-
 function readCall(dir) {
-  try {
-    return JSON.parse(readFileSync(callFile(dir), "utf8"));
-  } catch {
+  const call = readJson(callFile(dir));
+  if (Number.isInteger(call?.pid) && !isAlive(call.pid)) {
+    // The server died without hanging up (killed hard): its call is over.
+    rmSync(callFile(dir), { force: true });
     return null;
   }
+  return call;
 }
 
 /** Is this session on a call? */
@@ -134,24 +113,7 @@ export function onCall(dir, session) {
 /** Take what the user said while this session worked (oldest first), if this is the session listening or on a call. */
 export function takeInterjections(dir, session, now = Date.now()) {
   if (readListening(dir)?.session !== session && !onCall(dir, session)) return [];
-  let names;
-  try {
-    names = readdirSync(inboxDir(dir)).filter((n) => n.endsWith(".json")).sort();
-  } catch {
-    return [];
-  }
-  const out = [];
-  for (const name of names) {
-    const file = path.join(inboxDir(dir), name);
-    try {
-      const entry = JSON.parse(readFileSync(file, "utf8"));
-      rmSync(file, { force: true });
-      if (typeof entry.text === "string" && now - entry.at < INBOX_MAX_AGE_MS) out.push(entry.text);
-    } catch {
-      rmSync(file, { force: true });
-    }
-  }
-  return out;
+  return takeInbox(dir, now).map((e) => e.text);
 }
 
 export function interjectionReason(texts, { call = false } = {}) {
@@ -170,7 +132,7 @@ export function interjectionReason(texts, { call = false } = {}) {
 export function handle(input, { env = process.env, now = Date.now() } = {}) {
   const session = input?.session_id;
   if (!session) return { exitCode: 0 };
-  const dir = stateDir(env);
+  const dir = voiceModeDir(cacheRoot(env));
   const stayInVoice = !/^(0|false|no|off)$/i.test(env.VOICE_MCP_STAY_IN_VOICE?.trim() ?? "");
 
   switch (input.hook_event_name) {
@@ -181,7 +143,10 @@ export function handle(input, { env = process.env, now = Date.now() } = {}) {
           // The call replaces voice mode: no nudges back to speak_and_listen while it's on.
           clearState(dir, session);
           clearListening(dir, session);
-          writeFileSync(callFile(dir), JSON.stringify({ ...started, session }));
+          // Write then rename: the call polls this file and hangs up if it ever reads half of it.
+          const tmp = `${callFile(dir)}.${process.pid}.tmp`;
+          writeFileSync(tmp, JSON.stringify({ ...started, session }));
+          renameSync(tmp, callFile(dir));
         }
         return { exitCode: 0 };
       }

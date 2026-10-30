@@ -14,10 +14,11 @@
  * voice mode ends, when another session takes over, and after VOICE_MCP_WORK_LISTEN_MINUTES
  * (default 10) without a voice turn.
  */
-import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import * as files from "../hooks/voice-files.mjs";
 import { chime, findRecorder, listenForTurn } from "./audio.js";
 import { CONFIG, debug, envNum } from "./config.js";
 import { lockFile } from "./lock.js";
@@ -25,10 +26,9 @@ import { ensureModel } from "./model.js";
 import { CancelledError, sleep } from "./proc.js";
 import { transcribe } from "./stt.js";
 
-/** Shared with the hook: both live in the voice-mode state folder. */
-export const voiceModeDir = () => path.join(CONFIG.cacheDir, "voice-mode");
-export const listeningFile = () => path.join(voiceModeDir(), "listening.state");
-export const inboxDir = () => path.join(voiceModeDir(), "inbox");
+/** Shared with the hook: both live in the voice-mode state folder (hooks/voice-files.mjs). */
+export const voiceModeDir = () => files.voiceModeDir(CONFIG.cacheDir);
+export const inboxDir = () => files.inboxDir(voiceModeDir());
 /**
  * The user started typing (written by the voice-buddy mod at the first keystroke, as {"at": ms}):
  * the voice turn running now stops speaking and listening at once, and so does listening while
@@ -38,12 +38,8 @@ export const stopFile = () => path.join(voiceModeDir(), "stop");
 
 /** Was a stop asked for at or after `since` (ms)? */
 export function stopRequestedSince(since: number): boolean {
-  try {
-    const at = (JSON.parse(readFileSync(stopFile(), "utf8")) as { at?: unknown }).at;
-    return typeof at === "number" && at >= since;
-  } catch {
-    return false;
-  }
+  const at = (files.readJson(stopFile()) as { at?: unknown } | null)?.at;
+  return typeof at === "number" && at >= since;
 }
 
 /**
@@ -70,8 +66,6 @@ export function showPhase(phase: string | null): void {
 const CONFIRM_MS = Math.max(200, envNum("VOICE_MCP_WORK_LISTEN_CONFIRM_MS", 10_000));
 /** How often, while listening, we check whether to stop (the user typed, voice mode ended, …). */
 const WATCH_MS = 250;
-/** Inbox entries older than this are stale and never delivered. */
-export const INBOX_MAX_AGE_MS = 15 * 60_000;
 /** Longest message kept: a 30-second interjection is about 100 words, so this only cuts whisper running on. */
 export const INBOX_MAX_CHARS = 1000;
 
@@ -89,10 +83,7 @@ export function parseInterjection(text: string): string | null {
   return t.slice(m[0].length).trim();
 }
 
-export interface InboxEntry {
-  text: string;
-  at: number;
-}
+export type InboxEntry = files.InboxEntry;
 
 /** Leave something the user said for the hook (or the next voice turn) to hand to Claude. */
 export function addToInbox(text: string, now = Date.now()): void {
@@ -106,26 +97,7 @@ export function addToInbox(text: string, now = Date.now()): void {
 }
 
 /** Take everything waiting in the inbox (oldest first), removing it. Stale entries are dropped. */
-export function takeInbox(now = Date.now()): InboxEntry[] {
-  let names: string[];
-  try {
-    names = readdirSync(inboxDir()).filter((n) => n.endsWith(".json")).sort();
-  } catch {
-    return [];
-  }
-  const out: InboxEntry[] = [];
-  for (const name of names) {
-    const file = path.join(inboxDir(), name);
-    try {
-      const entry = JSON.parse(readFileSync(file, "utf8")) as InboxEntry;
-      rmSync(file, { force: true });
-      if (typeof entry.text === "string" && now - entry.at < INBOX_MAX_AGE_MS) out.push(entry);
-    } catch {
-      rmSync(file, { force: true });
-    }
-  }
-  return out;
-}
+export const takeInbox = (now = Date.now()): InboxEntry[] => files.takeInbox(voiceModeDir(), now);
 
 /** What the next voice turn tells Claude about interjections the hook hasn't delivered yet. */
 export function interjectionNote(entries: InboxEntry[]): string | null {
@@ -135,22 +107,14 @@ export function interjectionNote(entries: InboxEntry[]): string | null {
 }
 
 function readListening(): { at: number } | null {
-  try {
-    const s = JSON.parse(readFileSync(listeningFile(), "utf8")) as { at?: unknown };
-    return typeof s.at === "number" ? { at: s.at } : null;
-  } catch {
-    return null;
-  }
+  const at = (files.readJson(files.listeningFile(voiceModeDir())) as { at?: unknown } | null)?.at;
+  return typeof at === "number" ? { at } : null;
 }
 
 /** Another process is in a voice turn (it holds the mic lock): don't compete with it. */
 function micBusyElsewhere(): boolean {
-  try {
-    const owner = JSON.parse(readFileSync(lockFile(), "utf8")) as { pid?: number };
-    return typeof owner.pid === "number" && owner.pid !== process.pid;
-  } catch {
-    return false;
-  }
+  const pid = (files.readJson(lockFile()) as { pid?: unknown } | null)?.pid;
+  return typeof pid === "number" && pid !== process.pid && files.isAlive(pid);
 }
 
 class WorkListener {

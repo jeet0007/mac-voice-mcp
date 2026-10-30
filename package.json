@@ -11,6 +11,7 @@
   "main": "dist/index.js",
   "files": [
     "dist",
+    "hooks/voice-files.mjs",
     "examples",
     "README.md",
     "LICENSE",

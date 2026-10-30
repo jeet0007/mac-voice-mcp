@@ -162,6 +162,11 @@ cache, so Silero VAD needs no new download for Kokoro users.
 - `system_profiler` is slow (~1 s); fine once per call, not for polling.
 - Kokoro pause/resume via process signals needs care with SoX buffers.
 - Cowork bridge: tool calls over 60 s fail; `listen` waits 40 s at most.
+- Seen 2026-10-30 (twice): a background task (agent or `run_in_background` command) finishing
+  mid-`say` cut the spoken reply off, so the user missed it. The same notice also reached Claude
+  again as if the user had said it. Cause not traced: the new turn may stop playback, or Voice Buddy
+  may hand the notice over. To reproduce: on a call, `say` a long line just before a background
+  command ends.
 
 ## Prior art
 

@@ -97,6 +97,7 @@ export function createServer(): StdioMcpServer {
     },
   );
 
+  const startingCalls = new Set<AbortController>();
   server.registerTool(
     "call",
     {
@@ -107,21 +108,29 @@ export function createServer(): StdioMcpServer {
     },
     async ({ action }, { signal }): Promise<CallToolResult> => {
       if (action === "end") {
+        // An end while a start still waits for the mic cancels that start.
+        for (const pending of startingCalls) pending.abort();
         await call.end("Claude ended the call");
         return reply(CALL_ENDED_BY_CLAUDE);
       }
+      const ended = new AbortController();
+      startingCalls.add(ended);
       try {
         return await exclusive(async () => {
           await finishSpeaking();
           await preflight();
           await workListener.stop();
-          if ((await call.start(signal)) === "already") return reply(CALL_ALREADY_ON);
+          if (ended.signal.aborted) throw new CancelledError();
+          if ((await call.start(AbortSignal.any([signal, ended.signal]))) === "already") return reply(CALL_ALREADY_ON);
           const notes = await call.say(CALL_GREETING);
           return reply(CALL_RULES, notes);
         });
       } catch (err) {
+        if (err instanceof CancelledError && ended.signal.aborted && !signal.aborted) return reply(CALL_ENDED_BY_CLAUDE);
         if (err instanceof CancelledError) throw err;
         return failed("call", err);
+      } finally {
+        startingCalls.delete(ended);
       }
     },
   );

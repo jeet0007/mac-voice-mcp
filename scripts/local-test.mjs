@@ -28,6 +28,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { cacheRoot, voiceModeDir } from "../hooks/voice-files.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const run = promisify(execFile);
@@ -73,9 +74,7 @@ const LONG_REPLY =
   "This is a long reply to test typing to interrupt. It keeps going for a while, so there is time to type. " +
   "If you hear this whole sentence, the interrupt did not work.";
 
-const CACHE_ROOT =
-  process.env.VOICE_MCP_CACHE_DIR?.trim() || path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache"), "mac-voice-mcp");
-const STOP_FILE = path.join(CACHE_ROOT, "voice-mode", "stop");
+const STOP_FILE = path.join(voiceModeDir(cacheRoot()), "stop");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const median = (xs) => {

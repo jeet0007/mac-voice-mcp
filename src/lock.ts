@@ -7,8 +7,9 @@
  * blocks the mic for good. If the lock can't be used at all (read-only or missing cache
  * folder), turns go ahead without it rather than failing.
  */
-import { closeSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
+import { closeSync, linkSync, mkdirSync, openSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
 import path from "node:path";
+import { isAlive, readJson } from "../hooks/voice-files.mjs";
 import { CONFIG, debug } from "./config.js";
 import { CancelledError, sleep } from "./proc.js";
 
@@ -36,21 +37,8 @@ export const ON_A_CALL_ELSEWHERE =
   "microphone for it). Tell the user on screen; voice here works again once that call ends.";
 
 function readOwner(file: string): Owner | null {
-  try {
-    const o = JSON.parse(readFileSync(file, "utf8")) as Owner;
-    return Number.isInteger(o.pid) && Number.isFinite(o.since) ? o : null;
-  } catch {
-    return null;
-  }
-}
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === "EPERM"; // exists, owned by someone else
-  }
+  const o = readJson(file) as Owner | null;
+  return o && Number.isInteger(o.pid) && Number.isFinite(o.since) ? o : null;
 }
 
 /** The lock file's identity (inode) if it's stale, otherwise null. */

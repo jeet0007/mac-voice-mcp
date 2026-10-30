@@ -12,12 +12,13 @@
  * (the plugin hook removes it when the session ends), when the recorder fails, or at shutdown.
  * Ending stops the recorder within a second, empties the inbox, and says "Bye."
  */
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import * as files from "../hooks/voice-files.mjs";
 import { listenContinuously, speak } from "./audio.js";
-import { CONFIG, debug, envNum, log } from "./config.js";
+import { CONFIG, debug, envNum, log, PKG } from "./config.js";
 import { acquireMicLock } from "./lock.js";
 import { ensureModel } from "./model.js";
 import { CancelledError, sleep } from "./proc.js";
@@ -26,7 +27,14 @@ import { addToInbox, inboxDir, showPhase, takeInbox, voiceModeDir, type InboxEnt
 import { trackSpeaking, watchForTyping } from "./voice.js";
 
 /** Shared with the plugin hook and Voice Buddy: who is on a call, and which session it belongs to. */
-export const callFile = () => path.join(voiceModeDir(), "call.json");
+export const callFile = () => files.callFile(voiceModeDir());
+
+/** The last speech-to-text failure on a call, kept for debugging (and a future /issue). */
+export const sttFailureFile = () => path.join(CONFIG.cacheDir, "last-stt-failure.json");
+
+const missedNote = ({ count, error }: { count: number; error: string }) =>
+  `(voice-mcp note: speech to text failed on ${count === 1 ? "something" : `${count} things`} the user said just before this (${error}), ` +
+  `so you may have missed words. Tell them, say what you did hear, and that the failure is recorded in ${sttFailureFile()}.)`;
 
 /** How often the call checks for idleness, call.json and leftovers in the inbox. */
 const WATCH_MS = 250;
@@ -68,6 +76,8 @@ export class Call {
   private transcribing: Promise<void> = Promise.resolve();
   /** Problems with earlier speech, reported in the next result. */
   private laterNotes: string[] = [];
+  /** Things the user said that speech to text failed on, since the last one it heard. */
+  private missed: { count: number; error: string } | null = null;
   private wakers = new Set<() => void>();
 
   get on(): boolean {
@@ -84,6 +94,7 @@ export class Call {
     this.ctl = ctl;
     this.state = "on";
     this.endedBecause = "";
+    this.missed = null;
     this.lastActivity = Date.now();
     this.muteUntil = 0;
     mkdirSync(voiceModeDir(), { recursive: true });
@@ -114,14 +125,14 @@ export class Call {
     takeInbox();
     rmSync(callFile(), { force: true });
     showPhase(null);
-    release!();
     for (const wake of this.wakers) wake();
     try {
       await loop;
     } finally {
       this.state = "off";
     }
-    this.speaking = this.speaking.then(() => speak("Bye.").then(() => {}, () => {}));
+    // The mic lock is held until "Bye." has played, so another window can't talk over it (exit frees it too).
+    this.speaking = this.speaking.then(() => speak("Bye.").then(() => {}, () => {})).finally(release!);
     trackSpeaking(this.speaking);
   }
 
@@ -192,7 +203,7 @@ export class Call {
         dir,
         muted: () => Date.now() < this.muteUntil,
         onUtterance: (wav) => {
-          this.transcribing = this.transcribing.then(() => this.heard(wav, model, signal)).catch(() => {});
+          this.transcribing = this.transcribing.then(() => this.heard(wav, model, signal)).catch((e: unknown) => this.notHeard(e, model, signal));
         },
       });
     } finally {
@@ -211,8 +222,25 @@ export class Call {
       void this.end("the user hung up");
       return;
     }
-    addToInbox(text);
+    addToInbox(this.missed ? `${missedNote(this.missed)} ${text}` : text);
+    this.missed = null;
     for (const wake of this.wakers) wake();
+  }
+
+  /** Speech to text failed on something the user said: record it, and tell Claude with the next thing heard. */
+  private notHeard(err: unknown, model: string, signal: AbortSignal): void {
+    if (signal.aborted || err instanceof CancelledError) return;
+    const error = err instanceof Error ? err.message : String(err);
+    log(`call: speech to text failed: ${error}`);
+    this.missed = { count: (this.missed?.count ?? 0) + 1, error };
+    try {
+      writeFileSync(
+        sttFailureFile(),
+        JSON.stringify({ at: new Date().toISOString(), error, failures: this.missed.count, model, version: PKG.version, platform: `${process.platform} ${os.release()}` }, null, 2),
+      );
+    } catch (e) {
+      log(`call: couldn't record the failure: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   private tick(): void {
@@ -221,13 +249,7 @@ export class Call {
       void this.end(`nobody said anything for ${Math.round(IDLE_MS / 60_000)} minutes`);
       return;
     }
-    let mine = false;
-    try {
-      mine = (JSON.parse(readFileSync(callFile(), "utf8")) as { pid?: unknown }).pid === process.pid;
-    } catch {
-      /* gone */
-    }
-    if (!mine) {
+    if ((files.readJson(callFile()) as { pid?: unknown } | null)?.pid !== process.pid) {
       void this.end("the session ended");
       return;
     }
