@@ -198,11 +198,11 @@ async function speakBuiltIn(text: string, signal?: AbortSignal): Promise<void> {
   if (cmd) {
     const ready = takeStandby([cmd.bin, ...cmd.args].join("\0"));
     result = ready
-      ? await ready.send(text, { signal, timeoutMs: 180_000 })
-      : await run(cmd.bin, cmd.args, { input: text, signal, timeoutMs: 180_000 });
+      ? await ready.send(text, { signal, timeoutMs: 180_000, speaker: true })
+      : await run(cmd.bin, cmd.args, { input: text, signal, timeoutMs: 180_000, speaker: true });
     void prepareBuiltInVoice(); // for the next reply
   } else {
-    result = await run(bin, ["-w", ` ${text}`], { signal, timeoutMs: 180_000 });
+    result = await run(bin, ["-w", ` ${text}`], { signal, timeoutMs: 180_000, speaker: true });
   }
 
   if (result.code !== 0) {

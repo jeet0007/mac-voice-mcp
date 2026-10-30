@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { CONFIG, debug, IS_MAC, log } from "./config.js";
 import { prepareForKokoro } from "./kokoro-text.js";
 import { resamplePcm16, wavHeaderFor } from "./pcm.js";
-import { CancelledError, isExecutable, run, SetupError, tail, which } from "./proc.js";
+import { CancelledError, isExecutable, run, SetupError, tail, trackSpeaker, which } from "./proc.js";
 
 /** The kokoro-js release we install and test against. */
 export const KOKORO_JS_VERSION = "1.2.1";
@@ -299,6 +299,7 @@ function soxPlayer(bin: string): Player {
     stdio: ["pipe", "ignore", "pipe"],
     windowsHide: true,
   });
+  trackSpeaker(child);
   let stderr = "";
   child.stderr!.setEncoding("utf8").on("data", (d: string) => (stderr = (stderr + d).slice(-2000)));
   child.stdin!.on("error", () => {});
@@ -336,6 +337,7 @@ function afplayPlayer(): Player {
     await new Promise<void>((resolve, reject) => {
       const child = spawn("/usr/bin/afplay", [file], { stdio: "ignore" });
       current = child;
+      trackSpeaker(child);
       child.on("error", reject);
       child.on("close", (code) => (code === 0 || killed ? resolve() : reject(new Error(`afplay failed (exit ${code})`))));
     });
