@@ -19,11 +19,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import * as files from "../hooks/voice-files.mjs";
-import { detectDuplex, listenContinuously, speak } from "./audio.js";
+import { listenContinuously, speak } from "./audio.js";
+import { BargeIn, type Interruption } from "./barge-in.js";
 import { CONFIG, debug, envNum, log, PKG } from "./config.js";
 import { acquireMicLock } from "./lock.js";
 import { ensureModel } from "./model.js";
-import { CancelledError, pauseSpeech, sleep } from "./proc.js";
+import { CancelledError, sleep } from "./proc.js";
+import { detectDuplex, pauseSpeech } from "./speakers.js";
 import { prewarm, transcribe } from "./stt.js";
 import { addToInbox, inboxDir, showPhase, takeInbox, voiceModeDir, type InboxEntry } from "./worklisten.js";
 import { trackSpeaking, watchForTyping } from "./voice.js";
@@ -44,10 +46,6 @@ const WATCH_MS = 250;
 const ECHO_TAIL_MS = 300;
 /** A `say` that fails right away (no voice installed) is reported by that call; later failures by the next one. */
 const EARLY_FAILURE_MS = 300;
-/** After talking over Claude, nothing real said within this long resumes the reply (LiveKit's 2 s). */
-const BARGE_IN_WAIT_MS = 2000;
-/** About how fast the voices speak, to tell Claude how much of a reply was heard. */
-const WORDS_PER_SECOND = 2.7;
 /** The call ends after this long without a word either way. Fractions are fine (the tests use seconds). */
 const IDLE_MS = Math.max(0.01, envNum("VOICE_MCP_CALL_IDLE_MINUTES", 30)) * 60_000;
 
@@ -61,22 +59,6 @@ export function isHangUp(text: string): boolean {
   const around = "(?:okay|ok|alright|all right|yes|yeah|so|um|uh|well|please|thanks|thank you|now|for now|let's|can you|could you|claude|and)";
   const core = "(?:hang up|hangup|end (?:the )?call|(?:good)?bye claude)";
   return new RegExp(`^(?:${around} )*${core}(?: ${around})*$`).test(t);
-}
-
-const FILLERS = new Set(["mm", "mmm", "hmm", "mhm", "mm-hmm", "mm-hm", "uh-huh", "uh", "um", "ah", "oh", "okay", "ok", "yeah", "yep", "right", "sure"]);
-
-/**
- * Is this only backchannel ("Mm-hmm.", "Yeah, okay."), or nothing at all? Then talking over Claude
- * doesn't cut its reply. Sound tags whisper adds ("[BLANK_AUDIO]", "(coughs)") don't count as words.
- */
-export function isFiller(text: string): boolean {
-  const words = text
-    .toLowerCase()
-    .replace(/\[[^\]]*\]|\([^)]*\)/g, " ")
-    .replace(/[^\p{L}\p{N}'\- ]+/gu, " ")
-    .split(/\s+/)
-    .filter((w) => /[\p{L}\p{N}]/u.test(w));
-  return words.every((w) => FILLERS.has(w));
 }
 
 export type CallState = "off" | "on" | "ending";
@@ -96,14 +78,8 @@ export class Call {
   private muteUntil = 0;
   /** `say` calls play one after another. */
   private speaking: Promise<void> = Promise.resolve();
-  /** The `say` playing now. */
-  private playing: { text: string; startedAt: number; pausedMs: number; stop: () => void } | null = null;
-  /** The user talked over `playing` (full duplex): it's paused until their words are transcribed. */
-  private bargeIn: { at: number; pending: number; filler: boolean } | null = null;
-  /** The user has been talking for a moment (BARGE_IN_MS), and hasn't finished. */
-  private talking = false;
-  /** `say` calls queued before this were talked over: they're dropped. */
-  private dropBefore = 0;
+  /** The user talking over `say` (full duplex). A fresh one each call. */
+  private bargeIn = new BargeIn(pauseSpeech);
   /** Utterances are transcribed in the order they were said. */
   private transcribing: Promise<void> = Promise.resolve();
   /** Problems with earlier speech, reported in the next result. */
@@ -129,7 +105,7 @@ export class Call {
     this.endedBecause = "";
     this.missed = null;
     this.muteUntil = 0;
-    this.talking = false;
+    this.bargeIn = new BargeIn(pauseSpeech);
     this.duplex = duplex;
     this.lastActivity = Date.now();
     mkdirSync(voiceModeDir(), { recursive: true });
@@ -157,9 +133,7 @@ export class Call {
     // Everything that must not outlive the call happens before the first await, so a shutdown
     // that exits right after calling this still leaves nothing behind.
     ctl!.abort();
-    if (this.bargeIn) this.playing?.stop();
-    this.bargeIn = null;
-    pauseSpeech(false); // a stopped process can't act on SIGTERM
+    this.bargeIn.end();
     takeInbox();
     rmSync(callFile(), { force: true });
     showPhase(null);
@@ -181,12 +155,12 @@ export class Call {
     let returned = false;
     const startedAt = Date.now();
     const play = async () => {
-      if (!this.on || startedAt < this.dropBefore) return;
+      if (!this.on || this.bargeIn.dropped(startedAt)) return;
       this.muteUntil = Infinity;
       showPhase("speaking");
       const ctl = new AbortController();
       const typing = watchForTyping(startedAt, ctl.signal);
-      this.playing = { text, startedAt: Date.now(), pausedMs: 0, stop: () => ctl.abort() };
+      this.bargeIn.play(text, () => ctl.abort());
       try {
         await speak(text, typing.signal);
       } catch (err) {
@@ -195,7 +169,7 @@ export class Call {
           else this.laterNotes.push(`voice-mcp note: what you last said wasn't heard: ${err instanceof Error ? err.message : String(err)}`);
         }
       } finally {
-        this.playing = null;
+        this.bargeIn.played();
         typing.dispose();
         this.muteUntil = Date.now() + ECHO_TAIL_MS;
         this.lastActivity = Date.now();
@@ -242,25 +216,14 @@ export class Call {
         dir,
         muted: () => this.duplex === "half" && Date.now() < this.muteUntil,
         onUtterance: (wav) => {
-          const b = this.bargeIn;
-          if (b) b.pending++;
+          const from = this.bargeIn.utterance();
           this.transcribing = this.transcribing
-            .then(() => this.heard(wav, model, signal, b))
+            .then(() => this.heard(wav, model, signal, from))
             .catch((e: unknown) => this.notHeard(e, model, signal))
-            .finally(() => {
-              if (!b) return;
-              b.pending--;
-              this.settle();
-            });
+            .finally(() => this.bargeIn.done(from));
         },
         onSpeech: (talking) => {
-          this.talking = talking;
-          if (talking && this.duplex === "full" && this.playing && !this.bargeIn) {
-            pauseSpeech(true);
-            this.bargeIn = { at: Date.now(), pending: 0, filler: false };
-            setTimeout(() => this.settle(), BARGE_IN_WAIT_MS);
-          }
-          if (!talking) this.settle();
+          if (this.duplex === "full") this.bargeIn.speech(talking);
         },
       });
     } finally {
@@ -269,52 +232,22 @@ export class Call {
     }
   }
 
-  /** `bargeIn`: the one this utterance talked over, if any. */
-  private async heard(wav: string, model: string, signal: AbortSignal, bargeIn: Call["bargeIn"]): Promise<void> {
+  /** `from`: the reply this utterance talked over, if any. */
+  private async heard(wav: string, model: string, signal: AbortSignal, from: Interruption | null): Promise<void> {
     if (signal.aborted) return;
-    let text = await transcribe(wav, model, signal).finally(() => rmSync(wav, { force: true }));
-    debug(`call heard: ${JSON.stringify(text)}`);
+    const transcript = await transcribe(wav, model, signal).finally(() => rmSync(wav, { force: true }));
+    debug(`call heard: ${JSON.stringify(transcript)}`);
     if (signal.aborted) return; // the call ended meanwhile
-    if (isHangUp(text)) {
+    if (isHangUp(transcript)) {
       void this.end("the user hung up");
       return;
     }
-    const cut = bargeIn !== null && bargeIn === this.bargeIn;
-    if (cut && isFiller(text)) {
-      bargeIn.filler = true; // the reply resumes once this utterance is done (settle)
-      return;
-    }
-    if (!text) return; // a cough
+    const text = this.bargeIn.heard(from, transcript);
+    if (!text) return; // a cough, or a filler said over Claude (its reply resumes)
     this.lastActivity = Date.now();
-    if (cut) {
-      text = `(You interrupted Claude after: '${this.heardSoFar()}') ${text}`;
-      this.dropBefore = Date.now();
-      this.playing?.stop();
-      this.bargeIn = null;
-      pauseSpeech(false);
-    }
     addToInbox(this.missed ? `${missedNote(this.missed)} ${text}` : text);
     this.missed = null;
     for (const wake of this.wakers) wake();
-  }
-
-  /** Resume a talked-over reply once the user has stopped and said nothing real (a filler, or nothing within BARGE_IN_WAIT_MS). */
-  private settle(): void {
-    const b = this.bargeIn;
-    if (!b || this.talking || b.pending > 0 || !(b.filler || Date.now() - b.at >= BARGE_IN_WAIT_MS)) return;
-    pauseSpeech(false);
-    if (this.playing) this.playing.pausedMs += Date.now() - b.at;
-    this.bargeIn = null;
-  }
-
-  /** The words of the playing reply the user heard before talking over it. */
-  private heardSoFar(): string {
-    if (!this.playing) return "…";
-    // shortcut: estimated from the time played at an average pace, so off by a few words; upgrade when the voices report word timings.
-    const { text, startedAt, pausedMs } = this.playing;
-    const words = text.split(/\s+/).filter(Boolean);
-    const n = Math.max(1, Math.round(((this.bargeIn!.at - startedAt - pausedMs) / 1000) * WORDS_PER_SECOND));
-    return n >= words.length ? text : `${words.slice(0, n).join(" ")}…`;
   }
 
   /** Speech to text failed on something the user said: record it, and tell Claude with the next thing heard. */
@@ -335,7 +268,7 @@ export class Call {
 
   private tick(): void {
     if (!this.on) return;
-    this.settle(); // backs up its timer, which may fire a moment early
+    this.bargeIn.settle(); // backs up its timer, which may fire a moment early
     if (Date.now() - this.lastActivity > IDLE_MS) {
       void this.end(`nobody said anything for ${Math.round(IDLE_MS / 60_000)} minutes`);
       return;

@@ -22,7 +22,8 @@ import { fileURLToPath } from "node:url";
 import { CONFIG, debug, IS_MAC, log } from "./config.js";
 import { prepareForKokoro } from "./kokoro-text.js";
 import { resamplePcm16, wavHeaderFor } from "./pcm.js";
-import { CancelledError, isExecutable, run, SetupError, tail, trackSpeaker, which } from "./proc.js";
+import { CancelledError, isExecutable, run, SetupError, tail, which } from "./proc.js";
+import { trackSpeaker } from "./speakers.js";
 
 /** The kokoro-js release we install and test against. */
 export const KOKORO_JS_VERSION = "1.2.1";

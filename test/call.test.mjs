@@ -1,8 +1,9 @@
 // Hang-up phrases: the whole transcript, with politeness around it, never a negation.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { headphonesFromProfile } from "../dist/audio.js";
-import { isFiller, isHangUp } from "../dist/call.js";
+import { BargeIn, isFiller } from "../dist/barge-in.js";
+import { headphonesFromProfile } from "../dist/speakers.js";
+import { isHangUp } from "../dist/call.js";
 
 test("hang-up phrases end the call; anything else, including 'don't hang up', doesn't", () => {
   for (const said of ["Hang up.", "hang up", "Okay, hang up now.", "Claude, hang up.", "Hang up, please.", "Bye Claude!", "Goodbye, Claude.", "End the call.", "End call", "Thanks, end the call now."]) {
@@ -34,4 +35,60 @@ test("talking over Claude with only fillers or sound tags doesn't cut its reply;
   for (const said of ["Wait.", "Okay, stop.", "Yeah, use the other file.", "No.", "Hmm, that's wrong.", "ใช่"]) {
     assert.equal(isFiller(said), false, said);
   }
+});
+
+/** A BargeIn on a fake clock, recording every pause and stop. */
+function bargeIn() {
+  const log = [];
+  let t = 1000;
+  const b = new BargeIn((paused) => log.push(paused ? "pause" : "resume"), () => t);
+  b.play("One two three four five six.", () => log.push("stop"));
+  return { b, log, wait: (ms) => (t += ms) };
+}
+
+test("talking over a reply with real words pauses it, then drops the rest and the replies queued behind it", () => {
+  const { b, log, wait } = bargeIn();
+  wait(1111); // about three words in
+  b.speech(true);
+  assert.deepEqual(log, ["pause"]);
+  const from = b.utterance();
+  b.speech(false);
+  assert.deepEqual(log, ["pause"], "still paused while the words are transcribed");
+  assert.equal(b.heard(from, "Wait, use the other file."), "(You interrupted Claude after: 'One two three…') Wait, use the other file.");
+  b.done(from);
+  assert.deepEqual(log, ["pause", "stop", "resume"]);
+  assert.equal(b.dropped(1500), true);
+  wait(10);
+  assert.equal(b.dropped(2200), false);
+});
+
+test("a filler said over a reply resumes it at once and isn't handed to Claude", () => {
+  const { b, log } = bargeIn();
+  b.speech(true);
+  const from = b.utterance();
+  b.speech(false);
+  assert.equal(b.heard(from, "Mm-hmm."), "");
+  b.done(from);
+  assert.deepEqual(log, ["pause", "resume"]);
+});
+
+test("no words within 2 s resumes the reply, but never while the user is still talking", () => {
+  const { b, log, wait } = bargeIn();
+  b.speech(true);
+  wait(2500);
+  b.settle();
+  assert.deepEqual(log, ["pause"], "still talking");
+  b.speech(false); // a blip the endpointer threw away: no utterance
+  assert.deepEqual(log, ["pause", "resume"]);
+});
+
+test("speech while nothing plays changes nothing; the call ending never leaves speech paused", () => {
+  const idle = new BargeIn(() => assert.fail("nothing to pause"));
+  idle.speech(true);
+  assert.equal(idle.heard(idle.utterance(), "Hello there."), "Hello there.");
+
+  const { b, log } = bargeIn();
+  b.speech(true);
+  b.end();
+  assert.deepEqual(log, ["pause", "stop", "resume"]);
 });

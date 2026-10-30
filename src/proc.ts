@@ -70,34 +70,12 @@ export interface RunOptions {
   killSignal?: NodeJS.Signals;
   env?: NodeJS.ProcessEnv;
   cwd?: string;
-  /** It plays speech: pauseSpeech() pauses it. */
-  speaker?: boolean;
+  /** Called with the process once it's started. */
+  onProcess?: (child: ChildProcess) => void;
 }
 
 /** Every child we start, so shutdown can stop them all. */
 export const activeChildren = new Set<ChildProcess>();
-
-/** Processes playing speech, until they exit. */
-const speakers = new Set<ChildProcess>();
-let speechPaused = false;
-
-/**
- * Pause (true) or resume (false) all speech, for the user talking over it. SIGSTOP silences `say`
- * or SoX `play` within 200 ms and SIGCONT resumes mid-sentence. A stopped process can't act on
- * SIGTERM, so whoever stops paused speech must resume it right after.
- */
-export function pauseSpeech(paused: boolean): void {
-  speechPaused = paused;
-  if (IS_WIN) return; // no SIGSTOP: Windows would kill it
-  for (const child of speakers) child.kill(paused ? "SIGSTOP" : "SIGCONT");
-}
-
-/** Make pauseSpeech() reach `child` until it exits; one started while speech is paused is paused at once. */
-export function trackSpeaker(child: ChildProcess): void {
-  speakers.add(child);
-  child.once("close", () => speakers.delete(child));
-  if (speechPaused && !IS_WIN) child.kill("SIGSTOP");
-}
 
 export function run(cmd: string, args: string[], opts: RunOptions = {}): Promise<RunResult> {
   return new Promise((resolve, reject) => {
@@ -111,7 +89,7 @@ export function run(cmd: string, args: string[], opts: RunOptions = {}): Promise
       env: opts.env ? { ...process.env, ...opts.env } : process.env,
     });
     activeChildren.add(child);
-    if (opts.speaker) trackSpeaker(child);
+    opts.onProcess?.(child);
 
     let stdout = "";
     let stderr = "";
@@ -161,7 +139,7 @@ export interface Waiting {
   /** When it was started (Date.now()). */
   readonly startedAt: number;
   /** Give it its input and wait for it to finish, like run(). */
-  send(input: string, opts?: { signal?: AbortSignal; timeoutMs?: number; speaker?: boolean }): Promise<RunResult>;
+  send(input: string, opts?: { signal?: AbortSignal; timeoutMs?: number; onProcess?: (child: ChildProcess) => void }): Promise<RunResult>;
   kill(): void;
 }
 
@@ -217,7 +195,7 @@ export function startWaiting(cmd: string, args: string[], opts: { env?: NodeJS.P
         throw new CancelledError();
       }
       sent = true;
-      if (o.speaker) trackSpeaker(child);
+      o.onProcess?.(child);
       let timedOut = false;
       const timer = o.timeoutMs
         ? setTimeout(() => {
