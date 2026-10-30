@@ -1318,3 +1318,35 @@ test("raw JSON-RPC: version negotiation, errors, notifications, bad arguments", 
     child.kill();
   }
 });
+
+test("muting a call: the mic hears nothing until unmuted, and the call's end clears the mute", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "talk" }));
+  const mute = path.join(voiceModeDir(sb), "mute");
+  const talk = async () => {
+    writeFileSync(`${sb.log}.talk`, "");
+    assert.ok(await waitFor(() => !existsSync(`${sb.log}.talk`)), "the stub started talking");
+  };
+  try {
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    writeFileSync(mute, "");
+    await new Promise((r) => setTimeout(r, 600)); // the call checks for the mute file every 250 ms
+    await talk();
+    const muted = await client.callTool({ name: "listen", arguments: { wait_seconds: 2 } });
+    assert.match(muted.content[0].text, /^\(still on the call, nothing said\)/);
+    assert.doesNotMatch(sb.readLog(), /whisper-server inference/, "nothing said while muted was transcribed");
+
+    rmSync(mute);
+    await new Promise((r) => setTimeout(r, 600));
+    await talk();
+    const heard = await client.callTool({ name: "listen", arguments: { wait_seconds: 5 } });
+    assert.equal(heard.content[0].text, "Stub transcript from the server.");
+
+    writeFileSync(mute, "");
+    await client.callTool({ name: "call", arguments: { action: "end" } });
+    assert.ok(!existsSync(mute), "the next call doesn't start muted");
+  } finally {
+    await client.close();
+  }
+});

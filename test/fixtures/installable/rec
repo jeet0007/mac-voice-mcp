@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Stub SoX `rec`: streams synthetic 16 kHz mono s16le audio to stdout at 10x real time.
 // STUB_SCENARIO: answer | cough | silent | zero | long | call | dies (the recorder fails after a second)
+//   | talk (noise; 1.5 s of speech each time the file $STUB_LOG.talk appears, which it removes)
 //   | bargein (noise until a second text is spoken, then 1.5 s of speech over it, logged as "rec speech-onset <ms>")
 // STUB_SCENARIO_LATER: another scenario for every recording after the first (e.g. silence while Claude works).
 const fs = require("fs");
@@ -31,6 +32,7 @@ const script = {
   call: () => [noise(5), speech(1.5), noise(20), speech(1.5), noise(2.5)],
   dies: () => [noise(10)],
   bargein: () => [],
+  talk: () => [],
 }[scenario]();
 const frames = [];
 for (const part of script) for (let i = 0; i < part.length; i += 480) frames.push(part.slice(i, i + 480));
@@ -42,6 +44,11 @@ setInterval(() => {
   if (scenario === "bargein" && !spoken && (fs.readFileSync(process.env.STUB_LOG, "utf8").match(/^speak "/gm)?.length ?? 0) >= 2) {
     spoken = true;
     fs.appendFileSync(process.env.STUB_LOG, `rec speech-onset ${Date.now()}\n`);
+    const s = speech(1.5);
+    for (let j = 0; j < s.length; j += 480) frames.push(s.slice(j, j + 480));
+  }
+  if (scenario === "talk" && fs.existsSync(`${process.env.STUB_LOG}.talk`)) {
+    fs.rmSync(`${process.env.STUB_LOG}.talk`);
     const s = speech(1.5);
     for (let j = 0; j < s.length; j += 480) frames.push(s.slice(j, j + 480));
   }

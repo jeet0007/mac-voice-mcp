@@ -19,6 +19,8 @@ export const listeningFile = (dir) => path.join(dir, "listening.state");
 export const inboxDir = (dir) => path.join(dir, "inbox");
 /** Who is on a call, and which session it belongs to. */
 export const callFile = (dir) => path.join(dir, "call.json");
+/** Present while the user has muted the call (the floating bubble's mute button): the mic hears nothing. */
+export const muteFile = (dir) => path.join(dir, "mute");
 
 /** Inbox entries older than this are stale and never delivered. */
 export const INBOX_MAX_AGE_MS = 15 * 60_000;

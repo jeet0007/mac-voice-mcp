@@ -33,8 +33,7 @@ import { trackSpeaking } from "./voice.js";
 /** Shared with the plugin hook and Voice Buddy: who is on a call, and which session it belongs to. */
 export const callFile = () => files.callFile(voiceModeDir());
 
-/** Present while the user has muted the call (the floating bubble's mute button): the mic hears nothing. */
-export const muteFile = () => path.join(voiceModeDir(), "mute");
+export const muteFile = () => files.muteFile(voiceModeDir());
 
 /** The last speech-to-text failure on a call, kept for debugging (and a future /issue). */
 export const sttFailureFile = () => path.join(CONFIG.cacheDir, "last-stt-failure.json");
