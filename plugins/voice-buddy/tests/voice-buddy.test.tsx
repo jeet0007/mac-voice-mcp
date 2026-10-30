@@ -248,12 +248,12 @@ test("after a reload mid-call, this window's call is picked up again from call.j
   expect(submitted).toEqual([JSON.stringify({ text: 'are you still there', origin: 'plugin', asUser: true })])
 })
 
-test('typing during a call writes the stop file', async ($, on) => {
+test("typing during a call doesn't write the stop file (a typo shouldn't cut Claude off)", async ($, on) => {
   const { clock, files } = callEngine(on, {})
   await $.tool.call({ tool: CALL, action: 'start' } as never)
   await $.prompt.edit(key('h'))
   await clock.settle()
-  expect(files[`${DIR}/stop`]).toBe(JSON.stringify({ at: 1_000_000 }))
+  expect(files[`${DIR}/stop`]).toBeUndefined()
 })
 
 test('the blob loops seamlessly, and its frames fit the Raster', async () => {

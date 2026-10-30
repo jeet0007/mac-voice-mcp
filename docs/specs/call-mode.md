@@ -38,7 +38,7 @@ Claude is still writing (MCP only sees finished tool calls), telephony, cloud sp
 | Listen while Claude works, inbox, hook delivery | `worklisten.ts`, `hooks/voice-mode-lib.mjs` | Becomes the call's mic engine, without the "Claude, …" wake word |
 | Warm whisper-server | `stt.ts` | Transcribe each utterance |
 | Kokoro streaming playback, background speech | `kokoro.ts`, `voice.ts` | `say`, pause/resume for barge-in |
-| Stop file (typing interrupts) | `worklisten.ts` | Typing still interrupts; hang-up also uses it |
+| Stop file (typing interrupts) | `worklisten.ts` | Not on a call: typing doesn't cut Claude off (a typo would) |
 | Mic lock across windows | `lock.ts` | Held for the whole call |
 | Phase file + Voice Buddy | `worklisten.ts`, `plugins/voice-buddy` | Show "on a call" |
 

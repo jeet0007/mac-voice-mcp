@@ -28,7 +28,7 @@ import { CancelledError, sleep } from "./proc.js";
 import { detectDuplex, pauseSpeech } from "./speakers.js";
 import { prewarm, transcribe } from "./stt.js";
 import { addToInbox, inboxDir, showPhase, takeInbox, voiceModeDir, type InboxEntry } from "./worklisten.js";
-import { trackSpeaking, watchForTyping } from "./voice.js";
+import { trackSpeaking } from "./voice.js";
 
 /** Shared with the plugin hook and Voice Buddy: who is on a call, and which session it belongs to. */
 export const callFile = () => files.callFile(voiceModeDir());
@@ -148,7 +148,7 @@ export class Call {
 
   /**
    * Queue `text` for the speaker and return once it has started (or failed at once). While it
-   * plays the mic is gated, and typing stops it. Returns notes about earlier speech that failed.
+   * plays the mic is gated; typing doesn't stop it (a typo shouldn't cut Claude off). Returns notes about earlier speech that failed.
    */
   async say(text: string): Promise<string[]> {
     let failure: unknown = null;
@@ -159,10 +159,9 @@ export class Call {
       this.muteUntil = Infinity;
       showPhase("speaking");
       const ctl = new AbortController();
-      const typing = watchForTyping(startedAt, ctl.signal);
       this.bargeIn.play(text, () => ctl.abort());
       try {
-        await speak(text, typing.signal);
+        await speak(text, ctl.signal);
       } catch (err) {
         if (!(err instanceof CancelledError)) {
           if (!returned) failure = err;
@@ -170,7 +169,6 @@ export class Call {
         }
       } finally {
         this.bargeIn.played();
-        typing.dispose();
         this.muteUntil = Date.now() + ECHO_TAIL_MS;
         this.lastActivity = Date.now();
         if (this.on) showPhase(null);

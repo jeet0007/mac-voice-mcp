@@ -192,7 +192,7 @@ test("Voice Buddy finds the same voice-mode folder, files and tools as the serve
   }
   for (const file of [listeningFile, inboxDir, callFile]) assert.ok(buddy.includes(`\${dir}/${path.basename(file("/d"))}`), file.name);
   const server = readFileSync(path.join(ROOT, "src", "server.ts"), "utf8");
-  for (const [name, tool] of [["SPEAK", "speak_and_listen"], ["CALL", "call"], ["SAY", "say"]]) {
+  for (const [name, tool] of [["SPEAK", "speak_and_listen"], ["CALL", "call"]]) {
     assert.ok(server.includes(`registerTool(\n    "${tool}"`), `the server has no ${tool} tool`);
     const pattern = new RegExp(new RegExp(`^const ${name} = /(.*)/$`, "m").exec(buddy)[1]);
     for (const scope of ["mcp__plugin_mac-voice-mcp_voice-mcp__", "mcp__voice-mcp__"]) assert.match(`${scope}${tool}`, pattern);

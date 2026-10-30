@@ -18,7 +18,6 @@
  * - a speak_and_listen call of this session is running;
  * - one with listen: false ("give me a minute") returned in the last 30 s, still playing in the background;
  * - voice-mcp's plugin hook marked this session as listening while Claude works ("Claude, …");
- * - this window is on a call (the call tool, action start).
  *
  * 3. On a call, while Claude is idle: what you say waits in voice-mcp's inbox, and nothing would
  *    read it until Claude's next tool call. This hands each utterance to Claude as a new message
@@ -34,7 +33,6 @@ import { blobCells, blobSvg, LOOKS, type Mood } from './blob.ts'
 /** voice-mcp's tools, under any server scope: plugin, user or project. */
 const SPEAK = /(^|__)speak_and_listen$/
 const CALL = /(^|__)call$/
-const SAY = /(^|__)say$/
 /** How often, on a call with Claude idle, the inbox is checked. */
 const INBOX_POLL_MS = 150
 /** Added to the call start result: Claude reads it after the call rules. */
@@ -101,7 +99,7 @@ async function userTyped($: EngineInterface): Promise<void> {
   const now = await $.clock.now()
   const dir = await voiceModeDir($)
   if (!dir) throw new Error('no HOME to find voice-mcp in')
-  if (running === 0 && now > updateUntil && !onCall && !(await listeningHere($, dir))) return
+  if (running === 0 && now > updateUntil && !(await listeningHere($, dir))) return
   signalled = true
   await $.fs.write(`${dir}/stop`, JSON.stringify({ at: now }))
 }
@@ -263,12 +261,6 @@ export const register: Register = on => {
       return { ...r, context: [...(r.context ?? []), IDLE_DELIVERY_NOTE] }
     }
     return r
-  }).catch(($, e, next) => next(e))
-
-  // Each say is new speech that typing may interrupt.
-  on('tool.call', { tool: SAY }, ($, e, next) => {
-    signalled = false
-    return next(e)
   }).catch(($, e, next) => next(e))
 
   // Only the main loop's turns count: a subagent's run inside one doesn't change who reads the inbox.

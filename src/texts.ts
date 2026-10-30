@@ -116,7 +116,7 @@ export const CALL_TOOL_DESCRIPTION = [
 ].join("\n");
 
 export const SAY_TOOL_DESCRIPTION = [
-  "During a call: say text out loud and return at once, so you carry on working while it plays. Typing interrupts it.",
+  "During a call: say text out loud and return at once, so you carry on working while it plays.",
   "The result includes anything the user said meanwhile. Only during a call: use speak_and_listen otherwise.",
   "",
   SPEECH_RULES.replace("text_to_speak", "text"),
