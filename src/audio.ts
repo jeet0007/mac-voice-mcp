@@ -523,6 +523,9 @@ export async function listenForTurn(maxSeconds: number, outFile: string, signal?
   };
 }
 
+/** Speech this long while Claude speaks is the user talking over it (Pipecat waits 200 ms, LiveKit 500 ms; 150 ms is too eager). */
+export const BARGE_IN_MS = 250;
+
 /** One utterance is at most this long; after this much silence the endpointer is started afresh, so nothing piles up. */
 const UTTERANCE_MAX_MS = 60_000;
 
@@ -531,6 +534,8 @@ export interface ContinuousOptions {
   muted: () => boolean;
   /** Each utterance, as a trimmed 16 kHz mono WAV in `dir`, in order. Not awaited. */
   onUtterance: (wav: string) => void;
+  /** true once the user has talked for BARGE_IN_MS, false when that utterance ends or turns out to be a blip. */
+  onSpeech?: (talking: boolean) => void;
   dir: string;
 }
 
@@ -554,6 +559,7 @@ export async function listenContinuously(signal: AbortSignal, opts: ContinuousOp
   let frames: Buffer[] = [];
   let pending: Buffer = Buffer.alloc(0);
   let count = 0;
+  let talking = false;
   let stderr = "";
 
   const args = recorderArgs(recorder);
@@ -580,20 +586,23 @@ export async function listenContinuously(signal: AbortSignal, opts: ContinuousOp
           endpointer = fresh();
           frames = [];
         }
-        continue;
+      } else {
+        frames.push(frame);
+        const reason = endpointer.push(frame);
+        if (reason) {
+          if (reason !== "no-speech") {
+            const [first, last] = endpointer.trimRange(frames.length);
+            const pcm = Buffer.concat(frames.slice(first, last));
+            const wav = path.join(opts.dir, `${++count}.wav`);
+            writeFileSync(wav, Buffer.concat([wavHeader(pcm.length), pcm]));
+            opts.onUtterance(wav);
+          }
+          endpointer = fresh();
+          frames = [];
+        }
       }
-      frames.push(frame);
-      const reason = endpointer.push(frame);
-      if (!reason) continue;
-      if (reason !== "no-speech") {
-        const [first, last] = endpointer.trimRange(frames.length);
-        const pcm = Buffer.concat(frames.slice(first, last));
-        const wav = path.join(opts.dir, `${++count}.wav`);
-        writeFileSync(wav, Buffer.concat([wavHeader(pcm.length), pcm]));
-        opts.onUtterance(wav);
-      }
-      endpointer = fresh();
-      frames = [];
+      const now = endpointer.speechSeconds * 1000 >= BARGE_IN_MS;
+      if (now !== talking) opts.onSpeech?.((talking = now));
     }
     pending = pending.subarray(off);
   });

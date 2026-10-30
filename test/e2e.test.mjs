@@ -1,6 +1,6 @@
 /**
  * End-to-end: drives the real server over MCP stdio, with stub binaries standing in
- * for say / rec / whisper-cli / whisper-server / brew (see test/fixtures).
+ * for say / rec / whisper-cli / whisper-server / brew / system_profiler (see test/fixtures).
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -1122,6 +1122,82 @@ test("while the call speaks, the mic is muted: what plays isn't transcribed back
     await client.callTool({ name: "call", arguments: { action: "start" } });
     assert.ok(await waitFor(() => /^speak-end "I'm here\."/m.test(sb.readLog()), 6000));
     assert.doesNotMatch(sb.readLog(), /whisper-server inference|whisper-cli wav/, "nothing was transcribed");
+  } finally {
+    await client.close();
+  }
+});
+
+// --- Talking over Claude (full duplex, headphones) ---
+
+const LONG_REPLY = "Here is a long answer about the build and the tests.";
+/** The stub say process that speaks `said`, and when the rec stub started talking over it. */
+const bargeIn = async (sb, said) => {
+  assert.ok(await waitFor(() => /^rec speech-onset \d+$/m.test(sb.readLog()), 10_000), "the user talked over the reply");
+  const log = sb.readLog();
+  const pid = Number(log.split(`speak ${JSON.stringify(said)}`)[0].match(/^tts-input (\d+)$/gm).at(-1).split(" ")[1]);
+  return { pid, onset: Number(log.match(/^rec speech-onset (\d+)$/m)[1]) };
+};
+/** "T" while stopped (paused), "" once it has exited. */
+const stat = (pid) => spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
+async function waitForStat(pid, check, ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (check(stat(pid))) return true;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  return false;
+}
+
+test("talking over Claude on headphones pauses it within 400 ms; real words drop the rest and reach Claude", { skip: process.platform === "win32" }, async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "bargein", STUB_HEADPHONES: "1", STUB_SAY_MS: "4000", STUB_TRANSCRIPT: "Wait, use the other file." }));
+  try {
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    await client.callTool({ name: "say", arguments: { text: LONG_REPLY } });
+    const { pid, onset } = await bargeIn(sb, LONG_REPLY);
+    assert.ok(await waitForStat(pid, (s) => s.startsWith("T"), 2000), "the reply was paused");
+    assertQuick(onset, 400);
+    const heard = await client.callTool({ name: "listen", arguments: { wait_seconds: 5 } });
+    assert.equal(heard.content[0].text, "(You interrupted Claude after: 'Here…') Wait, use the other file.");
+    assert.ok(await waitForStat(pid, (s) => s === "", 3000), "the reply was stopped");
+    assert.doesNotMatch(sb.readLog(), new RegExp(`^speak-end ${JSON.stringify(LONG_REPLY)}`, "m"), "the rest was never said");
+  } finally {
+    await client.close();
+  }
+});
+
+test("a filler like 'mm-hmm' over Claude only pauses it: the reply resumes and finishes, and nothing reaches Claude", { skip: process.platform === "win32" }, async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "bargein", STUB_HEADPHONES: "1", STUB_SAY_MS: "4000", STUB_TRANSCRIPT: "Mm-hmm." }));
+  try {
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    await client.callTool({ name: "say", arguments: { text: LONG_REPLY } });
+    const { pid } = await bargeIn(sb, LONG_REPLY);
+    assert.ok(await waitForStat(pid, (s) => s.startsWith("T"), 2000), "the reply was paused");
+    const paused = Date.now();
+    assert.ok(await waitForStat(pid, (s) => !s.startsWith("T"), 3000), "the reply resumed");
+    assertQuick(paused, 2500);
+    assert.ok(await waitFor(() => new RegExp(`^speak-end ${JSON.stringify(LONG_REPLY)}`, "m").test(sb.readLog()), 6000), "the reply finished");
+    const nothing = await client.callTool({ name: "listen", arguments: { wait_seconds: 1 } });
+    assert.equal(nothing.content[0].text, "(still on the call, nothing said) Call listen again to keep waiting, or say something.");
+  } finally {
+    await client.close();
+  }
+});
+
+test("on speakers (half duplex) talking over Claude doesn't pause it", { skip: process.platform === "win32" }, async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "bargein", STUB_SAY_MS: "4000", STUB_TRANSCRIPT: "Wait, use the other file." }));
+  try {
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    await client.callTool({ name: "say", arguments: { text: LONG_REPLY } });
+    const { pid } = await bargeIn(sb, LONG_REPLY);
+    assert.equal(await waitForStat(pid, (s) => s.startsWith("T"), 1000), false, "never paused");
+    assert.ok(await waitFor(() => new RegExp(`^speak-end ${JSON.stringify(LONG_REPLY)}`, "m").test(sb.readLog()), 6000), "the reply finished");
+    assert.doesNotMatch(sb.readLog(), /whisper-server inference/, "the mic was muted, so nothing was transcribed");
   } finally {
     await client.close();
   }

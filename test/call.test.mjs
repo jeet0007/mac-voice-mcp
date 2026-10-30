@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { headphonesFromProfile } from "../dist/audio.js";
-import { isHangUp } from "../dist/call.js";
+import { isFiller, isHangUp } from "../dist/call.js";
 
 test("hang-up phrases end the call; anything else, including 'don't hang up', doesn't", () => {
   for (const said of ["Hang up.", "hang up", "Okay, hang up now.", "Claude, hang up.", "Hang up, please.", "Bye Claude!", "Goodbye, Claude.", "End the call.", "End call", "Thanks, end the call now."]) {
@@ -25,4 +25,13 @@ test("headphones: the built-in jack's or Bluetooth ones count; the Mac's speaker
   assert.equal(headphonesFromProfile(profile({ _name: "JBL Flip 5 Speaker", coreaudio_device_transport: bluetooth })), false);
   assert.equal(headphonesFromProfile({}), false);
   assert.equal(headphonesFromProfile(null), false);
+});
+
+test("talking over Claude with only fillers or sound tags doesn't cut its reply; any real word does", () => {
+  for (const said of ["Mm-hmm.", "mm hmm okay", "Uh-huh.", "Yeah, right.", "Okay. Sure!", "[BLANK_AUDIO]", "(coughs)", "Hmm... yep", ""]) {
+    assert.equal(isFiller(said), true, said);
+  }
+  for (const said of ["Wait.", "Okay, stop.", "Yeah, use the other file.", "No.", "Hmm, that's wrong.", "ใช่"]) {
+    assert.equal(isFiller(said), false, said);
+  }
 });
