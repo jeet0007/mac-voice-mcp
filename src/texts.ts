@@ -138,7 +138,7 @@ export const CALL_RULES = [
   "  you spoke, and listen waits for their next words.",
   "- End every turn by calling listen, so you hear them while you're idle. Exception: if a note after this",
   "  result says Voice Buddy delivers what the user says while you're idle, end turns normally and don't call listen.",
-  '- The user hangs up by saying "hang up" or "bye Claude"; you can end the call with call action end.',
+  '- The user hangs up by saying "hang up" or "bye Claude"; you can end the call with call action end. Once it has ended, say nothing more: write "Call ended." on screen.',
   "- Don't call speak_and_listen during the call.",
 ].join("\n");
 

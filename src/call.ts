@@ -10,7 +10,7 @@
  * It ends when the user says "hang up", when Claude calls `call end`, after
  * VOICE_MCP_CALL_IDLE_MINUTES (default 30) without a word either way, when call.json disappears
  * (the plugin hook removes it when the session ends), when the recorder fails, or at shutdown.
- * Ending stops the recorder within a second, empties the inbox, and says "Bye."
+ * Ending stops the recorder within a second and empties the inbox. Nothing is spoken: Claude notes it on screen.
  */
 import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -125,15 +125,13 @@ export class Call {
     takeInbox();
     rmSync(callFile(), { force: true });
     showPhase(null);
+    release!();
     for (const wake of this.wakers) wake();
     try {
       await loop;
     } finally {
       this.state = "off";
     }
-    // The mic lock is held until "Bye." has played, so another window can't talk over it (exit frees it too).
-    this.speaking = this.speaking.then(() => speak("Bye.").then(() => {}, () => {})).finally(release!);
-    trackSpeaking(this.speaking);
   }
 
   /**
