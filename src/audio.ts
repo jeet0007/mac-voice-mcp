@@ -534,7 +534,7 @@ export async function listenContinuously(signal: AbortSignal, opts: ContinuousOp
   activeChildren.add(child);
   const stop = () => {
     if (child.exitCode === null) child.kill("SIGTERM");
-    setTimeout(() => child.exitCode === null && child.kill("SIGKILL"), 800).unref();
+    setTimeout(() => child.exitCode === null && child.kill("SIGKILL"), 2000).unref();
   };
   if (signal.aborted) stop();
   signal.addEventListener("abort", stop, { once: true });
