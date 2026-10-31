@@ -40,10 +40,12 @@ Turn the volume up, keep the room quiet, and stop voice mode in other sessions w
 | `model.ts` | Finding, symlinking or downloading the model |
 | `stt.ts` | The warm `whisper-server` with orphan guard, and the `whisper-cli` fallback |
 | `setup.ts` | Requirement checks and consent-based background installs |
-| `lock.ts` | One voice turn at a time across every session on the Mac |
+| `lock.ts` | One voice turn (or call) at a time across every session on the Mac |
+| `worklisten.ts` | Listening for "Claude, …" while Claude works, the inbox and phase file shared with the plugin hook and Voice Buddy |
+| `call.ts` | A call: one open mic until the user hangs up, utterances into the inbox, hang-up phrases, idle timeout, `say` and `listen` |
 | `mcp.ts` | A small MCP server over stdio: JSON-RPC, tools, prompts, progress, cancellation |
 | `voice.ts`, `server.ts`, `index.ts` | The round trip, the MCP tools and prompts, and the CLI |
-| `skills/`, `hooks/` | The Claude Code plugin's `/mac-voice-mcp:talk` and `:setup` commands, the `voice-help` skill, and the stay-in-voice hook |
+| `skills/`, `hooks/` | The Claude Code plugin's `/mac-voice-mcp:talk`, `:call`, `:hangup` and `:setup` commands, the `voice-help` skill, and the stay-in-voice hook |
 
 The package installs two commands: `mac-voice-mcp` (the one `npx -y mac-voice-mcp` runs), and `voice-mcp`.
 

@@ -70,6 +70,8 @@ export interface RunOptions {
   killSignal?: NodeJS.Signals;
   env?: NodeJS.ProcessEnv;
   cwd?: string;
+  /** Called with the process once it's started. */
+  onProcess?: (child: ChildProcess) => void;
 }
 
 /** Every child we start, so shutdown can stop them all. */
@@ -87,6 +89,7 @@ export function run(cmd: string, args: string[], opts: RunOptions = {}): Promise
       env: opts.env ? { ...process.env, ...opts.env } : process.env,
     });
     activeChildren.add(child);
+    opts.onProcess?.(child);
 
     let stdout = "";
     let stderr = "";
@@ -136,7 +139,7 @@ export interface Waiting {
   /** When it was started (Date.now()). */
   readonly startedAt: number;
   /** Give it its input and wait for it to finish, like run(). */
-  send(input: string, opts?: { signal?: AbortSignal; timeoutMs?: number }): Promise<RunResult>;
+  send(input: string, opts?: { signal?: AbortSignal; timeoutMs?: number; onProcess?: (child: ChildProcess) => void }): Promise<RunResult>;
   kill(): void;
 }
 
@@ -192,6 +195,7 @@ export function startWaiting(cmd: string, args: string[], opts: { env?: NodeJS.P
         throw new CancelledError();
       }
       sent = true;
+      o.onProcess?.(child);
       let timedOut = false;
       const timer = o.timeoutMs
         ? setTimeout(() => {

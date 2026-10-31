@@ -23,5 +23,5 @@ test("writes a dev plugin that runs the local build under its own name", () => {
   assert.match(talk, /mcp__plugin_mac-voice-mcp-dev_voice-mcp__speak_and_listen/);
   assert.match(talk, /\/mac-voice-mcp-dev:talk/);
   assert.doesNotMatch(talk, /mcp__plugin_mac-voice-mcp_voice-mcp|\/mac-voice-mcp:/);
-  for (const f of ["hooks.json", "voice-mode.mjs", "voice-mode-lib.mjs"]) assert.ok(existsSync(path.join(dir, "hooks", f)), f);
+  for (const f of ["hooks.json", "voice-mode.mjs", "voice-mode-lib.mjs", "voice-files.mjs"]) assert.ok(existsSync(path.join(dir, "hooks", f)), f);
 });

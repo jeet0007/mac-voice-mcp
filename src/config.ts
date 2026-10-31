@@ -5,6 +5,7 @@
 import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { cacheRoot } from "../hooks/voice-files.mjs";
 
 export const PKG = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { name: string; version: string };
 
@@ -50,9 +51,7 @@ function whisperPrompt(): string | undefined {
 }
 
 /** Everything this server ever downloads or links lives here, shared by every version and every client. */
-const CACHE_ROOT =
-  process.env.VOICE_MCP_CACHE_DIR?.trim() ||
-  path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache"), "mac-voice-mcp");
+const CACHE_ROOT = cacheRoot();
 
 export const CONFIG = {
   /** Models, the mic lock and hook state live here. */
@@ -111,6 +110,14 @@ export const CONFIG = {
   recorder: (process.env.VOICE_MCP_RECORDER?.trim().toLowerCase() || "auto") as "auto" | "sox" | "ffmpeg",
   /** ffmpeg avfoundation audio input (macOS fallback recorder). ":default" follows the input chosen in System Settings. */
   ffmpegDevice: process.env.VOICE_MCP_FFMPEG_DEVICE?.trim() || ":default",
+
+  // --- Calls
+  /** Can the mic stay open while Claude speaks: auto (default: on headphones) | full (yes, so you can interrupt) | half (no: speakers). */
+  callDuplex: (["full", "half"].includes(process.env.VOICE_MCP_CALL_DUPLEX?.trim().toLowerCase() ?? "")
+    ? process.env.VOICE_MCP_CALL_DUPLEX!.trim().toLowerCase()
+    : "auto") as "auto" | "full" | "half",
+  /** A soft tick every 1.5 s after the user's words reach Claude, until it speaks (at most 10 s), so a call never goes silent (macOS). */
+  callThinkingSound: envBool("VOICE_MCP_CALL_THINKING_SOUND", true),
 
   // --- Speech-to-text
   /** whisper.cpp model name (tiny.en, base.en, small.en, large-v3-turbo-q5_0, ...). */

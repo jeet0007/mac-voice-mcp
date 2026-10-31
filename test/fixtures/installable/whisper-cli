@@ -5,4 +5,8 @@ const args = process.argv.slice(2);
 const wav = args[args.indexOf("-f") + 1];
 const seconds = (fs.statSync(wav).size - 44) / 32000;
 fs.appendFileSync(process.env.STUB_LOG, `whisper-cli wav=${seconds.toFixed(2)}s ${args.filter((a) => a !== wav).join(" ")}\n`);
+if (process.env.STUB_STT_FAIL && fs.existsSync(process.env.STUB_STT_FAIL)) {
+  process.stderr.write("stub: model failed to load\n");
+  process.exit(1);
+}
 process.stdout.write(` ${process.env.STUB_TRANSCRIPT ?? "Stub transcript from the CLI."}\n [BLANK_AUDIO]\n`);

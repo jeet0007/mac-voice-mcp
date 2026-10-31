@@ -4,7 +4,7 @@
  * cells for the terminal.
  */
 
-export type Mood = 'speaking' | 'listening' | 'transcribing' | 'waiting' | 'standby'
+export type Mood = 'speaking' | 'listening' | 'transcribing' | 'waiting' | 'standby' | 'call'
 
 export type Look = {
   /** 0xRRGGBB */
@@ -25,6 +25,7 @@ export const LOOKS: Record<Mood, Look> = {
   transcribing: { color: 0x9b7bd8, loopMs: 1400, wobble: 0.12, size: 0.85, breathe: 0.03 },
   waiting: { color: 0x8a8a8a, loopMs: 5000, wobble: 0.05, size: 0.75, breathe: 0.03 },
   standby: { color: 0x3fa796, loopMs: 6000, wobble: 0.05, size: 0.72, breathe: 0.06 },
+  call: { color: 0x34c759, loopMs: 4000, wobble: 0.06, size: 0.8, breathe: 0.1 },
 }
 
 const TAU = Math.PI * 2

@@ -12,9 +12,9 @@
  */
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { cacheRoot } from "../hooks/voice-files.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const NAME = "mac-voice-mcp";
@@ -23,9 +23,7 @@ const args = process.argv.slice(2);
 const flag = (f) => args.includes(f);
 const option = (f) => (args.includes(f) ? args[args.indexOf(f) + 1] : undefined);
 
-const cache =
-  process.env.VOICE_MCP_CACHE_DIR?.trim() || path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache"), NAME);
-const dir = path.resolve(option("--dir") ?? path.join(cache, "dev-plugin"));
+const dir = path.resolve(option("--dir") ?? path.join(cacheRoot(), "dev-plugin"));
 const entry = path.join(ROOT, "dist", "index.js");
 
 if (!flag("--no-build")) {

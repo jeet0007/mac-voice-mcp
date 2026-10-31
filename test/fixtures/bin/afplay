@@ -1,0 +1,3 @@
+#!/usr/bin/env node
+// Stub afplay: logs the sound instead of playing it.
+require("fs").appendFileSync(process.env.STUB_LOG, `afplay ${process.argv.slice(2).join(" ")}\n`);

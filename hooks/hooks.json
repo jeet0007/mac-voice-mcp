@@ -3,7 +3,7 @@
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "mcp__.*voice-mcp__speak_and_listen",
+        "matcher": "mcp__.*voice-mcp__(speak_and_listen|call)",
         "hooks": [
           {
             "type": "command",
@@ -24,7 +24,7 @@
     ],
     "PostToolUseFailure": [
       {
-        "matcher": "mcp__.*voice-mcp__speak_and_listen",
+        "matcher": "mcp__.*voice-mcp__(speak_and_listen|call)",
         "hooks": [
           {
             "type": "command",
@@ -47,6 +47,18 @@
     ],
     "Stop": [
       {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/voice-mode.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt",
         "hooks": [
           {
             "type": "command",

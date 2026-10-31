@@ -1,0 +1,6 @@
+#!/usr/bin/env node
+// Stub `system_profiler SPAudioDataType -json`: the default output is the Mac's speakers, or AirPods with STUB_HEADPHONES=1.
+const out = process.env.STUB_HEADPHONES === "1"
+  ? { _name: "AirPods Pro", coreaudio_default_audio_output_device: "spaudio_yes", coreaudio_device_transport: "coreaudio_device_type_bluetooth" }
+  : { _name: "MacBook Air Speakers", coreaudio_default_audio_output_device: "spaudio_yes", coreaudio_device_transport: "coreaudio_device_type_builtin", coreaudio_output_source: "MacBook Air Speakers" };
+process.stdout.write(JSON.stringify({ SPAudioDataType: [{ _items: [{ _name: "MacBook Air Microphone", coreaudio_default_audio_input_device: "spaudio_yes" }, out] }] }));

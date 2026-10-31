@@ -15,6 +15,7 @@ http.createServer((req, res) => {
     req.on("data", (d) => (n += d.length));
     req.on("end", () => {
       log(`whisper-server inference bytes=${n}`);
+      if (process.env.STUB_STT_FAIL && fs.existsSync(process.env.STUB_STT_FAIL)) return res.writeHead(500).end("stub: model failed to load");
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ text: ` ${process.env.STUB_TRANSCRIPT ?? "Stub transcript from the server."}\n` }));
     });
   } else res.writeHead(404).end();

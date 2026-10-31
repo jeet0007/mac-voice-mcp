@@ -17,7 +17,13 @@
  * "May be speaking or listening" is any of:
  * - a speak_and_listen call of this session is running;
  * - one with listen: false ("give me a minute") returned in the last 30 s, still playing in the background;
- * - voice-mcp's plugin hook marked this session as listening while Claude works ("Claude, …").
+ * - voice-mcp's plugin hook marked this session as listening while Claude works ("Claude, …");
+ *
+ * 3. On a call, while Claude is idle: what you say waits in voice-mcp's inbox, and nothing would
+ *    read it until Claude's next tool call. This hands each utterance to Claude as a new message
+ *    ($.prompt.submit as you), polling the inbox between turns. It tells Claude so right after the
+ *    call starts, so Claude ends its turns normally instead of waiting in listen. The buddy turns
+ *    green with the call's duration, and shows speaking and listening as usual.
  *
  * Early-access API (Claude Code mods): if a Claude Code update breaks it, voice keeps working and
  * Esc still interrupts.
@@ -25,8 +31,15 @@
 import type { EngineInterface, Register, Timer } from 'claude-code'
 import { blobCells, blobSvg, LOOKS, type Mood } from './blob.ts'
 
-/** voice-mcp's tool, under any server scope: plugin, user or project. */
+/** voice-mcp's tools, under any server scope: plugin, user or project. */
 const SPEAK = /(^|__)speak_and_listen$/
+const CALL = /(^|__)call$/
+/** How often, on a call with Claude idle, the inbox is checked. */
+const INBOX_POLL_MS = 150
+/** Added to the call start result: Claude reads it after the call rules. */
+const IDLE_DELIVERY_NOTE =
+  'Voice Buddy is on in this window: whatever the user says on the call while you are idle is handed to you ' +
+  'as a new message from them. So end your turns normally and do not call listen to wait for them.'
 /** How long a spoken update (listen: false) may still be playing after its call returned. */
 const UPDATE_PLAYS_MS = 30_000
 
@@ -34,6 +47,15 @@ let running = 0 // speak_and_listen calls of this session in progress
 let updateUntil = 0 // a spoken update may be playing until then
 let signalled = false // already told voice-mcp, since the last voice turn started
 let reported = false // already said once that it couldn't
+
+// --- A call ---
+let onCall = false // this window started a call (and hasn't seen it end)
+let mainTurn = false // Claude's main loop is in a turn: its tool calls and the hook deliver the inbox then
+let delivering = false // one $.prompt.submit at a time
+let deliveryBroken = false // $.prompt.submit failed on this call: leave the inbox to listen, say and the hook
+let inboxTimer: Timer | null = null
+/** When this window's call started (call.json's startedAt), while it's on; null otherwise. */
+let callStartedAt: number | null = null
 
 // --- The buddy ---
 /** What the buddy shows now; null hides it. */
@@ -52,6 +74,7 @@ const LABELS: Record<Mood, string> = {
   transcribing: 'Got it, transcribing',
   waiting: 'Waiting for another voice session',
   standby: 'Listening for "Claude, …"',
+  call: 'On a call',
 }
 const PHASES: Record<string, Mood> = { speaking: 'speaking', listening: 'listening', transcribing: 'transcribing', waiting: 'waiting' }
 
@@ -98,11 +121,28 @@ function noticeTyping($: EngineInterface): void {
   })
 }
 
+/** When this window's call started, or null when it has none (the call may have ended without Claude). */
+async function callStart($: EngineInterface, dir: string): Promise<number | null> {
+  if (!onCall) return null
+  try {
+    const { startedAt } = JSON.parse(await $.fs.read(`${dir}/call.json`)) as { startedAt?: unknown }
+    return typeof startedAt === 'number' ? startedAt : null
+  } catch {
+    return null
+  }
+}
+
+/** 0:42, 12:05 */
+function duration(s: number): string {
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+
 /** What this window's voice is doing now, or null when it's off here. */
 async function currentMood($: EngineInterface): Promise<Mood | null> {
   const dir = await voiceModeDir($)
   if (!dir) return null
-  if (running > 0 || (await $.clock.now()) <= updateUntil) {
+  callStartedAt = await callStart($, dir)
+  if (running > 0 || callStartedAt !== null || (await $.clock.now()) <= updateUntil) {
     try {
       const { phase } = JSON.parse(await $.fs.read(`${dir}/phase.json`)) as { phase?: string }
       const known = phase ? PHASES[phase] : undefined
@@ -111,8 +151,82 @@ async function currentMood($: EngineInterface): Promise<Mood | null> {
       /* no phase file: between phases, or an older voice-mcp */
     }
     if (running > 0) return 'speaking'
+    if (callStartedAt !== null) return 'call'
   }
   return (await listeningHere($, dir)) ? 'standby' : null
+}
+
+/** Read the inbox entries that still have words in them, oldest first. */
+async function readInbox($: EngineInterface, inbox: string): Promise<Array<{ file: string; text: string }>> {
+  let names: string[]
+  try {
+    names = (await $.fs.list(inbox)).filter((e) => e.kind === 'file' && e.name.endsWith('.json') && e.size > 0).map((e) => e.name)
+  } catch {
+    return [] // no inbox yet
+  }
+  const out: Array<{ file: string; text: string }> = []
+  for (const name of names.sort()) {
+    const file = `${inbox}/${name}`
+    try {
+      const { text } = JSON.parse(await $.fs.read(file)) as { text?: unknown }
+      if (typeof text === 'string') out.push({ file, text })
+    } catch {
+      /* taken by voice-mcp meanwhile, or not ours */
+    }
+  }
+  return out
+}
+
+/** On a call with Claude idle: hand what the user said to Claude as their next message. */
+async function deliverInbox($: EngineInterface): Promise<void> {
+  if (!onCall || mainTurn || delivering || deliveryBroken) return
+  const dir = await voiceModeDir($)
+  if (!dir) return
+  if (!(await $.fs.exists(`${dir}/call.json`))) {
+    onCall = false
+    inboxTimer?.cancel()
+    inboxTimer = null
+    return
+  }
+  const entries = await readInbox($, `${dir}/inbox`)
+  if (!entries.length) return
+  delivering = true
+  try {
+    // Blanked before submitting, so the hook can't hand the same words over again mid-turn.
+    // voice-mcp removes the blank files.
+    for (const e of entries) await $.fs.write(e.file, '')
+    try {
+      await $.prompt.submit({ text: entries.map((e) => e.text).join('\n'), asUser: true })
+    } catch (err) {
+      for (const e of entries) await $.fs.write(e.file, JSON.stringify({ text: e.text, at: await $.clock.now() }))
+      deliveryBroken = true
+      $.ui.toast(`voice-buddy can't pass on what you say while Claude is idle (${err instanceof Error ? err.message : String(err)}); Claude hears it at its next tool call or listen`)
+    }
+  } finally {
+    delivering = false
+  }
+}
+
+/** After a reload, which forgets the call start it saw: pick the call back up if it's this window's. */
+async function resumeCall($: EngineInterface): Promise<void> {
+  const dir = await voiceModeDir($)
+  if (!dir) return
+  try {
+    const call = JSON.parse(await $.fs.read(`${dir}/call.json`)) as { session?: unknown }
+    if (call.session !== (await $.session.id())) return
+  } catch {
+    return // no call
+  }
+  onCall = true
+  deliveryBroken = false
+  watchInbox($)
+}
+
+function watchInbox($: EngineInterface): void {
+  if (inboxTimer) return
+  inboxTimer = $.clock.every(INBOX_POLL_MS, () => {
+    deliverInbox($).catch(() => {})
+  })
 }
 
 /** Keep the buddy moving (terminal) and in step with the voice turn, until voice is off here. */
@@ -124,11 +238,15 @@ function animate($: EngineInterface): void {
   })
 }
 
+let shownSecond = -1 // the call duration on screen
+
 async function tick($: EngineInterface): Promise<void> {
   ticks++
   if (ticks % REFRESH_TICKS === 1) {
     const now = await currentMood($)
-    if (now !== mood) {
+    const second = callStartedAt === null ? -1 : Math.max(0, Math.floor(((await $.clock.now()) - callStartedAt) / 1000))
+    if (now !== mood || second !== shownSecond) {
+      shownSecond = second
       mood = now
       $.ui.invalidate('ui.render')
     }
@@ -157,6 +275,31 @@ export const register: Register = on => {
     }
   }).catch(($, e, next) => next(e)) // never in the way of the call itself
 
+  on('tool.call', { tool: CALL }, async ($, e, next) => {
+    signalled = false
+    const r = await next(e)
+    const action = (e as { action?: unknown }).action
+    if (action === 'end') onCall = false
+    if (action === 'start' && r.deny === undefined && !r.isError) {
+      onCall = true
+      deliveryBroken = false
+      watchInbox($)
+      animate($)
+      return { ...r, context: [...(r.context ?? []), IDLE_DELIVERY_NOTE] }
+    }
+    return r
+  }).catch(($, e, next) => next(e))
+
+  // Only the main loop's turns count: a subagent's run inside one doesn't change who reads the inbox.
+  on('turn.start', ($, e, next) => {
+    if (!e.agentId) mainTurn = true
+    return next(e)
+  })
+  on('turn.complete', ($, e, next) => {
+    if (!e.agentId) mainTurn = false
+    return next(e)
+  })
+
   // The first key that puts text in the box (not a cursor move), or a paste.
   on('prompt.edit', ($, e, next) => {
     if (e.inputText !== '') noticeTyping($)
@@ -165,20 +308,28 @@ export const register: Register = on => {
 
   // Enter with text already in the box (typed before the turn began, or a queued prompt).
   on('prompt.submit', ($, e, next) => {
-    noticeTyping($)
+    // A prompt a plugin submitted (ours hands over what the user said on a call) isn't the user typing.
+    if (e.origin.kind !== 'plugin') noticeTyping($)
     return next(e)
   }).catch(($, e, next) => next(e)) // never in the way of the prompt
 
   // A new window, or a reload, while voice-mcp listens for "Claude, …" here: show the buddy.
-  on('session.start', ($, e, next) => {
+  // After a reload mid-call, carry on delivering what the user says.
+  on('session.start', async ($, e, next) => {
     animate($)
+    await resumeCall($).catch(() => {})
     return next(e)
   })
 
   on('ui.render', { component: 'AbovePrompt' }, ($, e, next) => {
     if (e.props.hasSurvey || mood === null) return next(e)
     const shown = mood
-    const hint = shown === 'speaking' || shown === 'listening' ? ' · type to interrupt' : ''
+    const hint =
+      shownSecond >= 0
+        ? `${shown === 'call' ? '' : ' · on a call'} · ${duration(shownSecond)}`
+        : shown === 'speaking' || shown === 'listening'
+          ? ' · type to interrupt'
+          : ''
     if (e.surface === 'terminal') {
       terminalBand = e.requestId
       const { Box, Raster, Text } = $.ui.resolve(e)

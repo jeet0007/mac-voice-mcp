@@ -1,13 +1,13 @@
 /**
  * End-to-end: drives the real server over MCP stdio, with stub binaries standing in
- * for say / rec / whisper-cli / whisper-server / brew (see test/fixtures).
+ * for say / rec / whisper-cli / whisper-server / brew / system_profiler (see test/fixtures).
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync, lstatSync, readlinkSync, symlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -77,14 +77,14 @@ const assertQuick = (since, limitMs = 1500) => {
   assert.ok(Date.now() - since < limitMs, `took ${Date.now() - since} ms`);
 };
 
-test("lists two tools, two prompts, and compact server instructions", async () => {
+test("lists the tools, the prompts, and compact server instructions", async () => {
   const sb = sandbox();
   const { client } = await connect(sb.env());
   try {
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-    assert.deepEqual(tools, ["speak_and_listen", "voice_setup"]);
+    assert.deepEqual(tools, ["call", "listen", "say", "speak_and_listen", "voice_setup"]);
     const prompts = (await client.listPrompts()).prompts.map((p) => p.name).sort();
-    assert.deepEqual(prompts, ["setup", "voice_mode"]);
+    assert.deepEqual(prompts, ["call", "setup", "voice_mode"]);
     assert.ok(Buffer.byteLength(client.getInstructions() ?? "") < 2048, "Claude Code truncates instructions at 2 KB");
   } finally {
     await client.close();
@@ -813,6 +813,25 @@ test("after a spoken update, listening while Claude works resumes only once the 
   }
 });
 
+test("a mic lock left by a window that died doesn't stop listening while Claude works", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO_LATER: "silent", VOICE_MCP_START_TIMEOUT_SECONDS: "60" }));
+  const recs = () => sb.readLog().match(/^rec -/gm)?.length ?? 0;
+  try {
+    await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Shall I start?" } });
+    markListening(sb);
+    assert.ok(await waitFor(() => recs() >= 2), "listening while Claude works");
+    const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+    writeFileSync(path.join(sb.home, ".cache", "mac-voice-mcp", "mic.lock"), JSON.stringify({ pid: dead, since: Date.now() }));
+    const before = recs();
+    // Two more listens (one may have started before the lock), about 3 s each: slow runners need longer than 8 s.
+    assert.ok(await waitFor(() => recs() > before + 1, 20_000), "still listening");
+  } finally {
+    await client.close();
+  }
+});
+
 // --- The built-in voice starts before the reply is ready ----------------------------------------
 
 test("the built-in voice is started ahead of the next reply, so that reply only hands it the text", async () => {
@@ -963,6 +982,339 @@ test("cancelling a call stops the recorder, and the next call works", async () =
   }
 });
 
+// --- A call: the mic stays open until the user hangs up ---------------------------------------
+
+const callFile = (sb) => path.join(voiceModeDir(sb), "call.json");
+const recs = (sb) => sb.readLog().match(/^rec -/gm)?.length ?? 0;
+
+test("a call: one recorder throughout, listen hears the user, say returns at once, call end hangs up", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "call" }));
+  try {
+    const started = await client.callTool({ name: "call", arguments: { action: "start" } });
+    assert.equal(started.isError, false);
+    assert.match(text(started), /^The call is on: the microphone stays open until the user hangs up\./);
+    assert.equal(JSON.parse(readFileSync(callFile(sb), "utf8")).duplex, "half");
+    assert.ok(await waitFor(() => /^speak "I'm here\."/m.test(sb.readLog())), "the greeting was spoken");
+    assert.match(text(await client.callTool({ name: "call", arguments: { action: "start" } })), /A call is already on/);
+
+    const heard = await client.callTool({ name: "listen", arguments: {} });
+    assert.equal(heard.content[0].text, "Stub transcript from the server.");
+
+    const t = Date.now();
+    const said = await client.callTool({ name: "say", arguments: { text: "Working on it." } });
+    assertQuick(t);
+    assert.equal(said.isError, false);
+    assert.match(sb.readLog(), /^speak "Working on it\."/m);
+    // The second utterance was said while Claude worked: the next say or listen passes it on.
+    assert.ok(await waitFor(() => inboxTexts(sb).length > 0 || /the user said by voice/.test(text(said))));
+    const next = await client.callTool({ name: "say", arguments: { text: "Done." } });
+    assert.match(`${text(said)}\n${text(next)}`, /the user said by voice: "Stub transcript from the server\."/);
+
+    const onCall = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Hello?" } });
+    assert.match(onCall.content[0].text, /^\(You're on a call with the user: speak with say/);
+    assert.equal(recs(sb), 1, "one recorder for the whole call");
+
+    const ended = await client.callTool({ name: "call", arguments: { action: "end" } });
+    assert.match(text(ended), /^\(The call ended\./);
+    assert.ok(await waitFor(() => /^rec stopped$/m.test(sb.readLog()), 1000), "the recorder stopped within a second");
+    assert.ok(!existsSync(callFile(sb)), "call.json removed");
+    assert.deepEqual(inboxTexts(sb), [], "nothing kept");
+    assert.ok(!existsSync(path.join(sb.home, ".cache", "mac-voice-mcp", "mic.lock")), "the mic lock is released");
+    const after = await client.callTool({ name: "listen", arguments: { wait_seconds: 1 } });
+    assert.match(after.content[0].text, /^\(The call ended: Claude ended the call\. Don't call listen or say again/);
+    assert.match(text(await client.callTool({ name: "say", arguments: { text: "Still there?" } })), /^\(The call ended: Claude ended the call/);
+  } finally {
+    await client.close();
+  }
+});
+
+test("on a call, a soft tick plays while Claude thinks, until it speaks; VOICE_MCP_CALL_THINKING_SOUND=0 turns it off", async () => {
+  // The tick is a macOS system sound: elsewhere there is none.
+  const ticks = (sb) => sb.readLog().match(/^afplay -v 0\.2 .*Tink\.aiff$/gm)?.length ?? 0;
+  for (const [env, on] of [[{}, process.platform === "darwin"], [{ VOICE_MCP_CALL_THINKING_SOUND: "0" }, false]]) {
+    const sb = sandbox();
+    fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+    const { client } = await connect(sb.env({ STUB_SCENARIO: "call", ...env }));
+    try {
+      await client.callTool({ name: "call", arguments: { action: "start" } });
+      assert.equal(ticks(sb), 0, "nothing said yet, nothing to think about");
+      assert.equal((await client.callTool({ name: "listen", arguments: {} })).content[0].text, "Stub transcript from the server.");
+      await new Promise((r) => setTimeout(r, 3600));
+      if (on) assert.ok(ticks(sb) >= 2, `about every 1.5 s, got ${ticks(sb)}`);
+      else assert.equal(ticks(sb), 0, JSON.stringify(env));
+      await client.callTool({ name: "say", arguments: { text: "Done." } });
+      const before = ticks(sb);
+      await new Promise((r) => setTimeout(r, 2000));
+      assert.equal(ticks(sb), before, "Claude spoke: no more ticks");
+    } finally {
+      await client.close();
+    }
+  }
+});
+
+test("a permission prompt during a call (the plugin hook writes voice-mode/permission) is said out loud", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "silent" }));
+  try {
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    writeFileSync(path.join(voiceModeDir(sb), "permission"), JSON.stringify({ at: Date.now() }));
+    assert.ok(await waitFor(() => /^speak "Claude needs your OK on screen\."/m.test(sb.readLog()), 3000), "the notice was spoken");
+    assert.ok(!existsSync(path.join(voiceModeDir(sb), "permission")), "once");
+  } finally {
+    await client.close();
+  }
+});
+
+test("on headphones a call keeps the mic open while Claude speaks (full duplex); VOICE_MCP_CALL_DUPLEX overrides", async () => {
+  // Headphone detection is macOS-only (system_profiler): elsewhere auto means speakers.
+  const detected = process.platform === "darwin" ? "full" : "half";
+  for (const [env, duplex] of [
+    [{ STUB_HEADPHONES: "1" }, detected],
+    [{ STUB_HEADPHONES: "1", VOICE_MCP_CALL_DUPLEX: "half" }, "half"],
+    [{ VOICE_MCP_CALL_DUPLEX: "full" }, "full"],
+  ]) {
+    const sb = sandbox();
+    fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+    const { client } = await connect(sb.env({ STUB_SCENARIO: "silent", ...env }));
+    try {
+      await client.callTool({ name: "call", arguments: { action: "start" } });
+      assert.equal(JSON.parse(readFileSync(callFile(sb), "utf8")).duplex, duplex, JSON.stringify(env));
+    } finally {
+      await client.close();
+    }
+  }
+});
+
+test("call end while the start still waits for the mic: the call never starts", async () => {
+  const sb = sandbox();
+  const cache = path.join(sb.home, ".cache", "mac-voice-mcp");
+  fakeModel(path.join(cache, "models"));
+  writeFileSync(path.join(cache, "mic.lock"), JSON.stringify({ pid: process.pid, since: Date.now() })); // another window has the mic
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "call", VOICE_MCP_LOCK_WAIT_SECONDS: "10" }));
+  try {
+    const starting = client.callTool({ name: "call", arguments: { action: "start" } });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.match(text(await client.callTool({ name: "call", arguments: { action: "end" } })), /^\(The call ended\./);
+    rmSync(path.join(cache, "mic.lock"), { force: true }); // the other window lets go
+    assert.match(text(await starting), /^\(The call ended\./);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.ok(!existsSync(callFile(sb)), "no call.json");
+    assert.deepEqual(audioEvents(sb.readLog()), [], "nothing was spoken or recorded");
+  } finally {
+    await client.close();
+  }
+});
+
+test("speech to text failing on a call is recorded, and the next thing heard tells Claude words were missed", async () => {
+  const sb = sandbox();
+  const cache = path.join(sb.home, ".cache", "mac-voice-mcp");
+  fakeModel(path.join(cache, "models"));
+  const failing = path.join(sb.home, "stt-fails");
+  writeFileSync(failing, "");
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "call", STUB_STT_FAIL: failing }));
+  try {
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    const report = path.join(cache, "last-stt-failure.json");
+    assert.ok(await waitFor(() => existsSync(report)), "the failure is recorded");
+    assert.match(JSON.parse(readFileSync(report, "utf8")).error, /model failed to load/);
+    rmSync(failing);
+    const heard = text(await client.callTool({ name: "listen", arguments: {} }));
+    assert.match(heard, /^\(voice-mcp note: speech to text failed on .+ the user said just before this \(.*model failed to load.*\), so you may have missed words\./);
+    assert.match(heard, /last-stt-failure\.json\.\) Stub transcript from the server\.$/);
+    const next = text(await client.callTool({ name: "listen", arguments: { wait_seconds: 1 } }));
+    assert.doesNotMatch(next, /voice-mcp note/, "told once");
+  } finally {
+    await client.close();
+  }
+});
+
+test("the recorder failing mid-call ends the call, and the next listen says why", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "dies" }));
+  try {
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    assert.ok(await waitFor(() => !existsSync(callFile(sb)), 5000), "call.json removed");
+    assert.match(text(await client.callTool({ name: "listen", arguments: { wait_seconds: 1 } })), /^\(The call ended: voice-mcp lost the microphone/);
+  } finally {
+    await client.close();
+  }
+});
+
+test("call.json disappearing (the session ended) makes the server hang up", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "call" }));
+  try {
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    const t = Date.now();
+    rmSync(callFile(sb));
+    assert.ok(await waitFor(() => /^rec stopped$/m.test(sb.readLog())), "the recorder stopped");
+    assertQuick(t, 2000); // the time limit is checked locally (CI runners stall)
+    assert.match(text(await client.callTool({ name: "listen", arguments: { wait_seconds: 1 } })), /^\(The call ended: the session ended/);
+  } finally {
+    await client.close();
+  }
+});
+
+test("while the call speaks, the mic is muted: what plays isn't transcribed back", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  // The greeting plays for 4 s, over both of the recorder's utterances (at about 0.5 s and 2.7 s).
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "call", STUB_SAY_MS: "4000" }));
+  try {
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    assert.ok(await waitFor(() => /^speak-end "I'm here\."/m.test(sb.readLog()), 6000));
+    assert.doesNotMatch(sb.readLog(), /whisper-server inference|whisper-cli wav/, "nothing was transcribed");
+  } finally {
+    await client.close();
+  }
+});
+
+// --- Talking over Claude (full duplex, headphones) ---
+
+const LONG_REPLY = "Here is a long answer about the build and the tests.";
+/** The stub say process that speaks `said`, and when the rec stub started talking over it. */
+const bargeIn = async (sb, said) => {
+  assert.ok(await waitFor(() => /^rec speech-onset \d+$/m.test(sb.readLog()), 10_000), "the user talked over the reply");
+  const log = sb.readLog();
+  const pid = Number(log.split(`speak ${JSON.stringify(said)}`)[0].match(/^tts-input (\d+)$/gm).at(-1).split(" ")[1]);
+  return { pid, onset: Number(log.match(/^rec speech-onset (\d+)$/m)[1]) };
+};
+/** "T" while stopped (paused), "" once it has exited. */
+const stat = (pid) => spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
+async function waitForStat(pid, check, ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (check(stat(pid))) return true;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  return false;
+}
+
+test("talking over Claude on headphones pauses it within 400 ms; real words drop the rest and reach Claude", { skip: process.platform === "win32" }, async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "bargein", VOICE_MCP_CALL_DUPLEX: "full", STUB_SAY_MS: "4000", STUB_TRANSCRIPT: "Wait, use the other file." }));
+  try {
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    await client.callTool({ name: "say", arguments: { text: LONG_REPLY } });
+    const { pid, onset } = await bargeIn(sb, LONG_REPLY);
+    assert.ok(await waitForStat(pid, (s) => s.startsWith("T"), 2000), "the reply was paused");
+    assertQuick(onset, 400);
+    const heard = await client.callTool({ name: "listen", arguments: { wait_seconds: 5 } });
+    // How much of the reply was heard is estimated from the time it played, so on a busy machine it can be a word or two more.
+    assert.match(heard.content[0].text, /^\(You interrupted Claude after: '[^']+'\) Wait, use the other file\.$/);
+    assert.ok(await waitForStat(pid, (s) => s === "", 3000), "the reply was stopped");
+    assert.doesNotMatch(sb.readLog(), new RegExp(`^speak-end ${JSON.stringify(LONG_REPLY)}`, "m"), "the rest was never said");
+  } finally {
+    await client.close();
+  }
+});
+
+test("a filler like 'mm-hmm' over Claude only pauses it: the reply resumes and finishes, and nothing reaches Claude", { skip: process.platform === "win32" }, async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "bargein", VOICE_MCP_CALL_DUPLEX: "full", STUB_SAY_MS: "4000", STUB_TRANSCRIPT: "Mm-hmm." }));
+  try {
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    await client.callTool({ name: "say", arguments: { text: LONG_REPLY } });
+    const { pid } = await bargeIn(sb, LONG_REPLY);
+    assert.ok(await waitForStat(pid, (s) => s.startsWith("T"), 2000), "the reply was paused");
+    const paused = Date.now();
+    assert.ok(await waitForStat(pid, (s) => !s.startsWith("T"), 3000), "the reply resumed");
+    assertQuick(paused, 2500);
+    assert.ok(await waitFor(() => new RegExp(`^speak-end ${JSON.stringify(LONG_REPLY)}`, "m").test(sb.readLog()), 6000), "the reply finished");
+    const nothing = await client.callTool({ name: "listen", arguments: { wait_seconds: 1 } });
+    assert.equal(nothing.content[0].text, "(still on the call, nothing said) Call listen again to keep waiting, or say something.");
+  } finally {
+    await client.close();
+  }
+});
+
+test("on speakers (half duplex) talking over Claude doesn't pause it", { skip: process.platform === "win32" }, async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "bargein", STUB_SAY_MS: "4000", STUB_TRANSCRIPT: "Wait, use the other file." }));
+  try {
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    await client.callTool({ name: "say", arguments: { text: LONG_REPLY } });
+    const { pid } = await bargeIn(sb, LONG_REPLY);
+    assert.equal(await waitForStat(pid, (s) => s.startsWith("T"), 1000), false, "never paused");
+    assert.ok(await waitFor(() => new RegExp(`^speak-end ${JSON.stringify(LONG_REPLY)}`, "m").test(sb.readLog()), 6000), "the reply finished");
+    assert.doesNotMatch(sb.readLog(), /whisper-server inference/, "the mic was muted, so nothing was transcribed");
+  } finally {
+    await client.close();
+  }
+});
+
+test("saying 'hang up' ends the call: recorder stopped within a second, nothing said, nothing left behind", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "call", STUB_TRANSCRIPT: "Hang up." }));
+  try {
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    assert.ok(await waitFor(() => /whisper-server inference/.test(sb.readLog())), "heard something");
+    const t = Date.now();
+    assert.ok(await waitFor(() => /^rec stopped$/m.test(sb.readLog()), 1500), "the recorder stopped");
+    assertQuick(t, 1000);
+    assert.ok(await waitFor(() => !existsSync(callFile(sb))), "call.json removed");
+    assert.deepEqual(inboxTexts(sb), [], "the hang-up itself is not kept");
+    assert.doesNotMatch(sb.readLog().split("rec stopped")[1], /^speak /m, "nothing is said after hanging up");
+    const r = await client.callTool({ name: "listen", arguments: { wait_seconds: 1 } });
+    assert.match(r.content[0].text, /^\(The call ended: the user hung up\./);
+  } finally {
+    await client.close();
+  }
+});
+
+test("silence never ends a call before the idle limit; after it the call ends by itself", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  // 3 s: past two of the 15-second (1.5 s at the stub's speed) windows a voice turn would give up after.
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "silent", VOICE_MCP_CALL_IDLE_MINUTES: "0.05" }));
+  try {
+    const t0 = Date.now();
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    const t = Date.now();
+    const nothing = await client.callTool({ name: "listen", arguments: { wait_seconds: 1 } });
+    assert.equal(nothing.content[0].text, "(still on the call, nothing said) Call listen again to keep waiting, or say something.");
+    assert.ok(Date.now() - t >= 1000, "waited the whole second");
+    await new Promise((r) => setTimeout(r, Math.max(0, t0 + 2000 - Date.now())));
+    assert.ok(existsSync(callFile(sb)), "still on the call after 2 s of silence");
+    assert.doesNotMatch(sb.readLog(), /^rec stopped$/m);
+    assert.ok(await waitFor(() => /^rec stopped$/m.test(sb.readLog()), 3000), "ended after the idle limit");
+    assert.ok(await waitFor(() => !existsSync(callFile(sb))), "call.json removed");
+    assert.deepEqual(inboxTexts(sb), []);
+    const r = await client.callTool({ name: "listen", arguments: { wait_seconds: 1 } });
+    assert.match(r.content[0].text, /^\(The call ended: nobody said anything for 0 minutes\./);
+  } finally {
+    await client.close();
+  }
+});
+
+test("another window's voice turn during a call gives up at once, saying the user is on a call", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const a = await connect(sb.env({ STUB_SCENARIO: "silent" }));
+  const b = await connect(sb.env({ STUB_SCENARIO: "silent" }));
+  try {
+    await a.client.callTool({ name: "call", arguments: { action: "start" } });
+    const t = Date.now();
+    const r = await b.client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Hello?" } });
+    assertQuick(t);
+    assert.equal(r.isError, true);
+    assert.match(text(r), /^The user is on a call in another window/);
+    assert.equal(sb.readLog().match(/^speak /gm).length, 1, "only the call's greeting was spoken");
+  } finally {
+    await a.client.close();
+    await b.client.close();
+  }
+});
+
 test("raw JSON-RPC: version negotiation, errors, notifications, bad arguments", async () => {
   const sb = sandbox();
   const child = spawn(process.execPath, [ENTRY], { env: sb.env(), stdio: ["pipe", "pipe", "ignore"] });
@@ -1003,5 +1355,37 @@ test("raw JSON-RPC: version negotiation, errors, notifications, bad arguments", 
     assert.equal(replies.length, 7, "notifications get no reply");
   } finally {
     child.kill();
+  }
+});
+
+test("muting a call: the mic hears nothing until unmuted, and the call's end clears the mute", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "talk" }));
+  const mute = path.join(voiceModeDir(sb), "mute");
+  const talk = async () => {
+    writeFileSync(`${sb.log}.talk`, "");
+    assert.ok(await waitFor(() => !existsSync(`${sb.log}.talk`)), "the stub started talking");
+  };
+  try {
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    writeFileSync(mute, "");
+    await new Promise((r) => setTimeout(r, 600)); // the call checks for the mute file every 250 ms
+    await talk();
+    const muted = await client.callTool({ name: "listen", arguments: { wait_seconds: 2 } });
+    assert.match(muted.content[0].text, /^\(still on the call, nothing said\)/);
+    assert.doesNotMatch(sb.readLog(), /whisper-server inference/, "nothing said while muted was transcribed");
+
+    rmSync(mute);
+    await new Promise((r) => setTimeout(r, 600));
+    await talk();
+    const heard = await client.callTool({ name: "listen", arguments: { wait_seconds: 5 } });
+    assert.equal(heard.content[0].text, "Stub transcript from the server.");
+
+    writeFileSync(mute, "");
+    await client.callTool({ name: "call", arguments: { action: "end" } });
+    assert.ok(!existsSync(mute), "the next call doesn't start muted");
+  } finally {
+    await client.close();
   }
 });

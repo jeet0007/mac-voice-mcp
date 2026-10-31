@@ -1,16 +1,18 @@
 // The Claude Code plugin hook that keeps a voice conversation in voice (hooks/voice-mode*.mjs).
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, symlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { cacheRoot, callFile, inboxDir, listeningFile, permissionFile, voiceModeDir } from "../hooks/voice-files.mjs";
 import { handle, heardUser, NOT_HEARD_PREFIXES, STOP_REASON } from "../hooks/voice-mode-lib.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HOOK = path.join(ROOT, "hooks", "voice-mode.mjs");
 const TOOL = "mcp__plugin_mac-voice-mcp_voice-mcp__speak_and_listen";
+const CALL_TOOL = "mcp__plugin_mac-voice-mcp_voice-mcp__call";
 const reply = (text) => ({ content: [{ type: "text", text }] });
 const heard = reply("Yes, go ahead and deploy it.");
 
@@ -83,7 +85,7 @@ test("the user saying a trigger phrase doesn't end voice mode — only how the r
 });
 
 test("the hook's prefixes match what the server actually says", () => {
-  const src = ["src/voice.ts", "src/lock.ts", "src/server.ts"].map((f) => readFileSync(path.join(ROOT, f), "utf8")).join("\n");
+  const src = ["src/voice.ts", "src/lock.ts", "src/server.ts", "src/texts.ts"].map((f) => readFileSync(path.join(ROOT, f), "utf8")).join("\n");
   for (const p of NOT_HEARD_PREFIXES) assert.ok(src.includes(p), `server source no longer contains: ${p}`);
 });
 
@@ -122,7 +124,7 @@ test("as a real process — also through a symlinked install path — and bad in
 
 test("hooks.json: speak_and_listen updates voice mode under any server scope; every other tool only runs the cheap check", () => {
   const cfg = JSON.parse(readFileSync(path.join(ROOT, "hooks", "hooks.json"), "utf8"));
-  assert.deepEqual(Object.keys(cfg.hooks).sort(), ["PostToolUse", "PostToolUseFailure", "SessionEnd", "Stop", "UserPromptSubmit"]);
+  assert.deepEqual(Object.keys(cfg.hooks).sort(), ["Notification", "PostToolUse", "PostToolUseFailure", "SessionEnd", "Stop", "UserPromptSubmit"]);
   const NODE = 'node "${CLAUDE_PLUGIN_ROOT}/hooks/voice-mode.mjs"';
   for (const [event, groups] of Object.entries(cfg.hooks)) {
     for (const g of groups) {
@@ -132,12 +134,14 @@ test("hooks.json: speak_and_listen updates voice mode under any server scope; ev
       }
     }
   }
-  // speak_and_listen (under any server scope) updates voice mode; every other tool only runs the cheap inbox check.
+  // speak_and_listen and call (under any server scope) update voice mode; every other tool only runs the cheap inbox check.
   for (const g of [cfg.hooks.PostToolUse[0], cfg.hooks.PostToolUseFailure[0]]) {
     const matcher = new RegExp(`^(?:${g.matcher})$`);
     assert.match(TOOL, matcher);
+    assert.match(CALL_TOOL, matcher);
     assert.match("mcp__voice-mcp__speak_and_listen", matcher);
     assert.doesNotMatch("mcp__plugin_mac-voice-mcp_voice-mcp__voice_setup", matcher);
+    assert.doesNotMatch("mcp__plugin_mac-voice-mcp_voice-mcp__say", matcher);
   }
   assert.equal(cfg.hooks.PostToolUse[1].matcher, undefined, "the inbox check runs after every tool");
 });
@@ -157,6 +161,44 @@ test("after every tool, the shell check exits at once with nothing said, and han
   assert.match(r.stderr, /the user said by voice: "use the other branch"/);
 });
 
+test("the shell check looks in the same inbox as the hook, wherever the cache is", () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "voice-hook-home-"));
+  const xdg = mkdtempSync(path.join(os.tmpdir(), "voice-hook-xdg-"));
+  const { VOICE_MCP_CACHE_DIR, XDG_CACHE_HOME, ...base } = process.env;
+  // The HOME case's root, computed without this process's real home.
+  for (const [shellEnv, root] of [
+    [{ ...base, HOME: home, XDG_CACHE_HOME: xdg }, cacheRoot({ XDG_CACHE_HOME: xdg })],
+    [{ ...base, HOME: home }, cacheRoot({ XDG_CACHE_HOME: path.join(home, ".cache") })],
+  ]) {
+    const env = { VOICE_MCP_CACHE_DIR: root };
+    handle({ session_id: "s1", hook_event_name: "PostToolUse", tool_name: TOOL, tool_input: {}, tool_response: heard }, { env });
+    leaveInInbox(env, "use the other branch");
+    const event = JSON.stringify({ session_id: "s1", hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: {}, tool_response: "ok" });
+    const r = spawnSync("sh", [path.join(ROOT, "hooks", "after-tool.sh")], { input: event, env: shellEnv, encoding: "utf8" });
+    assert.equal(r.status, 2, root);
+    assert.match(r.stderr, /"use the other branch"/);
+  }
+});
+
+test("Voice Buddy finds the same voice-mode folder, files and tools as the server and hook", async () => {
+  const buddy = readFileSync(path.join(ROOT, "plugins", "voice-buddy", "hooks", "register.tsx"), "utf8");
+  // Run its folder lookup (the body has no types) against a fake engine.
+  const body = /async function voiceModeDir\([^)]*\)[^{]*\{([\s\S]*?)\n\}/.exec(buddy)[1];
+  const lookup = new (async () => {}).constructor("$", body);
+  const home = os.homedir();
+  for (const env of [{ VOICE_MCP_CACHE_DIR: "/c" }, { XDG_CACHE_HOME: "/x" }, { HOME: home }]) {
+    const $ = { env: { get: async (k) => env[k] } };
+    assert.equal(await lookup($), voiceModeDir(cacheRoot(env)), JSON.stringify(env));
+  }
+  for (const file of [listeningFile, inboxDir, callFile]) assert.ok(buddy.includes(`\${dir}/${path.basename(file("/d"))}`), file.name);
+  const server = readFileSync(path.join(ROOT, "src", "server.ts"), "utf8");
+  for (const [name, tool] of [["SPEAK", "speak_and_listen"], ["CALL", "call"]]) {
+    assert.ok(server.includes(`registerTool(\n    "${tool}"`), `the server has no ${tool} tool`);
+    const pattern = new RegExp(new RegExp(`^const ${name} = /(.*)/$`, "m").exec(buddy)[1]);
+    for (const scope of ["mcp__plugin_mac-voice-mcp_voice-mcp__", "mcp__voice-mcp__"]) assert.match(`${scope}${tool}`, pattern);
+  }
+});
+
 // --- Talking while Claude works --------------------------------------------------------------
 
 import { writeFileSync as writeFileSyncW, mkdirSync as mkdirSyncW, existsSync as existsSyncW } from "node:fs";
@@ -164,7 +206,7 @@ import { writeFileSync as writeFileSyncW, mkdirSync as mkdirSyncW, existsSync as
 function leaveInInbox(env, text, at = Date.now()) {
   const inbox = path.join(env.VOICE_MCP_CACHE_DIR, "voice-mode", "inbox");
   mkdirSyncW(inbox, { recursive: true });
-  writeFileSyncW(path.join(inbox, `${at}-x${Math.random().toString(36).slice(2, 6)}.json`), JSON.stringify({ text, at }));
+  writeFileSyncW(path.join(inbox, `${at}-x${Math.random().toString(36).slice(2, 12)}.json`), JSON.stringify({ text, at }));
 }
 
 test("a spoken answer marks this session as listening; typing removes the mark", () => {
@@ -259,4 +301,118 @@ test("when the user starts typing during a voice turn, voice mode ends: no nudge
   spoke(reply("(The user started typing instead of answering by voice, so voice-mcp stopped speaking and listening.)"));
   assert.deepEqual(run("Stop"), { exitCode: 0 });
   assert.equal(existsSyncW(path.join(env.VOICE_MCP_CACHE_DIR, "voice-mode", "listening.state")), false, "and the mic stays closed");
+});
+
+// --- A call ----------------------------------------------------------------------------------
+
+/** What the server writes at call start (src/call.ts). */
+function startCall(env, session, run) {
+  const file = path.join(env.VOICE_MCP_CACHE_DIR, "voice-mode", "call.json");
+  mkdirSyncW(path.dirname(file), { recursive: true });
+  writeFileSyncW(file, JSON.stringify({ pid: process.pid, startedAt: 1, duplex: "half" }));
+  run("PostToolUse", { tool_name: CALL_TOOL, tool_input: { action: "start" }, tool_response: reply("The call is on: …") });
+  return file;
+}
+
+test("call start marks the call as this session's; what the user says on it is handed over mid-turn, to this session only", () => {
+  const { env, run, spoke } = setup();
+  spoke(); // voice mode was on: the call replaces it
+  const file = startCall(env, "s1", run);
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { pid: process.pid, startedAt: 1, duplex: "half", session: "s1" });
+  assert.deepEqual(run("Stop"), { exitCode: 0 }, "no nudge back to speak_and_listen during a call");
+  leaveInInbox(env, "use the other branch");
+  const other = handle({ session_id: "s2", hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: {}, tool_response: "ok" }, { env });
+  assert.deepEqual(other, { exitCode: 0 }, "another session doesn't get it");
+  const r = run("PostToolUse", { tool_name: "Bash", tool_input: {}, tool_response: "ok" });
+  assert.equal(r.exitCode, 2);
+  assert.match(r.stderr, /the user said by voice: "use the other branch".*next natural pause \(say\)/);
+  assert.deepEqual(run("PostToolUse", { tool_name: "Bash", tool_input: {}, tool_response: "ok" }), { exitCode: 0 }, "delivered once");
+});
+
+test("the call never reads a half-written call.json while the hook marks it as this session's", async () => {
+  const { env, run } = setup();
+  const file = startCall(env, "s1", run);
+  // The call polls call.json and hangs up if it can't parse it (src/call.ts), so read it as hard as it can.
+  const poll = `const fs = require("fs"); let bad = 0; const end = Date.now() + 800;
+    while (Date.now() < end) { try { JSON.parse(fs.readFileSync(${JSON.stringify(file)}, "utf8")); } catch { bad++; } }
+    process.stdout.write(String(bad));`;
+  const reader = spawn(process.execPath, ["-e", poll]);
+  let out = "";
+  reader.stdout.on("data", (d) => (out += d));
+  const done = new Promise((resolve) => reader.on("close", resolve));
+  const end = Date.now() + 1000;
+  while (Date.now() < end) {
+    run("PostToolUse", { tool_name: CALL_TOOL, tool_input: { action: "start" }, tool_response: reply("The call is on: …") });
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  await done;
+  assert.equal(out, "0", "reads that saw a half-written call.json");
+  assert.equal(JSON.parse(readFileSync(file, "utf8")).session, "s1");
+});
+
+test("a call whose server died without hanging up is over: what the user says isn't taken by that session", () => {
+  const { env, run } = setup();
+  const file = startCall(env, "s1", run);
+  const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+  writeFileSyncW(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), pid: dead }));
+  leaveInInbox(env, "meant for another window");
+  assert.deepEqual(run("PostToolUse", { tool_name: "Bash", tool_input: {}, tool_response: "ok" }), { exitCode: 0 });
+  assert.equal(existsSyncW(file), false, "the stale call.json is cleaned up");
+});
+
+test("the server and hooks draining the inbox at the same time hand each thing the user said over exactly once", async () => {
+  const { env, run } = setup();
+  startCall(env, "s1", run);
+  const dir = path.join(env.VOICE_MCP_CACHE_DIR, "voice-mode");
+  for (let i = 0; i < 2000; i++) leaveInInbox(env, `said ${i}`);
+  const lib = path.join(ROOT, "hooks", "voice-mode-lib.mjs");
+  const server = path.join(ROOT, "dist", "worklisten.js");
+  // Paths go in as arguments (process.argv[1], [2]), so the code is constant.
+  const drains = [
+    [`import(process.argv[1]).then((m) => process.stdout.write(JSON.stringify(m.takeInterjections(process.argv[2], "s1"))))`, lib, dir],
+    [`import(process.argv[1]).then((m) => process.stdout.write(JSON.stringify(m.takeInbox().map((e) => e.text))))`, server],
+  ];
+  const readers = Array.from({ length: 4 }, (_, i) => {
+    const p = spawn(process.execPath, ["-e", ...drains[i % 2]], { env: { ...process.env, ...env } });
+    let out = "";
+    p.stdout.on("data", (d) => (out += d));
+    return new Promise((resolve) => p.on("close", () => resolve(JSON.parse(out))));
+  });
+  const said = (await Promise.all(readers)).flat();
+  assert.equal(said.length, 2000, "each entry handed over once, none twice");
+  assert.equal(new Set(said).size, 2000);
+});
+
+test("typing keeps the call; the session ending removes call.json (the server then hangs up)", () => {
+  const { env, run } = setup();
+  const file = startCall(env, "s1", run);
+  run("UserPromptSubmit", { prompt: "also check the tests" });
+  assert.equal(JSON.parse(readFileSync(file, "utf8")).session, "s1");
+  handle({ session_id: "s2", hook_event_name: "SessionEnd" }, { env });
+  assert.ok(existsSyncW(file), "another session ending leaves the call alone");
+  run("SessionEnd");
+  assert.equal(existsSyncW(file), false);
+});
+
+test("a permission prompt on this session's call asks the call to say so; idle notices and other sessions don't", () => {
+  const { env, run } = setup();
+  const file = permissionFile(voiceModeDir(env.VOICE_MCP_CACHE_DIR));
+  const prompt = { notification_type: "permission_prompt", message: "Claude needs your permission to use Bash" };
+  run("Notification", prompt);
+  assert.equal(existsSyncW(file), false, "no call: nothing to say");
+  startCall(env, "s1", run);
+  handle({ session_id: "s2", hook_event_name: "Notification", ...prompt }, { env });
+  assert.equal(existsSyncW(file), false, "another session's prompt");
+  run("Notification", { notification_type: "idle_prompt", message: "Claude is waiting for your input" });
+  assert.equal(existsSyncW(file), false, "idle is normal on a call");
+  assert.deepEqual(run("Notification", prompt), { exitCode: 0 });
+  assert.equal(existsSyncW(file), true);
+});
+
+test("a failed call start, or call end, leaves call.json alone", () => {
+  const { env, run } = setup();
+  run("PostToolUse", { tool_name: CALL_TOOL, tool_input: { action: "start" }, tool_response: { content: [{ type: "text", text: "voice-mcp is not set up yet: …" }], isError: true } });
+  assert.equal(existsSyncW(path.join(env.VOICE_MCP_CACHE_DIR, "voice-mode", "call.json")), false);
+  run("PostToolUse", { tool_name: CALL_TOOL, tool_input: { action: "end" }, tool_response: reply("(The call ended.") });
+  assert.equal(existsSyncW(path.join(env.VOICE_MCP_CACHE_DIR, "voice-mode", "call.json")), false);
 });

@@ -42,6 +42,7 @@ Claude ◀──────────────── "Yes, and tag Priya."
 ## Features
 
 - 🔒 **On-device.** whisper.cpp transcribes on your Mac. Recordings are deleted after each turn.
+- 📞 **Calls.** Run `/mac-voice-mcp:call` and the mic stays open until you hang up: talk whenever you like, while Claude works or waits. With headphones you can talk over Claude ([more](docs/usage.md#calls)).
 - 💬 **Natural turn-taking.** A soft chime, then it waits for you to start, and hands back about 1.5 seconds after you stop. No push-to-talk.
 - ⚡ **Fast replies.** A warm whisper.cpp server keeps the model loaded, so transcribing takes a fraction of a second on Apple Silicon.
 - 🗣️ **A natural voice, if you want one.** Uses your best macOS voice, or the optional [Kokoro](docs/voices.md#the-kokoro-voice-optional) neural voice.
@@ -73,6 +74,7 @@ You need a Mac (Apple Silicon recommended) and **Node.js 22 or newer**.
 **3. Allow the microphone.** The first time Claude listens, macOS asks. Click **Allow**.
 
 **4. Talk.** Run `/mac-voice-mcp:talk fix the flaky login test`, or ask Claude to *"check in with me by voice when you need a decision"*. Reply after the chime.
+Or start a call with `/mac-voice-mcp:call` and talk like on the phone; say "hang up" to end it.
 
 ### Allow voice turns without prompts
 
@@ -136,7 +138,7 @@ More in [Troubleshooting](docs/troubleshooting.md).
 
 mac-voice-mcp is a free, open-source personal project. It's provided **as is, with no warranty of any kind**, and the authors aren't liable for any damage or loss from using it. See the [LICENSE](LICENSE) for the exact terms. In plain words:
 
-- **It turns on your microphone** whenever an AI assistant calls `speak_and_listen`, and plays sound through your speakers.
+- **It turns on your microphone** whenever an AI assistant calls `speak_and_listen`, and for the whole of a call, until you hang up. It plays sound through your speakers.
 - **Speech recognition makes mistakes.** An assistant may act on a misheard word. Check what it heard before you let it do anything you can't undo, like deleting files, pushing code or sending messages.
 - **It installs software on your Mac**, but only after you agree: Homebrew packages, and kokoro-js with npm if you choose the Kokoro voice. Those are separate projects, under their own licenses (below).
 - **There's no guaranteed support.** Issues and pull requests are welcome, and fixed on a best-effort basis.

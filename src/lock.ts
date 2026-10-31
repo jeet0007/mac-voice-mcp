@@ -7,8 +7,9 @@
  * blocks the mic for good. If the lock can't be used at all (read-only or missing cache
  * folder), turns go ahead without it rather than failing.
  */
-import { closeSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
+import { closeSync, linkSync, mkdirSync, openSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
 import path from "node:path";
+import { isAlive, readJson } from "../hooks/voice-files.mjs";
 import { CONFIG, debug } from "./config.js";
 import { CancelledError, sleep } from "./proc.js";
 
@@ -21,6 +22,8 @@ const POLL_MS = 250;
 interface Owner {
   pid: number;
   since: number;
+  /** Held for a whole call (src/call.ts): as long as the owner lives, however long that is. */
+  call?: true;
 }
 
 export class MicBusyError extends Error {
@@ -29,22 +32,13 @@ export class MicBusyError extends Error {
 
 export const lockFile = () => path.join(CONFIG.cacheDir, "mic.lock");
 
-function readOwner(file: string): Owner | null {
-  try {
-    const o = JSON.parse(readFileSync(file, "utf8")) as Owner;
-    return Number.isInteger(o.pid) && Number.isFinite(o.since) ? o : null;
-  } catch {
-    return null;
-  }
-}
+export const ON_A_CALL_ELSEWHERE =
+  "The user is on a call in another window (another Claude window, Claude Desktop or Cursor holds the speaker and " +
+  "microphone for it). Tell the user on screen; voice here works again once that call ends.";
 
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === "EPERM"; // exists, owned by someone else
-  }
+function readOwner(file: string): Owner | null {
+  const o = readJson(file) as Owner | null;
+  return o && Number.isInteger(o.pid) && Number.isFinite(o.since) ? o : null;
 }
 
 /** The lock file's identity (inode) if it's stale, otherwise null. */
@@ -57,7 +51,7 @@ function staleIdentity(file: string, now: number): number | null {
     return null; // gone already; the next attempt will create it
   }
   const owner = readOwner(file);
-  const stale = owner ? !isAlive(owner.pid) || now - owner.since > STALE_AFTER_MS : now - mtimeMs > UNREADABLE_GRACE_MS;
+  const stale = owner ? !isAlive(owner.pid) || (!owner.call && now - owner.since > STALE_AFTER_MS) : now - mtimeMs > UNREADABLE_GRACE_MS;
   return stale ? ino : null;
 }
 
@@ -108,6 +102,8 @@ export interface AcquireOptions {
   /** Called once, when we start waiting for another session. */
   onWait?: () => void;
   waitMs?: number;
+  /** Hold the mic for a whole call: other sessions give up at once instead of waiting. */
+  call?: true;
 }
 
 /** Wait for the mic, take it, and return the function that gives it back. */
@@ -125,7 +121,7 @@ export async function acquireMicLock(opts: AcquireOptions = {}): Promise<() => v
 
   for (;;) {
     if (opts.signal?.aborted) throw new CancelledError();
-    const me: Owner = { pid: process.pid, since: Date.now() };
+    const me: Owner = { pid: process.pid, since: Date.now(), ...(opts.call && { call: true }) };
     try {
       const fd = openSync(file, "wx");
       try {
@@ -157,6 +153,7 @@ export async function acquireMicLock(opts: AcquireOptions = {}): Promise<() => v
       takeOver(file, ino);
       continue;
     }
+    if (readOwner(file)?.call) throw new MicBusyError(ON_A_CALL_ELSEWHERE);
     if (!waiting) {
       waiting = true;
       opts.onWait?.();
