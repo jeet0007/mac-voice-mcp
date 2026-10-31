@@ -825,7 +825,8 @@ test("a mic lock left by a window that died doesn't stop listening while Claude 
     const dead = spawnSync(process.execPath, ["-e", ""]).pid;
     writeFileSync(path.join(sb.home, ".cache", "mac-voice-mcp", "mic.lock"), JSON.stringify({ pid: dead, since: Date.now() }));
     const before = recs();
-    assert.ok(await waitFor(() => recs() > before + 1), "still listening");
+    // Two more listens (one may have started before the lock), about 3 s each: slow runners need longer than 8 s.
+    assert.ok(await waitFor(() => recs() > before + 1, 20_000), "still listening");
   } finally {
     await client.close();
   }
