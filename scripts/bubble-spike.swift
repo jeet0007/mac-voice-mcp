@@ -14,7 +14,16 @@
 //   /tmp/bubble-spike
 import AppKit
 
-let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cache/mac-voice-mcp/voice-mode")
+extension String { var nilIfEmpty: String? { isEmpty ? nil : self } }
+
+// The same folder as cacheRoot() in hooks/voice-files.mjs, so run it with the server's VOICE_MCP_CACHE_DIR or XDG_CACHE_HOME.
+let env = ProcessInfo.processInfo.environment
+let cacheDir = env["VOICE_MCP_CACHE_DIR"]?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+  ?? URL(fileURLWithPath: env["XDG_CACHE_HOME"]?.nilIfEmpty ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cache").path)
+    .appendingPathComponent("mac-voice-mcp").path
+let dir = URL(fileURLWithPath: cacheDir).appendingPathComponent("voice-mode")
+setvbuf(stdout, nil, _IOLBF, 0)
+print("watching \(dir.path)")
 let callFile = dir.appendingPathComponent("call.json")
 let phaseFile = dir.appendingPathComponent("phase.json")
 let muteFile = dir.appendingPathComponent("mute")

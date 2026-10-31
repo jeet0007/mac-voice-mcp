@@ -155,7 +155,7 @@ export class Call {
 
   /**
    * Queue `text` for the speaker and return once it has started (or failed at once). While it
-   * plays the mic is gated; typing doesn't stop it (a typo shouldn't cut Claude off). Returns notes about earlier speech that failed.
+   * plays the mic is gated on speakers (half duplex); typing doesn't stop it. Returns notes about earlier speech that failed.
    */
   async say(text: string): Promise<string[]> {
     let failure: unknown = null;
