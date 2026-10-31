@@ -151,6 +151,8 @@ export const STILL_ON_CALL = "(still on the call, nothing said) Call listen agai
 export const callEnded = (reason: string) => `(The call ended: ${reason}. Don't call listen or say again; the user can type, or start a new call.)`;
 export const SAID = "(Said. The microphone stays open, so carry on; what the user says next comes with your next say or listen.)";
 export const CALL_GREETING = "I'm here.";
+/** Said on a call when Claude Code shows a permission prompt (the plugin hook asks for it). */
+export const PERMISSION_NOTICE = "Claude needs your OK on screen.";
 
 export const CALL_PROMPT = [
   "Let's talk on a call: keep the microphone open and I'll speak whenever I like, like on the phone.",

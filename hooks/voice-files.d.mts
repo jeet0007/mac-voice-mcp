@@ -9,6 +9,7 @@ export function listeningFile(dir: string): string;
 export function inboxDir(dir: string): string;
 export function callFile(dir: string): string;
 export function muteFile(dir: string): string;
+export function permissionFile(dir: string): string;
 export const INBOX_MAX_AGE_MS: number;
 export function readJson(file: string): unknown;
 export function isAlive(pid: number): boolean;

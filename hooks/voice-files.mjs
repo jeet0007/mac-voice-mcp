@@ -21,6 +21,8 @@ export const inboxDir = (dir) => path.join(dir, "inbox");
 export const callFile = (dir) => path.join(dir, "call.json");
 /** Present while the user has muted the call (the floating bubble's mute button): the mic hears nothing. */
 export const muteFile = (dir) => path.join(dir, "mute");
+/** Written by the plugin hook when Claude Code shows a permission prompt on a call: the call says so out loud. */
+export const permissionFile = (dir) => path.join(dir, "permission");
 
 /** Inbox entries older than this are stale and never delivered. */
 export const INBOX_MAX_AGE_MS = 15 * 60_000;

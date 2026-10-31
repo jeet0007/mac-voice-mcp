@@ -12,6 +12,8 @@
  *   PostToolUse(call, start)        a call began in this session: note it in call.json, so what the
  *                                   user says on it reaches this session (and not another window's).
  *                                   SessionEnd removes call.json, which ends the call. Typing doesn't.
+ *   Notification(permission_prompt) on a call: ask the call to say "Claude needs your OK on screen",
+ *                                   so the user, maybe away from the screen, knows why it went quiet.
  *
  * Talking while Claude works: after a spoken answer the hook marks this session in listening.state,
  * and the MCP server keeps listening for "Claude, …" (src/worklisten.ts), leaving what it hears in
@@ -23,7 +25,7 @@
  */
 import { mkdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { cacheRoot, callFile, isAlive, listeningFile, readJson, takeInbox, voiceModeDir } from "./voice-files.mjs";
+import { cacheRoot, callFile, isAlive, listeningFile, permissionFile, readJson, takeInbox, voiceModeDir } from "./voice-files.mjs";
 
 const EXPIRE_MS = 30 * 60_000;
 
@@ -186,6 +188,10 @@ export function handle(input, { env = process.env, now = Date.now() } = {}) {
       clearState(dir, session);
       clearListening(dir, session);
       if (onCall(dir, session)) rmSync(callFile(dir), { force: true }); // the server notices and ends the call
+      return { exitCode: 0 };
+    case "Notification":
+      // The call speaks it, so its voice and mic gate apply. Other notifications (idle) are normal on a call.
+      if (input.notification_type === "permission_prompt" && onCall(dir, session)) writeFileSync(permissionFile(dir), JSON.stringify({ at: now }));
       return { exitCode: 0 };
     case "Stop": {
       // Something said while Claude worked comes first, even after the one nudge per answer.

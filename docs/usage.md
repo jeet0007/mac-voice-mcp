@@ -26,6 +26,7 @@ A call keeps the line open, like a phone call: the mic stays on until you hang u
 - **Silence is fine.** A call never ends because you're quiet. It ends after 30 minutes with nothing said either way (`VOICE_MCP_CALL_IDLE_MINUTES`).
 - **Hang up:** say "hang up" or "bye Claude", or run `/mac-voice-mcp:hangup`. Closing the session ends the call too.
 - **Typing doesn't end the call or cut Claude off.** Type whenever you want; the call stays on.
+- **No dead air.** After your words reach Claude, a soft tick plays every second and a half until Claude answers, for up to 10 seconds (`VOICE_MCP_CALL_THINKING_SOUND=0` turns it off). When Claude Code shows a permission prompt, Claude says "Claude needs your OK on screen", so you know why it went quiet.
 
 **Talking over Claude needs headphones.** On speakers the mic is muted while Claude speaks, so it doesn't hear itself. With headphones (the headphone jack, or Bluetooth headphones such as AirPods), the mic stays open: a quarter second of your voice pauses Claude. Say something real and it stops and answers you; a quick "mm-hmm" or a cough lets it carry on. voice-mcp checks for headphones when the call starts; `VOICE_MCP_CALL_DUPLEX` overrides it ([Configuration](configuration.md#calls)).
 
@@ -50,6 +51,7 @@ A call keeps the line open, like a phone call: the mic stays on until you hang u
 | Purple, quick | Got it, transcribing |
 | Grey | Waiting for another voice session to finish |
 | Green, calm | Listening for "Claude, …" while Claude works |
+| Bright green, pulsing | On a call, with how long it has lasted (orange and blue while Claude speaks and listens on it) |
 
 It's drawn with coloured blocks in the terminal and as a smooth animated shape in the desktop app and VS Code. Each window shows only its own voice.
 

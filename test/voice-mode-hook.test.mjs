@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { cacheRoot, callFile, inboxDir, listeningFile, voiceModeDir } from "../hooks/voice-files.mjs";
+import { cacheRoot, callFile, inboxDir, listeningFile, permissionFile, voiceModeDir } from "../hooks/voice-files.mjs";
 import { handle, heardUser, NOT_HEARD_PREFIXES, STOP_REASON } from "../hooks/voice-mode-lib.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -124,7 +124,7 @@ test("as a real process — also through a symlinked install path — and bad in
 
 test("hooks.json: speak_and_listen updates voice mode under any server scope; every other tool only runs the cheap check", () => {
   const cfg = JSON.parse(readFileSync(path.join(ROOT, "hooks", "hooks.json"), "utf8"));
-  assert.deepEqual(Object.keys(cfg.hooks).sort(), ["PostToolUse", "PostToolUseFailure", "SessionEnd", "Stop", "UserPromptSubmit"]);
+  assert.deepEqual(Object.keys(cfg.hooks).sort(), ["Notification", "PostToolUse", "PostToolUseFailure", "SessionEnd", "Stop", "UserPromptSubmit"]);
   const NODE = 'node "${CLAUDE_PLUGIN_ROOT}/hooks/voice-mode.mjs"';
   for (const [event, groups] of Object.entries(cfg.hooks)) {
     for (const g of groups) {
@@ -391,6 +391,21 @@ test("typing keeps the call; the session ending removes call.json (the server th
   assert.ok(existsSyncW(file), "another session ending leaves the call alone");
   run("SessionEnd");
   assert.equal(existsSyncW(file), false);
+});
+
+test("a permission prompt on this session's call asks the call to say so; idle notices and other sessions don't", () => {
+  const { env, run } = setup();
+  const file = permissionFile(voiceModeDir(env.VOICE_MCP_CACHE_DIR));
+  const prompt = { notification_type: "permission_prompt", message: "Claude needs your permission to use Bash" };
+  run("Notification", prompt);
+  assert.equal(existsSyncW(file), false, "no call: nothing to say");
+  startCall(env, "s1", run);
+  handle({ session_id: "s2", hook_event_name: "Notification", ...prompt }, { env });
+  assert.equal(existsSyncW(file), false, "another session's prompt");
+  run("Notification", { notification_type: "idle_prompt", message: "Claude is waiting for your input" });
+  assert.equal(existsSyncW(file), false, "idle is normal on a call");
+  assert.deepEqual(run("Notification", prompt), { exitCode: 0 });
+  assert.equal(existsSyncW(file), true);
 });
 
 test("a failed call start, or call end, leaves call.json alone", () => {

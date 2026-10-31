@@ -1029,6 +1029,44 @@ test("a call: one recorder throughout, listen hears the user, say returns at onc
   }
 });
 
+test("on a call, a soft tick plays while Claude thinks, until it speaks; VOICE_MCP_CALL_THINKING_SOUND=0 turns it off", async () => {
+  // The tick is a macOS system sound: elsewhere there is none.
+  const ticks = (sb) => sb.readLog().match(/^afplay -v 0\.2 .*Tink\.aiff$/gm)?.length ?? 0;
+  for (const [env, on] of [[{}, process.platform === "darwin"], [{ VOICE_MCP_CALL_THINKING_SOUND: "0" }, false]]) {
+    const sb = sandbox();
+    fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+    const { client } = await connect(sb.env({ STUB_SCENARIO: "call", ...env }));
+    try {
+      await client.callTool({ name: "call", arguments: { action: "start" } });
+      assert.equal(ticks(sb), 0, "nothing said yet, nothing to think about");
+      assert.equal((await client.callTool({ name: "listen", arguments: {} })).content[0].text, "Stub transcript from the server.");
+      await new Promise((r) => setTimeout(r, 3600));
+      if (on) assert.ok(ticks(sb) >= 2, `about every 1.5 s, got ${ticks(sb)}`);
+      else assert.equal(ticks(sb), 0, JSON.stringify(env));
+      await client.callTool({ name: "say", arguments: { text: "Done." } });
+      const before = ticks(sb);
+      await new Promise((r) => setTimeout(r, 2000));
+      assert.equal(ticks(sb), before, "Claude spoke: no more ticks");
+    } finally {
+      await client.close();
+    }
+  }
+});
+
+test("a permission prompt during a call (the plugin hook writes voice-mode/permission) is said out loud", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "silent" }));
+  try {
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    writeFileSync(path.join(voiceModeDir(sb), "permission"), JSON.stringify({ at: Date.now() }));
+    assert.ok(await waitFor(() => /^speak "Claude needs your OK on screen\."/m.test(sb.readLog()), 3000), "the notice was spoken");
+    assert.ok(!existsSync(path.join(voiceModeDir(sb), "permission")), "once");
+  } finally {
+    await client.close();
+  }
+});
+
 test("on headphones a call keeps the mic open while Claude speaks (full duplex); VOICE_MCP_CALL_DUPLEX overrides", async () => {
   // Headphone detection is macOS-only (system_profiler): elsewhere auto means speakers.
   const detected = process.platform === "darwin" ? "full" : "half";

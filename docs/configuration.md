@@ -55,6 +55,7 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 |---|---|---|
 | `VOICE_MCP_CALL_IDLE_MINUTES` | `30` | A call ends after this long with nothing said by you or Claude. Silence alone never ends it before then. |
 | `VOICE_MCP_CALL_DUPLEX` | `auto` | Whether the mic stays open while Claude speaks on a call. `full`: yes, so you can talk over Claude; it pauses, drops the rest of its reply when you say something real, and carries on after a filler such as "mm-hmm". Use it only with headphones: on speakers the mic hears Claude. `half`: the mic is muted while Claude speaks. `auto`: `full` when the Mac's sound goes to headphones (the headphone jack, or Bluetooth that isn't a speaker), else `half`; checked once when the call starts. Windows calls are always `half`: speech can't be paused there. |
+| `VOICE_MCP_CALL_THINKING_SOUND` | `1` | After your words reach Claude on a call, a soft tick every 1.5 s until Claude speaks, for at most 10 s, so the call never goes silent. `0` turns it off. macOS only. |
 
 ## Claude Code plugin hook
 

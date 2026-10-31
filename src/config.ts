@@ -116,6 +116,8 @@ export const CONFIG = {
   callDuplex: (["full", "half"].includes(process.env.VOICE_MCP_CALL_DUPLEX?.trim().toLowerCase() ?? "")
     ? process.env.VOICE_MCP_CALL_DUPLEX!.trim().toLowerCase()
     : "auto") as "auto" | "full" | "half",
+  /** A soft tick every 1.5 s after the user's words reach Claude, until it speaks (at most 10 s), so a call never goes silent (macOS). */
+  callThinkingSound: envBool("VOICE_MCP_CALL_THINKING_SOUND", true),
 
   // --- Speech-to-text
   /** whisper.cpp model name (tiny.en, base.en, small.en, large-v3-turbo-q5_0, ...). */

@@ -248,6 +248,33 @@ test("after a reload mid-call, this window's call is picked up again from call.j
   expect(submitted).toEqual([JSON.stringify({ text: 'are you still there', origin: 'plugin', asUser: true })])
 })
 
+test("on a call the buddy shows it with the call's duration, and Claude speaking on it as usual", async ($, on) => {
+  const { clock, files } = callEngine(on, {})
+  on('ui.render', ($$, e) => {
+    const { Text } = $$.ui.resolve(e)
+    return <Text>engine</Text>
+  })
+  on('ui.blit', () => ({ value: {} }))
+  files[`${DIR}/call.json`] = JSON.stringify({ pid: 1, session: 's1', startedAt: 1_000_000 })
+  await $.tool.call({ tool: CALL, action: 'start' } as never)
+  await clock.advance(65_300) // the buddy refreshes every 240 ms
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /^ ?On a call$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^ · 1:05$/ })).toBeDefined()
+  await ui.unmount()
+  files[PHASE] = JSON.stringify({ phase: 'speaking', at: 1 })
+  await clock.advance(1000)
+  const speaking = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect(await speaking.find({ type: 'Text', text: /Speaking/ })).toBeDefined()
+  expect(await speaking.find({ type: 'Text', text: /^ · on a call · 1:06$/ })).toBeDefined()
+  await speaking.unmount()
+  delete files[`${DIR}/call.json`] // hung up
+  await clock.advance(1000)
+  const after = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect((await after.find({ type: 'Text' }))?.text).toBe('engine')
+  await after.unmount()
+})
+
 test("typing during a call doesn't write the stop file (a typo shouldn't cut Claude off)", async ($, on) => {
   const { clock, files } = callEngine(on, {})
   await $.tool.call({ tool: CALL, action: 'start' } as never)

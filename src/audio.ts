@@ -249,13 +249,19 @@ export async function synthesizeToFile(text: string, outFile: string): Promise<S
 
 /** A short, quiet cue that the mic just opened ("start") or closed ("stop"). macOS only. */
 export async function chime(kind: "start" | "stop"): Promise<void> {
-  if (!CONFIG.chime || !IS_MAC) return;
-  const sound = kind === "start" ? "/System/Library/Sounds/Tink.aiff" : "/System/Library/Sounds/Pop.aiff";
-  if (!existsSync(sound)) return;
+  if (CONFIG.chime) await playSound(kind === "start" ? "Tink" : "Pop", 0.6);
+}
+
+/** The soft tick of a call while Claude thinks: 60 ms of sound, too short for the endpointer to take as speech. macOS only. */
+export const thinkingTick = () => playSound("Tink", 0.2);
+
+async function playSound(name: string, volume: number): Promise<void> {
+  const sound = `/System/Library/Sounds/${name}.aiff`;
+  if (!IS_MAC || !existsSync(sound)) return;
   try {
-    await run("/usr/bin/afplay", ["-v", "0.6", sound], { timeoutMs: 3000 });
+    await run(which("afplay") ?? "/usr/bin/afplay", ["-v", String(volume), sound], { timeoutMs: 3000 });
   } catch {
-    /* a missing chime is never fatal */
+    /* a missing sound is never fatal */
   }
 }
 

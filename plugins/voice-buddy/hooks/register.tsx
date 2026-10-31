@@ -22,7 +22,8 @@
  * 3. On a call, while Claude is idle: what you say waits in voice-mcp's inbox, and nothing would
  *    read it until Claude's next tool call. This hands each utterance to Claude as a new message
  *    ($.prompt.submit as you), polling the inbox between turns. It tells Claude so right after the
- *    call starts, so Claude ends its turns normally instead of waiting in listen.
+ *    call starts, so Claude ends its turns normally instead of waiting in listen. The buddy turns
+ *    green with the call's duration, and shows speaking and listening as usual.
  *
  * Early-access API (Claude Code mods): if a Claude Code update breaks it, voice keeps working and
  * Esc still interrupts.
@@ -53,6 +54,8 @@ let mainTurn = false // Claude's main loop is in a turn: its tool calls and the 
 let delivering = false // one $.prompt.submit at a time
 let deliveryBroken = false // $.prompt.submit failed on this call: leave the inbox to listen, say and the hook
 let inboxTimer: Timer | null = null
+/** When this window's call started (call.json's startedAt), while it's on; null otherwise. */
+let callStartedAt: number | null = null
 
 // --- The buddy ---
 /** What the buddy shows now; null hides it. */
@@ -71,6 +74,7 @@ const LABELS: Record<Mood, string> = {
   transcribing: 'Got it, transcribing',
   waiting: 'Waiting for another voice session',
   standby: 'Listening for "Claude, …"',
+  call: 'On a call',
 }
 const PHASES: Record<string, Mood> = { speaking: 'speaking', listening: 'listening', transcribing: 'transcribing', waiting: 'waiting' }
 
@@ -117,11 +121,28 @@ function noticeTyping($: EngineInterface): void {
   })
 }
 
+/** When this window's call started, or null when it has none (the call may have ended without Claude). */
+async function callStart($: EngineInterface, dir: string): Promise<number | null> {
+  if (!onCall) return null
+  try {
+    const { startedAt } = JSON.parse(await $.fs.read(`${dir}/call.json`)) as { startedAt?: unknown }
+    return typeof startedAt === 'number' ? startedAt : null
+  } catch {
+    return null
+  }
+}
+
+/** 0:42, 12:05 */
+function duration(s: number): string {
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+
 /** What this window's voice is doing now, or null when it's off here. */
 async function currentMood($: EngineInterface): Promise<Mood | null> {
   const dir = await voiceModeDir($)
   if (!dir) return null
-  if (running > 0 || (await $.clock.now()) <= updateUntil) {
+  callStartedAt = await callStart($, dir)
+  if (running > 0 || callStartedAt !== null || (await $.clock.now()) <= updateUntil) {
     try {
       const { phase } = JSON.parse(await $.fs.read(`${dir}/phase.json`)) as { phase?: string }
       const known = phase ? PHASES[phase] : undefined
@@ -130,6 +151,7 @@ async function currentMood($: EngineInterface): Promise<Mood | null> {
       /* no phase file: between phases, or an older voice-mcp */
     }
     if (running > 0) return 'speaking'
+    if (callStartedAt !== null) return 'call'
   }
   return (await listeningHere($, dir)) ? 'standby' : null
 }
@@ -216,11 +238,15 @@ function animate($: EngineInterface): void {
   })
 }
 
+let shownSecond = -1 // the call duration on screen
+
 async function tick($: EngineInterface): Promise<void> {
   ticks++
   if (ticks % REFRESH_TICKS === 1) {
     const now = await currentMood($)
-    if (now !== mood) {
+    const second = callStartedAt === null ? -1 : Math.max(0, Math.floor(((await $.clock.now()) - callStartedAt) / 1000))
+    if (now !== mood || second !== shownSecond) {
+      shownSecond = second
       mood = now
       $.ui.invalidate('ui.render')
     }
@@ -258,6 +284,7 @@ export const register: Register = on => {
       onCall = true
       deliveryBroken = false
       watchInbox($)
+      animate($)
       return { ...r, context: [...(r.context ?? []), IDLE_DELIVERY_NOTE] }
     }
     return r
@@ -297,7 +324,12 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, ($, e, next) => {
     if (e.props.hasSurvey || mood === null) return next(e)
     const shown = mood
-    const hint = shown === 'speaking' || shown === 'listening' ? ' · type to interrupt' : ''
+    const hint =
+      shownSecond >= 0
+        ? `${shown === 'call' ? '' : ' · on a call'} · ${duration(shownSecond)}`
+        : shown === 'speaking' || shown === 'listening'
+          ? ' · type to interrupt'
+          : ''
     if (e.surface === 'terminal') {
       terminalBand = e.requestId
       const { Box, Raster, Text } = $.ui.resolve(e)

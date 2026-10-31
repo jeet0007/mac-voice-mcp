@@ -12,6 +12,8 @@
  * It ends when the user says "hang up", when Claude calls `call end`, after
  * VOICE_MCP_CALL_IDLE_MINUTES (default 30) without a word either way, when call.json disappears
  * (the plugin hook removes it when the session ends), when the recorder fails, or at shutdown.
+ * After the user's words reach Claude a soft tick plays every 1.5 s until Claude speaks (10 s at most),
+ * and a permission prompt on screen is said out loud, so the line never goes quiet while Claude waits.
  * Ending stops the recorder within a second and empties the inbox. Nothing is spoken: Claude notes it on screen.
  */
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -19,7 +21,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import * as files from "../hooks/voice-files.mjs";
-import { listenContinuously, speak } from "./audio.js";
+import { listenContinuously, speak, thinkingTick } from "./audio.js";
 import { BargeIn, type Interruption } from "./barge-in.js";
 import { CONFIG, debug, envNum, log, PKG } from "./config.js";
 import { acquireMicLock } from "./lock.js";
@@ -27,6 +29,7 @@ import { ensureModel } from "./model.js";
 import { CancelledError, sleep } from "./proc.js";
 import { detectDuplex, pauseSpeech } from "./speakers.js";
 import { prewarm, transcribe } from "./stt.js";
+import { PERMISSION_NOTICE } from "./texts.js";
 import { addToInbox, inboxDir, showPhase, takeInbox, voiceModeDir, type InboxEntry } from "./worklisten.js";
 import { trackSpeaking } from "./voice.js";
 
@@ -34,6 +37,8 @@ import { trackSpeaking } from "./voice.js";
 export const callFile = () => files.callFile(voiceModeDir());
 
 export const muteFile = () => files.muteFile(voiceModeDir());
+
+const permissionFile = () => files.permissionFile(voiceModeDir());
 
 /** The last speech-to-text failure on a call, kept for debugging (and a future /issue). */
 export const sttFailureFile = () => path.join(CONFIG.cacheDir, "last-stt-failure.json");
@@ -48,6 +53,9 @@ const WATCH_MS = 250;
 const ECHO_TAIL_MS = 300;
 /** A `say` that fails right away (no voice installed) is reported by that call; later failures by the next one. */
 const EARLY_FAILURE_MS = 300;
+/** While Claude thinks: a tick this often, for at most this long. */
+const THINKING_EVERY_MS = 1500;
+const THINKING_MAX_MS = 10_000;
 /** The call ends after this long without a word either way. Fractions are fine (the tests use seconds). */
 const IDLE_MS = Math.max(0.01, envNum("VOICE_MCP_CALL_IDLE_MINUTES", 30)) * 60_000;
 
@@ -91,6 +99,15 @@ export class Call {
   /** Things the user said that speech to text failed on, since the last one it heard. */
   private missed: { count: number; error: string } | null = null;
   private wakers = new Set<() => void>();
+  /** `say` calls queued or playing. */
+  private saysPending = 0;
+  /** The user has talked for BARGE_IN_MS and not stopped yet. */
+  private userTalking = false;
+  /** Words are in the inbox that nobody has handed to Claude yet. */
+  private undelivered = false;
+  /** When the user's words last reached Claude, until it speaks (0: not thinking). */
+  private thinkingSince = 0;
+  private lastTickAt = 0;
 
   get on(): boolean {
     return this.state === "on";
@@ -110,7 +127,11 @@ export class Call {
     this.missed = null;
     this.muteUntil = 0;
     this.userMuted = false;
+    this.userTalking = false;
+    this.undelivered = false;
+    this.thinkingSince = 0;
     rmSync(muteFile(), { force: true });
+    rmSync(permissionFile(), { force: true });
     this.bargeIn = new BargeIn(pauseSpeech);
     this.duplex = duplex;
     this.lastActivity = Date.now();
@@ -161,6 +182,10 @@ export class Call {
     let failure: unknown = null;
     let returned = false;
     const startedAt = Date.now();
+    // Claude is talking: words taken before this, or with this say's result, need no ticks.
+    this.thinkingSince = 0;
+    this.undelivered = false;
+    this.saysPending++;
     const play = async () => {
       if (!this.on || this.bargeIn.dropped(startedAt)) return;
       this.muteUntil = Infinity;
@@ -183,6 +208,7 @@ export class Call {
     };
     const done = this.speaking.then(play);
     this.speaking = done;
+    void done.finally(() => this.saysPending--);
     trackSpeaking(done);
     await Promise.race([done, sleep(EARLY_FAILURE_MS)]);
     returned = true;
@@ -228,6 +254,7 @@ export class Call {
             .finally(() => this.bargeIn.done(from));
         },
         onSpeech: (talking) => {
+          this.userTalking = talking;
           if (this.duplex === "full") this.bargeIn.speech(talking);
         },
       });
@@ -252,6 +279,7 @@ export class Call {
     this.lastActivity = Date.now();
     addToInbox(this.missed ? `${missedNote(this.missed)} ${text}` : text);
     this.missed = null;
+    this.undelivered = true;
     for (const wake of this.wakers) wake();
   }
 
@@ -283,15 +311,42 @@ export class Call {
       void this.end("the session ended");
       return;
     }
+    if (existsSync(permissionFile())) {
+      rmSync(permissionFile(), { force: true });
+      void this.say(PERMISSION_NOTICE).then(
+        (notes) => this.laterNotes.unshift(...notes),
+        (e: unknown) => log(`call: couldn't say the permission notice: ${e instanceof Error ? e.message : String(e)}`),
+      );
+    }
     // Voice Buddy blanks an inbox entry once it has handed it to Claude: nothing is kept.
+    let waiting = false;
     try {
       for (const name of readdirSync(inboxDir())) {
         const file = path.join(inboxDir(), name);
         if (statSync(file).size === 0) rmSync(file, { force: true });
+        else if (name.endsWith(".json")) waiting = true;
       }
     } catch {
       /* no inbox yet */
     }
+    // Whoever handed the words over (listen, the plugin hook, Voice Buddy), Claude has them now.
+    if (this.undelivered && !waiting) {
+      this.undelivered = false;
+      if (!this.saysPending) this.thinkingSince = this.lastTickAt = Date.now();
+    }
+    this.tickWhileThinking();
+  }
+
+  private tickWhileThinking(): void {
+    if (!CONFIG.callThinkingSound || !this.thinkingSince || this.saysPending || this.userTalking) return;
+    const now = Date.now();
+    if (now - this.thinkingSince > THINKING_MAX_MS) {
+      this.thinkingSince = 0;
+      return;
+    }
+    if (now - this.lastTickAt < THINKING_EVERY_MS) return;
+    this.lastTickAt = now;
+    void thinkingTick();
   }
 }
 
