@@ -1041,10 +1041,14 @@ test("on a call, a soft tick plays while Claude thinks, until it speaks; VOICE_M
       await client.callTool({ name: "call", arguments: { action: "start" } });
       assert.equal(ticks(sb), 0, "nothing said yet, nothing to think about");
       assert.equal((await client.callTool({ name: "listen", arguments: {} })).content[0].text, "Stub transcript from the server.");
-      await new Promise((r) => setTimeout(r, 3600));
-      if (on) assert.ok(ticks(sb) >= 2, `about every 1.5 s, got ${ticks(sb)}`);
-      else assert.equal(ticks(sb), 0, JSON.stringify(env));
+      // Waited for, not timed: a slow CI Mac starts the stand-in sound player late.
+      if (on) assert.ok(await waitFor(() => ticks(sb) >= 2), `about every 1.5 s, got ${ticks(sb)}`);
+      else {
+        await new Promise((r) => setTimeout(r, 3600));
+        assert.equal(ticks(sb), 0, JSON.stringify(env));
+      }
       await client.callTool({ name: "say", arguments: { text: "Done." } });
+      await new Promise((r) => setTimeout(r, 800)); // a tick started just before Claude spoke may still be logging
       const before = ticks(sb);
       await new Promise((r) => setTimeout(r, 2000));
       assert.equal(ticks(sb), before, "Claude spoke: no more ticks");
