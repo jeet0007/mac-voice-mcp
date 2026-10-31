@@ -17,6 +17,22 @@ Once you answer out loud, you're in a voice conversation. Claude replies by voic
 
 In Claude Code, the plugin enforces this with a hook. If Claude tries to answer in text mid-conversation, the hook sends it back once to answer by voice. If it stops again, the hook lets it. To turn the hook off, add `"VOICE_MCP_STAY_IN_VOICE": "0"` to the `env` block in `~/.claude/settings.json`. Other apps rely on the instructions alone.
 
+## Calls
+
+A call keeps the line open, like a phone call: the mic stays on until you hang up, so you can talk whenever you like instead of waiting for Claude to ask.
+
+- **Start:** `/mac-voice-mcp:call` (Claude Code), or the **call** prompt in Claude Desktop and Cursor. Claude says "I'm here."
+- **Talk anytime.** While Claude works, what you say reaches it at its next step. While it waits, Voice Buddy hands it over as your next message, within a fraction of a second. Without Voice Buddy (and in Claude Desktop and Cursor), Claude keeps listening between replies instead.
+- **Silence is fine.** A call never ends because you're quiet. It ends after 30 minutes with nothing said either way (`VOICE_MCP_CALL_IDLE_MINUTES`).
+- **Hang up:** say "hang up" or "bye Claude", or run `/mac-voice-mcp:hangup`. Closing the session ends the call too.
+- **Typing doesn't end the call or cut Claude off.** Type whenever you want; the call stays on.
+
+**Talking over Claude needs headphones.** On speakers the mic is muted while Claude speaks, so it doesn't hear itself. With headphones (the headphone jack, or Bluetooth headphones such as AirPods), the mic stays open: a quarter second of your voice pauses Claude. Say something real and it stops and answers you; a quick "mm-hmm" or a cough lets it carry on. voice-mcp checks for headphones when the call starts; `VOICE_MCP_CALL_DUPLEX` overrides it ([Configuration](configuration.md#calls)).
+
+**One call at a time.** While you're on a call, voice in other windows (other Claude Code sessions, Claude Desktop, Cursor) says you're on a call elsewhere instead of opening the mic.
+
+**Long commands:** while Claude runs a long command in the foreground, such as a full test run, what you say waits until it finishes. Ask Claude to run long commands in the background during a call.
+
 ## Voice Buddy: see the voice, type to interrupt
 
 **Voice Buddy** is an optional companion plugin for Claude Code:

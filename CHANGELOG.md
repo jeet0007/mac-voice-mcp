@@ -6,6 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [Unreleased]
 
 ### Added
+- **Calls.** `/mac-voice-mcp:call` (or the `call` prompt in Claude Desktop and Cursor) keeps the mic open until you hang up, like a phone call, instead of one turn at a time. Talk whenever you like: while Claude works, your words reach it at its next step; while it waits, Voice Buddy hands them over as your next message, in about 0.15 s. Silence never ends a call (it ends after 30 minutes with nothing said, `VOICE_MCP_CALL_IDLE_MINUTES`). Hang up by saying "hang up" or "bye Claude", with `/mac-voice-mcp:hangup`, or by closing the session. Typing doesn't end the call or cut Claude off. While a call is on, voice in other windows says so instead of opening the mic. New tools for this: `call`, `say` and `listen`; `speak_and_listen` is unchanged.
 - **Talk over Claude on a call, with headphones.** When the Mac's sound goes to headphones, the mic stays open while Claude speaks. A quarter second of your voice pauses Claude. Say something real and the rest of its reply is dropped, and Claude hears what you said and roughly how far it got. A filler such as "mm-hmm", a cough, or nothing real within 2 s lets it carry on from where it paused. On speakers the mic stays muted while Claude speaks, as before. `VOICE_MCP_CALL_DUPLEX` (`auto`, `full`, `half`) overrides the headphone check.
 
 ## [0.7.1] - 2026-10-26
