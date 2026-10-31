@@ -367,12 +367,13 @@ test("the server and hooks draining the inbox at the same time hand each thing t
   for (let i = 0; i < 2000; i++) leaveInInbox(env, `said ${i}`);
   const lib = path.join(ROOT, "hooks", "voice-mode-lib.mjs");
   const server = path.join(ROOT, "dist", "worklisten.js");
+  // Paths go in as arguments (process.argv[1], [2]), so the code is constant.
   const drains = [
-    `import(${JSON.stringify(lib)}).then((m) => process.stdout.write(JSON.stringify(m.takeInterjections(${JSON.stringify(dir)}, "s1"))))`,
-    `import(${JSON.stringify(server)}).then((m) => process.stdout.write(JSON.stringify(m.takeInbox().map((e) => e.text))))`,
+    [`import(process.argv[1]).then((m) => process.stdout.write(JSON.stringify(m.takeInterjections(process.argv[2], "s1"))))`, lib, dir],
+    [`import(process.argv[1]).then((m) => process.stdout.write(JSON.stringify(m.takeInbox().map((e) => e.text))))`, server],
   ];
   const readers = Array.from({ length: 4 }, (_, i) => {
-    const p = spawn(process.execPath, ["-e", drains[i % 2]], { env: { ...process.env, ...env } });
+    const p = spawn(process.execPath, ["-e", ...drains[i % 2]], { env: { ...process.env, ...env } });
     let out = "";
     p.stdout.on("data", (d) => (out += d));
     return new Promise((resolve) => p.on("close", () => resolve(JSON.parse(out))));
