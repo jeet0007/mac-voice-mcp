@@ -1,8 +1,10 @@
 {
   "name": "voice-buddy",
-  "version": "0.1.0",
-  "description": "Companion to Mac Voice for Claude Code: an animated buddy above the prompt that shows when Claude is speaking or listening, and typing that interrupts the voice at once.",
-  "author": { "name": "Jeet" },
+  "version": "0.2.0",
+  "description": "Companion to Mac Voice for Claude Code: an animated buddy above the prompt that shows when Claude is speaking or listening, typing that interrupts the voice at once, and on a call it hands what you say to Claude while it waits.",
+  "author": {
+    "name": "Jeet"
+  },
   "homepage": "https://github.com/jeet0007/mac-voice-mcp#readme",
   "repository": "https://github.com/jeet0007/mac-voice-mcp",
   "license": "MIT"
