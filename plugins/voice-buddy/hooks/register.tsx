@@ -1,8 +1,8 @@
 /**
  * voice-buddy, a companion to Mac Voice in Claude Code:
  *
- * 1. The buddy: a soft animated blob above the prompt while voice is on in this window, its colour
- *    and motion showing what the voice turn is doing (speaking, listening, transcribing, waiting
+ * 1. The buddy: a one-line status above the prompt while voice is on in this window, showing what
+ *    the voice turn is doing (speaking, listening, transcribing, waiting
  *    for the mic, or listening for "Claude, …" while Claude works). It reads voice-mcp's
  *    voice-mode/phase.json, and only while this window's voice turn runs.
  *
@@ -22,14 +22,14 @@
  * 3. On a call, while Claude is idle: what you say waits in voice-mcp's inbox, and nothing would
  *    read it until Claude's next tool call. This hands each utterance to Claude as a new message
  *    ($.prompt.submit as you), polling the inbox between turns. It tells Claude so right after the
- *    call starts, so Claude ends its turns normally instead of waiting in listen. The buddy turns
- *    green with the call's duration, and shows speaking and listening as usual.
+ *    call starts, so Claude ends its turns normally instead of waiting in listen. The buddy shows
+ *    the call's duration ("Muted" while the call bubble has it muted), and speaking and listening
+ *    as usual.
  *
  * Early-access API (Claude Code mods): if a Claude Code update breaks it, voice keeps working and
  * Esc still interrupts.
  */
 import type { EngineInterface, Register, Timer } from 'claude-code'
-import { blobCells, blobSvg, LOOKS, type Mood } from './blob.ts'
 
 /** voice-mcp's tools, under any server scope: plugin, user or project. */
 const SPEAK = /(^|__)speak_and_listen$/
@@ -60,14 +60,9 @@ let callStartedAt: number | null = null
 // --- The buddy ---
 /** What the buddy shows now; null hides it. */
 let mood: Mood | null = null
-/** The terminal band the buddy is drawn in, for repainting it between redraws. */
-let terminalBand: string | undefined
 let timer: Timer | null = null
-let ticks = 0
-const TICK_MS = 80 // about 12 frames a second in the terminal
-const REFRESH_TICKS = 3 // check what the voice turn is doing about 4 times a second
-const COLUMNS = 10
-const ROWS = 5
+const REFRESH_MS = 240 // check what the voice turn is doing about 4 times a second
+type Mood = 'speaking' | 'listening' | 'transcribing' | 'waiting' | 'standby' | 'call' | 'muted'
 const LABELS: Record<Mood, string> = {
   speaking: 'Speaking',
   listening: 'Listening',
@@ -75,6 +70,7 @@ const LABELS: Record<Mood, string> = {
   waiting: 'Waiting for another voice session',
   standby: 'Listening for "Claude, …"',
   call: 'On a call',
+  muted: '🔇 Muted',
 }
 const PHASES: Record<string, Mood> = { speaking: 'speaking', listening: 'listening', transcribing: 'transcribing', waiting: 'waiting' }
 
@@ -151,7 +147,8 @@ async function currentMood($: EngineInterface): Promise<Mood | null> {
       /* no phase file: between phases, or an older voice-mcp */
     }
     if (running > 0) return 'speaking'
-    if (callStartedAt !== null) return 'call'
+    // The call bubble's mute button (voice-mode/mute): say so here too, so both views agree.
+    if (callStartedAt !== null) return (await $.fs.exists(`${dir}/mute`)) ? 'muted' : 'call'
   }
   return (await listeningHere($, dir)) ? 'standby' : null
 }
@@ -229,11 +226,11 @@ function watchInbox($: EngineInterface): void {
   })
 }
 
-/** Keep the buddy moving (terminal) and in step with the voice turn, until voice is off here. */
+/** Keep the buddy in step with the voice turn, until voice is off here. */
 function animate($: EngineInterface): void {
   if (timer) return
-  ticks = 0
-  timer = $.clock.every(TICK_MS, () => {
+  tick($).catch(() => {})
+  timer = $.clock.every(REFRESH_MS, () => {
     tick($).catch(() => {})
   })
 }
@@ -241,24 +238,16 @@ function animate($: EngineInterface): void {
 let shownSecond = -1 // the call duration on screen
 
 async function tick($: EngineInterface): Promise<void> {
-  ticks++
-  if (ticks % REFRESH_TICKS === 1) {
-    const now = await currentMood($)
-    const second = callStartedAt === null ? -1 : Math.max(0, Math.floor(((await $.clock.now()) - callStartedAt) / 1000))
-    if (now !== mood || second !== shownSecond) {
-      shownSecond = second
-      mood = now
-      $.ui.invalidate('ui.render')
-    }
-    if (mood === null) {
-      timer?.cancel()
-      timer = null
-      return
-    }
+  const now = await currentMood($)
+  const second = callStartedAt === null ? -1 : Math.max(0, Math.floor(((await $.clock.now()) - callStartedAt) / 1000))
+  if (now !== mood || second !== shownSecond) {
+    shownSecond = second
+    mood = now
+    $.ui.invalidate('ui.render')
   }
-  if (mood && terminalBand) {
-    const p = ((ticks * TICK_MS) % LOOKS[mood].loopMs) / LOOKS[mood].loopMs
-    await $.ui.blit({ requestId: terminalBand, key: 'buddy', cells: blobCells(mood, p, COLUMNS, ROWS) })
+  if (mood === null) {
+    timer?.cancel()
+    timer = null
   }
 }
 
@@ -330,22 +319,10 @@ export const register: Register = on => {
         : shown === 'speaking' || shown === 'listening'
           ? ' · type to interrupt'
           : ''
-    if (e.surface === 'terminal') {
-      terminalBand = e.requestId
-      const { Box, Raster, Text } = $.ui.resolve(e)
-      return (
-        <Box flexDirection="row" alignItems="center">
-          <Raster key="buddy" columns={COLUMNS} rows={ROWS} cells={blobCells(shown, 0, COLUMNS, ROWS)} />
-          <Text> {LABELS[shown]}</Text>
-          <Text dimColor>{hint}</Text>
-        </Box>
-      )
-    }
-    const { Box, Svg, Text } = $.ui.resolve(e)
+    const { Box, Text } = $.ui.resolve(e)
     return (
-      <Box flexDirection="row" alignItems="center">
-        <Svg source={blobSvg(shown)} alt={`Voice: ${LABELS[shown]}`} width={28} height={28} isInteractive />
-        <Text> {LABELS[shown]}</Text>
+      <Box flexDirection="row">
+        <Text>{LABELS[shown]}</Text>
         <Text dimColor>{hint}</Text>
       </Box>
     )

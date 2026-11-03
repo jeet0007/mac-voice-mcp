@@ -137,3 +137,12 @@ test("our own chime is ignored: a loud sound while ignoring neither starts nor e
   for (let i = 0; i < ms(1200) && !reason; i++) reason = quiet.push(frame("noise"));
   assert.equal(reason, "no-speech");
 });
+
+test("the last frame's level and threshold: speech sits above the threshold, a quiet room below it", () => {
+  const ep = new Endpointer(OPTS);
+  for (let i = 0; i < ms(1000); i++) ep.push(frame("noise"));
+  assert.equal(ep.lastThresholdDb, -48, "a quiet room's threshold is the -48 dB floor");
+  assert.ok(ep.lastDb < ep.lastThresholdDb, `room ${ep.lastDb} dB is under ${ep.lastThresholdDb} dB`);
+  ep.push(frame("speech"));
+  assert.ok(ep.lastDb > ep.lastThresholdDb, `speech ${ep.lastDb} dB is over ${ep.lastThresholdDb} dB`);
+});

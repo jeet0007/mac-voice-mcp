@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { cacheRoot, callFile, inboxDir, listeningFile, permissionFile, voiceModeDir } from "../hooks/voice-files.mjs";
+import { cacheRoot, callFile, inboxDir, listeningFile, muteFile, permissionFile, voiceModeDir } from "../hooks/voice-files.mjs";
 import { handle, heardUser, NOT_HEARD_PREFIXES, STOP_REASON } from "../hooks/voice-mode-lib.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -190,7 +190,7 @@ test("Voice Buddy finds the same voice-mode folder, files and tools as the serve
     const $ = { env: { get: async (k) => env[k] } };
     assert.equal(await lookup($), voiceModeDir(cacheRoot(env)), JSON.stringify(env));
   }
-  for (const file of [listeningFile, inboxDir, callFile]) assert.ok(buddy.includes(`\${dir}/${path.basename(file("/d"))}`), file.name);
+  for (const file of [listeningFile, inboxDir, callFile, muteFile]) assert.ok(buddy.includes(`\${dir}/${path.basename(file("/d"))}`), file.name);
   const server = readFileSync(path.join(ROOT, "src", "server.ts"), "utf8");
   for (const [name, tool] of [["SPEAK", "speak_and_listen"], ["CALL", "call"]]) {
     assert.ok(server.includes(`registerTool(\n    "${tool}"`), `the server has no ${tool} tool`);

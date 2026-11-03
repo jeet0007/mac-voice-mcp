@@ -118,6 +118,8 @@ export const CONFIG = {
     : "auto") as "auto" | "full" | "half",
   /** Opt-in: a soft tick every 1.5 s after the user's words reach Claude, until it speaks (at most 10 s), so a call never goes silent (macOS). */
   callThinkingSound: envBool("VOICE_MCP_CALL_THINKING_SOUND", false),
+  /** Show the floating call bubble during a call, once setup has built it (macOS). Off: VOICE_MCP_CALL_BUBBLE=0. */
+  callBubble: envBool("VOICE_MCP_CALL_BUBBLE", true),
 
   // --- Speech-to-text
   /** whisper.cpp model name (tiny.en, base.en, small.en, large-v3-turbo-q5_0, ...). */

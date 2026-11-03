@@ -1,0 +1,5 @@
+#!/bin/sh
+# Stands in for the built call bubble: logs its start and its stop.
+echo "bubble start $VOICE_MCP_CACHE_DIR" >> "$STUB_LOG"
+trap 'echo "bubble stopped" >> "$STUB_LOG"; exit 0' TERM
+while :; do sleep 0.1; done

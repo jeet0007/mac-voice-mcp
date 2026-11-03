@@ -21,6 +21,8 @@ export const inboxDir = (dir) => path.join(dir, "inbox");
 export const callFile = (dir) => path.join(dir, "call.json");
 /** Present while the user has muted the call (the floating bubble's mute button): the mic hears nothing. */
 export const muteFile = (dir) => path.join(dir, "mute");
+/** The mic's latest level and speech threshold during a call ("<dB> <threshold dB>"), for the bubble's glow. */
+export const levelsFile = (dir) => path.join(dir, "levels");
 /** Written by the plugin hook when Claude Code shows a permission prompt on a call: the call says so out loud. */
 export const permissionFile = (dir) => path.join(dir, "permission");
 

@@ -506,6 +506,8 @@ export interface ContinuousOptions {
   muted: () => boolean;
   /** Each utterance, as a trimmed 16 kHz mono WAV in `dir`, in order. Not awaited. */
   onUtterance: (wav: string) => void;
+  /** Each heard (unmuted) frame's level and the speech threshold it was judged against, in dBFS. */
+  onLevel?: (db: number, thresholdDb: number) => void;
   /** true once the user has talked for BARGE_IN_MS, false when that utterance ends or turns out to be a blip. */
   onSpeech?: (talking: boolean) => void;
   dir: string;
@@ -561,6 +563,7 @@ export async function listenContinuously(signal: AbortSignal, opts: ContinuousOp
       } else {
         frames.push(frame);
         const reason = endpointer.push(frame);
+        opts.onLevel?.(endpointer.lastDb, endpointer.lastThresholdDb);
         if (reason) {
           if (reason !== "no-speech") {
             const [first, last] = endpointer.trimRange(frames.length);
