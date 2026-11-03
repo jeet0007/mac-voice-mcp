@@ -9,6 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **The call bubble (macOS, optional).** A small floating window shows while a call is on, above every app and on every desktop: Claude's blob, the call's duration, a mute button and a hang-up button. Click the blob to bring the call's terminal or editor to the front; drag it anywhere and it stays there. It never takes focus. It's built on your Mac from source with `swiftc` once you agree (`setup --bubble`, or `voice_setup` with `bubble=true`), needs Xcode's Command Line Tools, and rebuilds by itself after an upgrade. `VOICE_MCP_CALL_BUBBLE=0` turns it off. Without it, calls work as before.
 - **The call bubble glows with your mic's level.** A soft glow around the pill grows as you speak louder: blue when voice-mcp hears it as speech, grey when it's too quiet to count (or just background noise). It goes away while you're muted and while Claude speaks.
 - **Voice Buddy shows a muted call** in grey as "Muted", so it agrees with the bubble.
+- **Voice Buddy steps aside while the call bubble is up**, so the call shows in one place and the terminal stops animating it. It comes back if the bubble quits.
 
 ## [0.8.1] - 2026-11-03
 
