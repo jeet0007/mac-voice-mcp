@@ -177,9 +177,11 @@ glass.material = .hudWindow
 glass.appearance = NSAppearance(named: .darkAqua)
 glass.state = .active
 glass.blendingMode = .behindWindow
-glass.wantsLayer = true
-glass.layer!.cornerRadius = height / 2
-glass.layer!.masksToBounds = true
+// A mask image (not a layer corner radius) shapes the window itself, so its shadow hugs the capsule instead of a faint box.
+glass.maskImage = NSImage(size: glass.bounds.size, flipped: false) { rect in
+  NSBezierPath(roundedRect: rect, xRadius: height / 2, yRadius: height / 2).fill()
+  return true
+}
 let pill = Pill(frame: glass.bounds)
 glass.addSubview(pill)
 panel.contentView = glass
