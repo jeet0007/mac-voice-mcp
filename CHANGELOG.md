@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-03
+
 ### Added
 - **The call bubble (macOS, optional).** A small floating window shows while a call is on, above every app and on every desktop: Claude's blob, the call's duration, a mute button and a hang-up button. Click the blob to bring the call's terminal or editor to the front; drag it anywhere and it stays there. It never takes focus. It's built on your Mac from source with `swiftc` once you agree (`setup --bubble`, or `voice_setup` with `bubble=true`), needs Xcode's Command Line Tools, and rebuilds by itself after an upgrade. `VOICE_MCP_CALL_BUBBLE=0` turns it off. Without it, calls work as before.
 - **The call bubble glows with your mic's level.** A soft glow around the pill grows as you speak louder: blue when voice-mcp hears it as speech, grey when it's too quiet to count (or just background noise). It goes away while you're muted and while Claude speaks.
@@ -193,7 +195,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   - `voice_setup`: checks first, installs only what's missing, and only after you agree.
   - The `setup` and `voice_mode` prompts.
 
-[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.7.0...v0.7.1
