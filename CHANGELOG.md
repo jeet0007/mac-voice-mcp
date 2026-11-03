@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-03
+
 ### Changed
 - **The voice is your system voice.** voice-mcp now speaks with the voice chosen in System Settings → Accessibility → Spoken Content → System Voice, instead of picking the most natural Premium or Enhanced voice installed. `VOICE_MCP_VOICE=best` brings back the old choice; a voice name still picks that voice.
 - **The thinking tick on a call is off by default.** Up to six ticks after everything you said was too much. `VOICE_MCP_CALL_THINKING_SOUND=1` turns it back on.
@@ -183,7 +185,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   - `voice_setup`: checks first, installs only what's missing, and only after you agree.
   - The `setup` and `voice_mode` prompts.
 
-[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.6.1...v0.7.0
