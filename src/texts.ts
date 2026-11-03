@@ -69,6 +69,7 @@ export const SETUP_TOOL_DESCRIPTION = [
   "and downloads the speech model once. It never uninstalls or changes anything else.",
   "kokoro=true (also only after the user agrees) installs the optional Kokoro voice: more natural than the built-in one,",
   "runs on this Mac, about 1 GB on disk. Once installed it's used automatically; the built-in voice stays as the fallback.",
+  "bubble=true (also only after the user agrees) builds the floating call bubble on this Mac with swiftc: a small window during calls with mute and hang up.",
   'If it reports INSTALLING, the install continues in the background — wait a minute and call it again to check.',
 ].join("\n");
 

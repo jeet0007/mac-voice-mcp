@@ -1,0 +1,7 @@
+#!/bin/sh
+# Stands in for swiftc: "builds" the stub bubble at -o.
+echo "swiftc $*" >> "$STUB_LOG"
+while [ $# -gt 0 ]; do
+  if [ "$1" = "-o" ]; then cp "$(dirname "$0")/call-bubble" "$2"; fi
+  shift
+done

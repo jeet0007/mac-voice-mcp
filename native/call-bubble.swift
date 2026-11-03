@@ -1,17 +1,17 @@
-// Floating call bubble spike for mac-voice-mcp (not shipped in the npm package).
+// The floating call bubble for mac-voice-mcp (docs/specs/call-bubble.md).
 //
 // A small always-on-top call pill, like FaceTime's: a frosted dark capsule with Claude's animated
-// blob on the left and two round buttons, mute and hang up. It shows while a call is on, whatever
-// app or desktop is in front, and never takes focus. It reads the same files as Voice Buddy:
-// voice-mode/call.json (a call is on) and voice-mode/phase.json ("speaking", or gone when quiet).
+// blob, the call's duration and two round buttons, mute and hang up. It shows on every desktop,
+// whatever app is in front, and never takes focus. voice-mcp's setup builds it on this Mac with
+// swiftc (after asking), and the server starts it at call start. It reads the same files as Voice
+// Buddy: voice-mode/call.json (the call, while it's on) and voice-mode/phase.json ("speaking").
 // - Click the blob: brings the window running the call (terminal or IDE) to the front.
 // - Mute: creates voice-mode/mute; the server's mic hears nothing while it exists.
 // - Hang up: removes call.json, which the server treats as an end.
-// - Drag anywhere else to move it.
+// - Drag anywhere else to move it; where it was left is kept in voice-mode/bubble.json.
+// It exits once call.json is gone or the server that wrote it has died.
 //
-// Build, then run (leave it running, then start a call):
-//   swiftc -O scripts/bubble-spike.swift -o /tmp/bubble-spike
-//   /tmp/bubble-spike
+// voice-mcp builds it with: swiftc -O native/call-bubble.swift -o <cache>/bin/call-bubble
 import AppKit
 
 extension String { var nilIfEmpty: String? { isEmpty ? nil : self } }
@@ -22,10 +22,9 @@ let cacheDir = env["VOICE_MCP_CACHE_DIR"]?.trimmingCharacters(in: .whitespacesAn
   ?? URL(fileURLWithPath: env["XDG_CACHE_HOME"]?.nilIfEmpty ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cache").path)
     .appendingPathComponent("mac-voice-mcp").path
 let dir = URL(fileURLWithPath: cacheDir).appendingPathComponent("voice-mode")
-setvbuf(stdout, nil, _IOLBF, 0)
-print("watching \(dir.path)")
 let callFile = dir.appendingPathComponent("call.json")
 let phaseFile = dir.appendingPathComponent("phase.json")
+let placeFile = dir.appendingPathComponent("bubble.json")
 let muteFile = dir.appendingPathComponent("mute")
 
 // Same colours as Voice Buddy's blob.ts.
@@ -38,7 +37,8 @@ let pad: CGFloat = 8
 let orb: CGFloat = height - 2 * pad
 let button: CGFloat = 36
 let gap: CGFloat = 10
-let width = pad + orb + 14 + button + gap + button + pad + 2
+let clock: CGFloat = 58
+let width = pad + orb + 10 + clock + 4 + button + gap + button + pad + 2
 
 func symbol(_ name: String, _ label: String, _ color: NSColor) -> NSImage {
   NSImage(systemSymbolName: name, accessibilityDescription: label)!
@@ -47,15 +47,19 @@ func symbol(_ name: String, _ label: String, _ color: NSColor) -> NSImage {
 
 func isMuted() -> Bool { FileManager.default.fileExists(atPath: muteFile.path) }
 
+func readJSON(_ url: URL) -> [String: Any]? { (try? JSONSerialization.jsonObject(with: Data(contentsOf: url))) as? [String: Any] }
+
 final class Pill: NSView {
   var color = listening
   var talking = false
   var t: CGFloat = 0
   var hover: NSRect? = nil
   var dragged = false
+  var elapsed = "0:00"
 
   let orbRect = NSRect(x: pad, y: pad, width: orb, height: orb)
-  let muteRect = NSRect(x: pad + orb + 14, y: (height - button) / 2, width: button, height: button)
+  let clockRect = NSRect(x: pad + orb + 10, y: 0, width: clock, height: height)
+  let muteRect = NSRect(x: pad + orb + 10 + clock + 4, y: (height - button) / 2, width: button, height: button)
   var hangUpRect: NSRect { muteRect.offsetBy(dx: button + gap, dy: 0) }
 
   override func updateTrackingAreas() {
@@ -83,6 +87,13 @@ final class Pill: NSView {
     path.close()
     NSGradient(starting: color.blended(withFraction: 0.45, of: .white)!, ending: color.blended(withFraction: 0.15, of: .black)!)!
       .draw(in: path, relativeCenterPosition: NSPoint(x: -0.35, y: 0.35))
+
+    let digits = NSAttributedString(string: elapsed, attributes: [
+      .font: NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium),
+      .foregroundColor: NSColor(white: 1, alpha: 0.85),
+    ])
+    let size = digits.size()
+    digits.draw(at: NSPoint(x: clockRect.midX - size.width / 2, y: clockRect.midY - size.height / 2))
 
     // Mute: frosted grey, or white with a dark slashed mic while muted (like FaceTime).
     let muted = isMuted()
@@ -122,7 +133,7 @@ final class Pill: NSView {
 
 /** The app hosting the call's MCP server (its terminal or IDE): walk up from call.json's pid. */
 func bringClaudeForward() {
-  let call = (try? JSONSerialization.jsonObject(with: Data(contentsOf: callFile))) as? [String: Any]
+  let call = readJSON(callFile)
   var pid = (call?["pid"] as? NSNumber)?.int32Value ?? 0
   while pid > 1 {
     if let app = NSRunningApplication(processIdentifier: pid), app.activationPolicy == .regular {
@@ -140,9 +151,18 @@ func bringClaudeForward() {
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory) // no Dock icon, no menu bar
 
-let screen = NSScreen.main!.visibleFrame
+/** Where it was left, if that spot is still on a screen; else the top right of the main screen. */
+func startFrame() -> NSRect {
+  if let place = readJSON(placeFile), let x = place["x"] as? Double, let y = place["y"] as? Double {
+    let frame = NSRect(x: x, y: y, width: width, height: height)
+    if NSScreen.screens.contains(where: { $0.visibleFrame.contains(NSPoint(x: frame.midX, y: frame.midY)) }) { return frame }
+  }
+  let screen = (NSScreen.main ?? NSScreen.screens[0]).visibleFrame
+  return NSRect(x: screen.maxX - width - 16, y: screen.maxY - height - 16, width: width, height: height)
+}
+
 let panel = NSPanel(
-  contentRect: NSRect(x: screen.maxX - width - 16, y: screen.maxY - height - 16, width: width, height: height),
+  contentRect: startFrame(),
   styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
 panel.level = .floating
 panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
@@ -164,21 +184,28 @@ let pill = Pill(frame: glass.bounds)
 glass.addSubview(pill)
 panel.contentView = glass
 
-var shown = false
+NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: panel, queue: .main) { _ in
+  let place = try? JSONSerialization.data(withJSONObject: ["x": Double(panel.frame.minX), "y": Double(panel.frame.minY)])
+  try? place?.write(to: placeFile, options: .atomic)
+}
+
+/** The call's start (ms since 1970), or nil once it's over: call.json gone, or the server that wrote it died. */
+func callStart() -> Double? {
+  guard let call = readJSON(callFile), let pid = (call["pid"] as? NSNumber)?.int32Value,
+        kill(pid, 0) == 0 || errno == EPERM else { return nil }
+  return (call["startedAt"] as? NSNumber)?.doubleValue ?? Date().timeIntervalSince1970 * 1000
+}
+
+panel.orderFrontRegardless()
 Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { _ in
-  let onCall = FileManager.default.fileExists(atPath: callFile.path)
-  if onCall != shown {
-    shown = onCall
-    onCall ? panel.orderFrontRegardless() : panel.orderOut(nil)
-    panel.invalidateShadow()
-  }
-  guard onCall else { return }
-  let phase = (try? JSONSerialization.jsonObject(with: Data(contentsOf: phaseFile))) as? [String: Any]
+  guard let started = callStart() else { exit(0) }
+  let s = max(0, Int((Date().timeIntervalSince1970 * 1000 - started) / 1000))
+  pill.elapsed = s < 3600 ? String(format: "%d:%02d", s / 60, s % 60) : String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60)
+  let phase = readJSON(phaseFile)
   pill.talking = phase?["phase"] as? String == "speaking"
   let target = pill.talking ? speaking : isMuted() ? mutedGrey : listening
   pill.color = pill.color.blended(withFraction: 0.15, of: target) ?? target
   pill.t += pill.talking ? 1.6 / 30 : 1.0 / 30
   pill.needsDisplay = true
 }
-print("Bubble running: it shows while a call is on. Ctrl-C to quit.")
 app.run()

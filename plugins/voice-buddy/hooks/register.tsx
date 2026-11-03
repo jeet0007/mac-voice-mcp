@@ -23,7 +23,8 @@
  *    read it until Claude's next tool call. This hands each utterance to Claude as a new message
  *    ($.prompt.submit as you), polling the inbox between turns. It tells Claude so right after the
  *    call starts, so Claude ends its turns normally instead of waiting in listen. The buddy turns
- *    green with the call's duration, and shows speaking and listening as usual.
+ *    green with the call's duration (grey and "Muted" while the call bubble has it muted), and
+ *    shows speaking and listening as usual.
  *
  * Early-access API (Claude Code mods): if a Claude Code update breaks it, voice keeps working and
  * Esc still interrupts.
@@ -75,6 +76,7 @@ const LABELS: Record<Mood, string> = {
   waiting: 'Waiting for another voice session',
   standby: 'Listening for "Claude, …"',
   call: 'On a call',
+  muted: '🔇 Muted',
 }
 const PHASES: Record<string, Mood> = { speaking: 'speaking', listening: 'listening', transcribing: 'transcribing', waiting: 'waiting' }
 
@@ -151,7 +153,8 @@ async function currentMood($: EngineInterface): Promise<Mood | null> {
       /* no phase file: between phases, or an older voice-mcp */
     }
     if (running > 0) return 'speaking'
-    if (callStartedAt !== null) return 'call'
+    // The call bubble's mute button (voice-mode/mute): say so here too, so both views agree.
+    if (callStartedAt !== null) return (await $.fs.exists(`${dir}/mute`)) ? 'muted' : 'call'
   }
   return (await listeningHere($, dir)) ? 'standby' : null
 }

@@ -1,6 +1,6 @@
 # Call bubble (0.9.0)
 
-Status: planned · Builds on: call mode (0.8.0) · Prototype: `scripts/bubble-spike.swift`
+Status: implemented (Unreleased) · Builds on: call mode (0.8.0) · Source: `native/call-bubble.swift`
 
 ## Goal
 

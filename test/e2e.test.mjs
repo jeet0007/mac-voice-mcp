@@ -4,7 +4,8 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync, lstatSync, readlinkSync, symlinkSync } from "node:fs";
+import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync, lstatSync, readlinkSync, symlinkSync } from "node:fs";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -1392,6 +1393,112 @@ test("muting a call: the mic hears nothing until unmuted, and the call's end cle
     writeFileSync(mute, "");
     await client.callTool({ name: "call", arguments: { action: "end" } });
     assert.ok(!existsSync(mute), "the next call doesn't start muted");
+  } finally {
+    await client.close();
+  }
+});
+
+// --- The floating call bubble (a stub stands in for the one swiftc builds) -------------------------
+
+const SWIFT = path.join(FIXTURES, "swift");
+const cacheDir = (sb) => path.join(sb.home, ".cache", "mac-voice-mcp");
+const bubbleBin = (sb) => path.join(cacheDir(sb), "bin", "call-bubble");
+const bubblePid = (sb) => path.join(voiceModeDir(sb), "bubble.pid");
+const sourceHash = () => createHash("sha256").update(readFileSync(path.join(ROOT, "native", "call-bubble.swift"))).digest("hex");
+const bubbleLog = (sb) => sb.readLog().split("\n").filter((l) => /^(bubble |swiftc )/.test(l));
+const withSwiftc = (sb, extra = {}) => sb.env({ PATH: `${SWIFT}${path.delimiter}${sb.env().PATH}`, ...extra });
+
+/** As if setup had built it: the stub bubble, and the hash of the source it was built from. */
+function builtBubble(sb, hash = sourceHash()) {
+  mkdirSync(path.dirname(bubbleBin(sb)), { recursive: true });
+  copyFileSync(path.join(SWIFT, "call-bubble"), bubbleBin(sb));
+  writeFileSync(`${bubbleBin(sb)}.hash`, hash);
+}
+
+/** Start a call on a fresh server and wait until its recorder runs. */
+async function callOn(sb, env) {
+  fakeModel(path.join(cacheDir(sb), "models"));
+  const c = await connect(env);
+  await c.client.callTool({ name: "call", arguments: { action: "start" } });
+  assert.ok(await waitFor(() => /^rec -/m.test(sb.readLog())), "the call is on");
+  return c;
+}
+
+test("the call bubble starts with a call, one per Mac, and stops at the call's end and at shutdown", { skip: process.platform === "win32" }, async () => {
+  const sb = sandbox();
+  builtBubble(sb);
+  const { client } = await callOn(sb, sb.env({ STUB_SCENARIO: "silent" }));
+  try {
+    assert.ok(await waitFor(() => bubbleLog(sb).length === 1, 1000), "started within a second");
+    assert.deepEqual(bubbleLog(sb), [`bubble start ${cacheDir(sb)}`], "told where voice-mode is");
+    assert.match(readFileSync(bubblePid(sb), "utf8"), /^\d+$/);
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    await client.callTool({ name: "call", arguments: { action: "end" } });
+    assert.ok(await waitFor(() => bubbleLog(sb).includes("bubble stopped"), 1000), "stopped within a second of the end");
+    assert.ok(!existsSync(bubblePid(sb)), "bubble.pid removed");
+
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    assert.ok(await waitFor(() => bubbleLog(sb).length === 3), "a new call shows it again");
+  } finally {
+    await client.close();
+  }
+  assert.ok(await waitFor(() => bubbleLog(sb).length === 4), "shutdown stopped it");
+  assert.deepEqual(bubbleLog(sb), [`bubble start ${cacheDir(sb)}`, "bubble stopped", `bubble start ${cacheDir(sb)}`, "bubble stopped"]);
+});
+
+test("no call bubble when it isn't built, VOICE_MCP_CALL_BUBBLE=0, or another server's is already up", { skip: process.platform === "win32" }, async () => {
+  for (const [why, prepare, extra] of [
+    ["not built", () => {}, {}],
+    ["turned off", (sb) => builtBubble(sb), { VOICE_MCP_CALL_BUBBLE: "0" }],
+    ["already running", (sb) => (builtBubble(sb), mkdirSync(voiceModeDir(sb), { recursive: true }), writeFileSync(bubblePid(sb), String(process.pid))), {}],
+  ]) {
+    const sb = sandbox();
+    prepare(sb);
+    const { client } = await callOn(sb, sb.env({ STUB_SCENARIO: "silent", ...extra }));
+    try {
+      await new Promise((r) => setTimeout(r, 500));
+      await client.callTool({ name: "call", arguments: { action: "end" } });
+      assert.deepEqual(bubbleLog(sb), [], why);
+    } finally {
+      await client.close();
+    }
+  }
+});
+
+test("a new version of the bubble's source rebuilds once at call start, then shows", { skip: process.platform === "win32" }, async () => {
+  const sb = sandbox();
+  builtBubble(sb, "an older source");
+  const { client } = await callOn(sb, withSwiftc(sb, { STUB_SCENARIO: "silent" }));
+  try {
+    assert.ok(await waitFor(() => bubbleLog(sb).length === 2), "rebuilt and started");
+    assert.match(bubbleLog(sb)[0], /^swiftc -O \S+native\/call-bubble\.swift -o \S+call-bubble\.\d+\.tmp$/);
+    assert.equal(bubbleLog(sb)[1], `bubble start ${cacheDir(sb)}`);
+    assert.equal(readFileSync(`${bubbleBin(sb)}.hash`, "utf8"), sourceHash());
+    await client.callTool({ name: "call", arguments: { action: "end" } });
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    assert.ok(await waitFor(() => bubbleLog(sb).length === 4));
+    assert.equal(bubbleLog(sb).filter((l) => l.startsWith("swiftc")).length, 1, "built once");
+  } finally {
+    await client.close();
+  }
+});
+
+test("setup offers the call bubble on a Mac with swiftc, and builds it only with bubble=true", { skip: process.platform !== "darwin" && "the bubble is macOS-only" }, async () => {
+  const sb = sandbox();
+  fakeModel(path.join(cacheDir(sb), "models"));
+  const { client } = await connect(withSwiftc(sb));
+  try {
+    const check = text(await client.callTool({ name: "voice_setup", arguments: {} }));
+    assert.match(check, /setup — READY/);
+    assert.match(check, /^• Call bubble: a floating call window; built on this Mac in about 10 s$/m);
+    assert.match(check, /ask the user whether to build the call bubble.*call voice_setup with bubble=true/);
+    assert.deepEqual(bubbleLog(sb), [], "nothing built without consent");
+
+    const built = text(await client.callTool({ name: "voice_setup", arguments: { bubble: true } }));
+    assert.match(built, /^✔ Call bubble: a floating call window, built on this Mac$/m);
+    assert.match(built, /Built the call bubble on this Mac in \d+ s\./);
+    assert.equal(readFileSync(`${bubbleBin(sb)}.hash`, "utf8"), sourceHash());
+    assert.doesNotMatch(built, /build the call bubble/, "not offered again");
   } finally {
     await client.close();
   }

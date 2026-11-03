@@ -7,6 +7,7 @@
  * the result. A slow `brew install` can never time the client out.
  */
 import { statSync } from "node:fs";
+import { bubbleBuilding, bubbleState, buildBubble, findSwiftc } from "./bubble.js";
 import { chooseVoice, describeRecorder, findRecorder, findTts, resetVoiceChoice, VOICE_UPGRADE_HINT } from "./audio.js";
 import { CONFIG, IS_MAC, IS_WIN, log } from "./config.js";
 import { installKokoro, isKokoroInstalled, isKokoroModelPresent, KOKORO_SIZES_MB, kokoroVoiceLabel } from "./kokoro.js";
@@ -26,6 +27,8 @@ interface Check {
   model?: boolean;
   /** Fixed by installing the optional Kokoro voice (kokoro=true). */
   kokoro?: boolean;
+  /** Fixed by building the call bubble (bubble=true). */
+  bubble?: boolean;
 }
 
 export interface SetupOptions {
@@ -33,6 +36,8 @@ export interface SetupOptions {
   install?: boolean;
   /** true only after the user agreed: install the optional Kokoro voice (npm + ~330 MB model). */
   kokoro?: boolean;
+  /** true only after the user agreed: build the floating call bubble with swiftc (macOS). */
+  bubble?: boolean;
   /** Optional heartbeat while waiting (used for MCP progress notifications). */
   onProgress?: (message: string) => void;
 }
@@ -64,6 +69,7 @@ interface Job {
 let brewJob: Job | null = null;
 let modelJob: Job | null = null;
 let kokoroJob: Job | null = null;
+let bubbleJob: Job | null = null;
 /** The Kokoro install's latest progress line. */
 let kokoroProgress = "";
 /** Results of finished jobs not yet shown to the user. */
@@ -139,6 +145,8 @@ async function checkRequirements(): Promise<Check[]> {
     );
   }
   if (kokoro) checks.push(kokoro);
+  const bubble = bubbleCheck();
+  if (bubble) checks.push(bubble);
 
   const rec = findRecorder();
   if (!rec) {
@@ -227,6 +235,21 @@ function kokoroCheck(): Check | null {
   return null;
 }
 
+/** The optional call bubble (macOS): built on this Mac with swiftc, never downloaded. */
+function bubbleCheck(): Check | null {
+  if (!IS_MAC) return null;
+  const label = "Call bubble";
+  if (bubbleBuilding()) return { label, status: "installing", detail: "building with swiftc" };
+  const state = bubbleState();
+  if (state === "built") {
+    return { label, status: "ok", detail: CONFIG.callBubble ? "a floating call window, built on this Mac" : "built, but VOICE_MCP_CALL_BUBBLE=0 turns it off" };
+  }
+  if (!findSwiftc()) {
+    return { label, status: "optional", detail: "a floating call window, built on this Mac; it needs Xcode's Command Line Tools (`xcode-select --install`; Homebrew users have them)" };
+  }
+  return { label, status: "optional", detail: state === "stale" ? "a new version needs building" : "a floating call window; built on this Mac in about 10 s", bubble: true };
+}
+
 // --- The flow ------------------------------------------------------------------------------
 
 export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcome> {
@@ -241,10 +264,12 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
     if (formulae.length && brew && !running(brewJob)) brewJob = startBrewInstall(brew, formulae);
     if (checks.some((c) => c.model && c.status === "missing") && !running(modelJob)) modelJob = startModelDownload();
   }
+  // A stale bubble rebuilds without asking again: the user already opted in.
+  if ((opts.bubble || bubbleState() === "stale") && checks.some((c) => c.bubble) && !running(bubbleJob)) bubbleJob = startJob("Building the call bubble", buildBubble);
   if (opts.kokoro && !running(kokoroJob) && !(isKokoroInstalled() && isKokoroModelPresent())) kokoroJob = startKokoroInstall();
 
   // Wait (bounded) for anything in flight, with a heartbeat.
-  const jobs = [brewJob, modelJob, kokoroJob].filter(running);
+  const jobs = [brewJob, modelJob, kokoroJob, bubbleJob].filter(running);
   if (jobs.length) {
     const deadline = Date.now() + INSTALL_WAIT_MS;
     while (jobs.some((j) => !j.done) && Date.now() < deadline) {
@@ -259,7 +284,7 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
     checks = await checkRequirements();
   }
 
-  const installing = running(brewJob) || running(modelJob) || running(kokoroJob);
+  const installing = running(brewJob) || running(modelJob) || running(kokoroJob) || running(bubbleJob);
   const ready = checks.every((c) => c.status === "ok" || c.status === "optional");
   const icon: Record<CheckStatus, string> = { ok: "✔", missing: "✘", optional: "•", installing: "…" };
   const done = finishedMessages.splice(0);
@@ -271,7 +296,7 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
     IS_MAC ? "• Microphone: macOS asks for permission the first time speak_and_listen listens — click Allow." : "",
   ];
   if (done.length) lines.push("", "What was done:", ...done.map((d) => `- ${d}`));
-  if ((install || opts.kokoro) && !done.length && !installing && ready) lines.push("", "Nothing to install — everything was already present.");
+  if ((install || opts.kokoro || opts.bubble) && !done.length && !installing && ready) lines.push("", "Nothing to install — everything was already present.");
 
   const toInstall = [...new Set(checks.filter((c) => c.status === "missing" && c.brew).map((c) => c.brew!))];
   const needsModel = checks.some((c) => c.model && c.status === "missing");
@@ -289,6 +314,12 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
       lines.push(
         `Optional: ask the user whether to install the Kokoro voice (a one-time install, about 1 GB on disk). ` +
           "Only if they agree, call voice_setup with kokoro=true.",
+      );
+    }
+    if (checks.some((c) => c.bubble && c.status === "optional") && !opts.bubble) {
+      lines.push(
+        "Optional: ask the user whether to build the call bubble, a small floating window during calls with the call's time, mute and hang up " +
+          "(built on this Mac from source in about 10 s). Only if they agree, call voice_setup with bubble=true.",
       );
     }
     if (checks.some((c) => c.label === "Voice" && c.status === "optional")) {

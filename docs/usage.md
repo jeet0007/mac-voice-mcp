@@ -30,6 +30,12 @@ A call keeps the line open, like a phone call: the mic stays on until you hang u
 
 **Talking over Claude needs headphones.** On speakers the mic is muted while Claude speaks, so it doesn't hear itself. With headphones (the headphone jack, or Bluetooth headphones such as AirPods), the mic stays open: a quarter second of your voice pauses Claude. Say something real and it stops and answers you; a quick "mm-hmm" or a cough lets it carry on. voice-mcp checks for headphones when the call starts; `VOICE_MCP_CALL_DUPLEX` overrides it ([Configuration](configuration.md#calls)).
 
+### The call bubble (macOS)
+
+A small floating window shows while a call is on, above every app and on every desktop, like FaceTime's call pill. It shows Claude's blob (orange while Claude speaks, blue while it listens, grey while you're muted), how long the call has lasted, a mute button and a hang-up button. Click the blob to bring the call's terminal or editor to the front. Drag it anywhere; it stays where you left it, and it never takes focus from what you're typing.
+
+It's optional and built on your Mac from source, never downloaded: setup offers it when Xcode's Command Line Tools are installed (`xcode-select --install`; Homebrew users have them), and builds it in a few seconds once you agree. Run `npx -y mac-voice-mcp setup --bubble`, or ask Claude to set it up. After an upgrade it rebuilds by itself. To turn it off, set `VOICE_MCP_CALL_BUBBLE=0`. Muting from the bubble also shows in Voice Buddy.
+
 **One call at a time.** While you're on a call, voice in other windows (other Claude Code sessions, Claude Desktop, Cursor) says you're on a call elsewhere instead of opening the mic.
 
 **Long commands:** while Claude runs a long command in the foreground, such as a full test run, what you say waits until it finishes. Ask Claude to run long commands in the background during a call.

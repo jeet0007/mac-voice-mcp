@@ -23,6 +23,7 @@ import path from "node:path";
 import * as files from "../hooks/voice-files.mjs";
 import { listenContinuously, speak, thinkingTick } from "./audio.js";
 import { BargeIn, type Interruption } from "./barge-in.js";
+import { startBubble, stopBubble } from "./bubble.js";
 import { CONFIG, debug, envNum, log, PKG } from "./config.js";
 import { acquireMicLock } from "./lock.js";
 import { ensureModel } from "./model.js";
@@ -138,6 +139,7 @@ export class Call {
     mkdirSync(voiceModeDir(), { recursive: true });
     writeFileSync(callFile(), JSON.stringify({ pid: process.pid, startedAt: this.lastActivity, duplex: this.duplex }));
     this.watch = setInterval(() => this.tick(), WATCH_MS);
+    startBubble();
     this.loop = this.run(ctl.signal).catch((e: unknown) => {
       if (this.ctl !== ctl || e instanceof CancelledError) return;
       void this.end(`voice-mcp lost the microphone: ${e instanceof Error ? e.message : String(e)}`);
@@ -164,6 +166,7 @@ export class Call {
     takeInbox();
     rmSync(callFile(), { force: true });
     rmSync(muteFile(), { force: true });
+    stopBubble();
     showPhase(null);
     release!();
     for (const wake of this.wakers) wake();

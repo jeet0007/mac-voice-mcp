@@ -160,7 +160,7 @@ function callEngine(on: Parameters<Parameters<typeof test>[1]>[1], entries: Reco
   on('session.id', () => ({ value: 's1' }))
   on('tool.call', () => ({ result: {} }))
   on('prompt.edit', (_, e) => ({ text: e.text, cursor: e.cursor }))
-  on('fs.exists', (_, e) => ({ value: e.path === `${DIR}/call.json` }))
+  on('fs.exists', (_, e) => ({ value: e.path === `${DIR}/call.json` || e.path in files }))
   on('fs.list', (_, e) => {
     if (e.path !== INBOX) throw new Error('ENOENT')
     const value = Object.keys(files).map((f) => ({ name: f.slice(INBOX.length + 1), kind: 'file' as const, size: files[f]!.length, mtimeMs: 1, isLink: false }))
@@ -262,8 +262,15 @@ test("on a call the buddy shows it with the call's duration, and Claude speaking
   expect(await ui.find({ type: 'Text', text: /^ ?On a call$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^ · 1:05$/ })).toBeDefined()
   await ui.unmount()
+  files[`${DIR}/mute`] = '' // the call bubble's mute button
+  await clock.advance(300)
+  const muted = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await muted.find({ type: 'Text', text: /^ ?🔇 Muted$/ })).toBeDefined()
+  expect(await muted.find({ type: 'Text', text: /^ · on a call · 1:05$/ })).toBeDefined()
+  await muted.unmount()
+  delete files[`${DIR}/mute`]
   files[PHASE] = JSON.stringify({ phase: 'speaking', at: 1 })
-  await clock.advance(1000)
+  await clock.advance(700)
   const speaking = await $.ui.mount({ ...BAND, surface: 'desktop' })
   expect(await speaking.find({ type: 'Text', text: /Speaking/ })).toBeDefined()
   expect(await speaking.find({ type: 'Text', text: /^ · on a call · 1:06$/ })).toBeDefined()

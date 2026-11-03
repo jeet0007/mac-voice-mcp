@@ -193,14 +193,18 @@ export function createServer(): StdioMcpServer {
             "true: install the optional Kokoro voice — a natural-sounding neural voice that runs on this Mac " +
               "(kokoro-js via npm and a one-time model download, about 1 GB on disk). Ask the user first.",
           ),
+        bubble: z
+          .boolean()
+          .optional()
+          .describe("true: build the floating call bubble on this Mac with swiftc (about 10 s; macOS). Ask the user first."),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ install, kokoro }, { progress }): Promise<CallToolResult> => {
+    async ({ install, kokoro, bubble }, { progress }): Promise<CallToolResult> => {
       try {
         const outcome = await exclusive(async () => {
           await finishSpeaking(); // its checks use the speaker too
-          return runSetupFlow({ install: install === true, kokoro: kokoro === true, onProgress: progress });
+          return runSetupFlow({ install: install === true, kokoro: kokoro === true, bubble: bubble === true, onProgress: progress });
         });
         return { content: [{ type: "text", text: outcome.report }] };
       } catch (err) {
