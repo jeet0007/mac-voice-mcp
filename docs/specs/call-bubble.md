@@ -57,6 +57,17 @@ focus from what you're typing.
 | Hang up | Removes `call.json`; the server ends the call as it does for a closed session |
 | Drag | Moves it; position remembered |
 
+### Mic glow
+
+- While a call is on, the server writes `voice-mode/levels` ("<dB> <threshold dB>") about every
+  60 ms, only for frames the mic hears (not muted, not while Claude speaks in half duplex).
+- The bubble reads it once per 30 Hz tick and draws a soft glow outside the pill: strength and
+  blur follow the level (-90 to -10 dB mapped to 0 to 1, smoothed), blue above the threshold
+  (speech), grey below. No glow while muted, while Claude talks, or when the file is over 0.25 s old.
+- The panel is the pill plus a 30 pt margin on each side for the glow. The window shadow is off
+  (it follows content alpha, so it would shadow the glow too); the bubble draws the pill's shadow
+  itself. `bubble.json` still holds the pill's origin.
+
 ### Voice Buddy
 
 Shows "muted" on a muted call (grey, with a mute mark), so both views agree.

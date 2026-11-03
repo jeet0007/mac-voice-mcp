@@ -5,10 +5,13 @@
 // whatever app is in front, and never takes focus. voice-mcp's setup builds it on this Mac with
 // swiftc (after asking), and the server starts it at call start. It reads the same files as Voice
 // Buddy: voice-mode/call.json (the call, while it's on) and voice-mode/phase.json ("speaking").
+// A soft glow around the pill follows the mic's level from voice-mode/levels ("<dB> <threshold dB>"):
+// blue when the server counts it as speech, grey below that, none while muted, while Claude talks,
+// or when the file is stale.
 // - Click the blob: brings the window running the call (terminal or IDE) to the front.
 // - Mute: creates voice-mode/mute; the server's mic hears nothing while it exists.
 // - Hang up: removes call.json, which the server treats as an end.
-// - Drag anywhere else to move it; where it was left is kept in voice-mode/bubble.json.
+// - Drag anywhere else to move it; where it was left (the pill's origin) is kept in voice-mode/bubble.json.
 // It exits once call.json is gone or the server that wrote it has died.
 //
 // voice-mcp builds it with: swiftc -O native/call-bubble.swift -o <cache>/bin/call-bubble
@@ -26,6 +29,7 @@ let callFile = dir.appendingPathComponent("call.json")
 let phaseFile = dir.appendingPathComponent("phase.json")
 let placeFile = dir.appendingPathComponent("bubble.json")
 let muteFile = dir.appendingPathComponent("mute")
+let levelsPath = dir.appendingPathComponent("levels").path
 
 // Same colours as Voice Buddy's blob.ts.
 let speaking = NSColor(red: 0xd9 / 255.0, green: 0x77 / 255.0, blue: 0x57 / 255.0, alpha: 1)
@@ -39,6 +43,9 @@ let button: CGFloat = 36
 let gap: CGFloat = 10
 let clock: CGFloat = 58
 let width = pad + orb + 10 + clock + 4 + button + gap + button + pad + 2
+// Room around the pill for its glow and shadow; the panel is the pill plus this on every side.
+let margin: CGFloat = 30
+let pillPath = NSBezierPath(roundedRect: NSRect(x: margin, y: margin, width: width, height: height), xRadius: height / 2, yRadius: height / 2)
 
 func symbol(_ name: String, _ label: String, _ color: NSColor) -> NSImage {
   NSImage(systemSymbolName: name, accessibilityDescription: label)!
@@ -131,6 +138,44 @@ final class Pill: NSView {
   }
 }
 
+/** The pill's shadow and the mic-level glow, drawn only outside the pill so the glass never shows them through. */
+final class Glow: NSView {
+  var level: CGFloat = 0 // 0...1
+  var speech: CGFloat = 0 // 0 grey, 1 blue
+
+  override func draw(_ dirtyRect: NSRect) {
+    let outside = NSBezierPath(rect: bounds)
+    outside.append(pillPath)
+    outside.windingRule = .evenOdd
+    outside.addClip()
+    halo(NSColor(white: 0, alpha: 0.4), blur: 12, dy: -3)
+    if level > 0 {
+      let color = mutedGrey.blended(withFraction: speech, of: listening)!
+      halo(color.withAlphaComponent(min(1, 0.3 + level)), blur: 4 + 26 * level, dy: 0)
+    }
+  }
+
+  func halo(_ color: NSColor, blur: CGFloat, dy: CGFloat) {
+    let shadow = NSShadow()
+    shadow.shadowColor = color
+    shadow.shadowBlurRadius = blur
+    shadow.shadowOffset = NSSize(width: 0, height: dy)
+    shadow.set()
+    NSColor.black.setFill()
+    pillPath.fill()
+  }
+}
+
+/** The mic's level mapped to 0...1, and whether it's over the speech threshold, if the server wrote it in the last 0.25 s. */
+func micLevel() -> (level: CGFloat, speech: Bool)? {
+  var st = stat()
+  guard stat(levelsPath, &st) == 0,
+        Date().timeIntervalSince1970 - (Double(st.st_mtimespec.tv_sec) + Double(st.st_mtimespec.tv_nsec) / 1e9) < 0.25,
+        let parts = (try? String(contentsOfFile: levelsPath, encoding: .utf8))?.split(separator: " "), parts.count == 2,
+        let db = Double(parts[0]), let threshold = Double(parts[1]) else { return nil }
+  return (CGFloat(max(0, min(1, (db + 90) / 80))), db > threshold)
+}
+
 /** The app hosting the call's MCP server (its terminal or IDE): walk up from call.json's pid. */
 func bringClaudeForward() {
   let call = readJSON(callFile)
@@ -151,7 +196,7 @@ func bringClaudeForward() {
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory) // no Dock icon, no menu bar
 
-/** Where it was left, if that spot is still on a screen; else the top right of the main screen. */
+/** The pill's frame: where it was left, if that spot is still on a screen; else the top right of the main screen. */
 func startFrame() -> NSRect {
   if let place = readJSON(placeFile), let x = place["x"] as? Double, let y = place["y"] as? Double {
     let frame = NSRect(x: x, y: y, width: width, height: height)
@@ -162,32 +207,35 @@ func startFrame() -> NSRect {
 }
 
 let panel = NSPanel(
-  contentRect: startFrame(),
+  contentRect: startFrame().insetBy(dx: -margin, dy: -margin),
   styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
 panel.level = .floating
 panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
 panel.isOpaque = false
 panel.backgroundColor = .clear
-panel.hasShadow = true
+// Off: the window shadow follows content alpha, so it would shadow the glow too. Glow draws the pill's shadow instead.
+panel.hasShadow = false
 panel.hidesOnDeactivate = false
 
 // Frosted dark capsule, like FaceTime's and the Dynamic Island's.
-let glass = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+let glass = NSVisualEffectView(frame: NSRect(x: margin, y: margin, width: width, height: height))
 glass.material = .hudWindow
 glass.appearance = NSAppearance(named: .darkAqua)
 glass.state = .active
 glass.blendingMode = .behindWindow
-// A mask image (not a layer corner radius) shapes the window itself, so its shadow hugs the capsule instead of a faint box.
+// A mask image (not a layer corner radius) shapes the blurred glass itself into the capsule.
 glass.maskImage = NSImage(size: glass.bounds.size, flipped: false) { rect in
   NSBezierPath(roundedRect: rect, xRadius: height / 2, yRadius: height / 2).fill()
   return true
 }
 let pill = Pill(frame: glass.bounds)
 glass.addSubview(pill)
-panel.contentView = glass
+let glow = Glow(frame: NSRect(origin: .zero, size: panel.frame.size))
+glow.addSubview(glass)
+panel.contentView = glow
 
 NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: panel, queue: .main) { _ in
-  let place = try? JSONSerialization.data(withJSONObject: ["x": Double(panel.frame.minX), "y": Double(panel.frame.minY)])
+  let place = try? JSONSerialization.data(withJSONObject: ["x": Double(panel.frame.minX + margin), "y": Double(panel.frame.minY + margin)])
   try? place?.write(to: placeFile, options: .atomic)
 }
 
@@ -198,6 +246,8 @@ func callStart() -> Double? {
   return (call["startedAt"] as? NSNumber)?.doubleValue ?? Date().timeIntervalSince1970 * 1000
 }
 
+var level: CGFloat = 0
+var speech: CGFloat = 0
 panel.orderFrontRegardless()
 Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { _ in
   guard let started = callStart() else { exit(0) }
@@ -205,9 +255,21 @@ Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { _ in
   pill.elapsed = s < 3600 ? String(format: "%d:%02d", s / 60, s % 60) : String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60)
   let phase = readJSON(phaseFile)
   pill.talking = phase?["phase"] as? String == "speaking"
-  let target = pill.talking ? speaking : isMuted() ? mutedGrey : listening
+  let muted = isMuted()
+  let target = pill.talking ? speaking : muted ? mutedGrey : listening
   pill.color = pill.color.blended(withFraction: 0.15, of: target) ?? target
   pill.t += pill.talking ? 1.6 / 30 : 1.0 / 30
   pill.needsDisplay = true
+
+  let mic = pill.talking || muted ? nil : micLevel()
+  level += ((mic?.level ?? 0) - level) * 0.25
+  if level < 0.01 { level = 0 }
+  if let mic { speech += ((mic.speech ? 1 : 0) - speech) * 0.3 }
+  // Redraw the glow only when it would look different; the pill redraws on its own.
+  if abs(level - glow.level) > 0.01 || abs(speech - glow.speech) > 0.02 {
+    glow.level = level
+    glow.speech = speech
+    glow.needsDisplay = true
+  }
 }
 app.run()
