@@ -1030,10 +1030,10 @@ test("a call: one recorder throughout, listen hears the user, say returns at onc
   }
 });
 
-test("on a call, a soft tick plays while Claude thinks, until it speaks; VOICE_MCP_CALL_THINKING_SOUND=0 turns it off", async () => {
+test("on a call, VOICE_MCP_CALL_THINKING_SOUND=1 plays a soft tick while Claude thinks, until it speaks; off by default", async () => {
   // The tick is a macOS system sound: elsewhere there is none.
   const ticks = (sb) => sb.readLog().match(/^afplay -v 0\.2 .*Tink\.aiff$/gm)?.length ?? 0;
-  for (const [env, on] of [[{}, process.platform === "darwin"], [{ VOICE_MCP_CALL_THINKING_SOUND: "0" }, false]]) {
+  for (const [env, on] of [[{ VOICE_MCP_CALL_THINKING_SOUND: "1" }, process.platform === "darwin"], [{}, false]]) {
     const sb = sandbox();
     fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
     const { client } = await connect(sb.env({ STUB_SCENARIO: "call", ...env }));

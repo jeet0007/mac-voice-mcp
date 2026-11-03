@@ -8,7 +8,7 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 
 | Variable | Default | |
 |---|---|---|
-| `VOICE_MCP_VOICE` | most natural installed | Unset: the best Premium or Enhanced voice installed for the language, else the system voice. Set a name, e.g. `Ava (Premium)`, `Daniel`, `Kanya` (list them with `say -v '?'`), or `default` to always use the system voice. |
+| `VOICE_MCP_VOICE` | system voice | Unset (or `default`): the voice chosen in System Settings → Accessibility → Spoken Content → System Voice. `best`: the most natural Premium or Enhanced voice installed for the language. Or a name, e.g. `Ava (Premium)`, `Daniel`, `Kanya` (list them with `say -v '?'`). |
 | `VOICE_MCP_RATE` | system rate | Words per minute, e.g. `200` (macOS voices). |
 | `VOICE_MCP_TTS` | `auto` | `auto`: the [Kokoro voice](voices.md#the-kokoro-voice-optional) once it's installed, else the built-in voice. `say`: always the built-in voice. `kokoro`: Kokoro, and setup offers to install it. |
 | `VOICE_MCP_KOKORO_VOICE` | `af_heart` | Kokoro voice. American English starts with `a`, British with `b`, e.g. `af_bella`, `am_michael`, `bf_emma`, `bm_george`. |
@@ -55,7 +55,7 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 |---|---|---|
 | `VOICE_MCP_CALL_IDLE_MINUTES` | `30` | A call ends after this long with nothing said by you or Claude. Silence alone never ends it before then. |
 | `VOICE_MCP_CALL_DUPLEX` | `auto` | Whether the mic stays open while Claude speaks on a call. `full`: yes, so you can talk over Claude; it pauses, drops the rest of its reply when you say something real, and carries on after a filler such as "mm-hmm". Use it only with headphones: on speakers the mic hears Claude. `half`: the mic is muted while Claude speaks. `auto`: `full` when the Mac's sound goes to headphones (the headphone jack, or Bluetooth that isn't a speaker), else `half`; checked once when the call starts. Windows calls are always `half`: speech can't be paused there. |
-| `VOICE_MCP_CALL_THINKING_SOUND` | `1` | After your words reach Claude on a call, a soft tick every 1.5 s until Claude speaks, for at most 10 s, so the call never goes silent. `0` turns it off. macOS only. |
+| `VOICE_MCP_CALL_THINKING_SOUND` | `0` | `1`: after your words reach Claude on a call, a soft tick every 1.5 s until Claude speaks, for at most 10 s, so the call never goes silent. Off by default. macOS only. |
 
 ## Claude Code plugin hook
 

@@ -17,7 +17,7 @@
 | The orange mic dot stays on while Claude works | That's [talking to Claude while it works](usage.md#talk-to-claude-while-it-works): it listens for "Claude, …". It stops when you type, when voice mode ends, or after 10 minutes. `VOICE_MCP_LISTEN_WHILE_WORKING=0` turns it off. |
 | Claude didn't get what I said while it worked | Start with its name: "Claude, …". It arrives after Claude's next step. It only works in Claude Code with the plugin. |
 | It garbles names or jargon | Describe the conversation in `VOICE_MCP_WHISPER_PROMPT` as a sentence that uses the words, e.g. `"A call with Priya about the Postgres and Kubernetes migration."`, or switch to `small.en`. |
-| The voice sounds robotic | Download a Premium voice, or install the Kokoro voice (see [Voices](voices.md)). Either is used automatically. |
+| The voice sounds robotic | Choose a Premium voice as the System Voice in System Settings, or install the Kokoro voice (see [Voices](voices.md)). |
 | "The Kokoro voice didn't work" | The built-in voice spoke instead. Ask Claude to *check voice setup*, or run `npx -y mac-voice-mcp@latest setup`. To reinstall it, delete `~/.cache/mac-voice-mcp/kokoro/` and run `setup --kokoro`. |
 | It asks for approval every turn | Add the tool to Claude Code's allow list: see [Allow voice turns without prompts](install.md#allow-voice-turns-without-prompts). |
 | "Another voice session on this Mac…" | Another Claude window, Claude Desktop or Cursor held the speaker and mic for over 2 minutes, which means one very long turn. End that conversation, then try again. |
