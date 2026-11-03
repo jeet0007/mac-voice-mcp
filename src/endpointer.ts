@@ -74,6 +74,9 @@ export class Endpointer {
   lastVoicedFrame = -1;
   /** False while every sample so far has been exactly zero (a blocked mic). */
   anyNonZero = false;
+  /** The last frame's level and the speech threshold it was judged against (dBFS), for the bubble's glow. */
+  lastDb = -100;
+  lastThresholdDb = Number.NaN;
   /** True while our own chime plays: its sound reaches the mic, but it isn't the user. */
   private ignoring = false;
 
@@ -102,6 +105,7 @@ export class Endpointer {
     }
     const rms = Math.sqrt(sumSq / Math.max(1, n)) / 32768;
     const db = Math.max(-100, 20 * Math.log10(rms + 1e-9));
+    this.lastDb = db;
     const idx = this.frames++;
     if (this.ignoring) return this.timeLimit();
 
@@ -118,6 +122,7 @@ export class Endpointer {
       this.floorDb = Math.min(-30, Math.max(-90, Math.min(...this.history.slice(-FLOOR_WINDOW_FRAMES))));
     }
     const threshold = Math.max(this.floorDb + this.opts.marginDb, this.opts.minSpeechDb);
+    this.lastThresholdDb = threshold;
     const loud = db > threshold && idx >= SETTLE_FRAMES;
 
     if (loud) {

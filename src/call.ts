@@ -23,7 +23,7 @@ import path from "node:path";
 import * as files from "../hooks/voice-files.mjs";
 import { listenContinuously, speak, thinkingTick } from "./audio.js";
 import { BargeIn, type Interruption } from "./barge-in.js";
-import { startBubble, stopBubble } from "./bubble.js";
+import { bubbleWanted, startBubble, stopBubble } from "./bubble.js";
 import { CONFIG, debug, envNum, log, PKG } from "./config.js";
 import { acquireMicLock } from "./lock.js";
 import { ensureModel } from "./model.js";
@@ -40,6 +40,7 @@ export const callFile = () => files.callFile(voiceModeDir());
 export const muteFile = () => files.muteFile(voiceModeDir());
 
 const permissionFile = () => files.permissionFile(voiceModeDir());
+const levelsFile = () => files.levelsFile(voiceModeDir());
 
 /** The last speech-to-text failure on a call, kept for debugging (and a future /issue). */
 export const sttFailureFile = () => path.join(CONFIG.cacheDir, "last-stt-failure.json");
@@ -166,6 +167,7 @@ export class Call {
     takeInbox();
     rmSync(callFile(), { force: true });
     rmSync(muteFile(), { force: true });
+    rmSync(levelsFile(), { force: true });
     stopBubble();
     showPhase(null);
     release!();
@@ -245,6 +247,7 @@ export class Call {
     const model = await ensureModel({ download: false });
     prewarm(model);
     const dir = await mkdtemp(path.join(os.tmpdir(), "voice-mcp-call-"));
+    let levelFrames = 0;
     try {
       await listenContinuously(signal, {
         dir,
@@ -255,6 +258,12 @@ export class Call {
             .then(() => this.heard(wav, model, signal, from))
             .catch((e: unknown) => this.notHeard(e, model, signal))
             .finally(() => this.bargeIn.done(from));
+        },
+        // Every other 30 ms frame is plenty for the bubble's glow, which smooths it anyway.
+        onLevel: (db, thresholdDb) => {
+          if (bubbleWanted() && ++levelFrames % 2 === 0 && Number.isFinite(thresholdDb)) {
+            writeFileSync(levelsFile(), `${db.toFixed(1)} ${thresholdDb.toFixed(1)}`);
+          }
         },
         onSpeech: (talking) => {
           this.userTalking = talking;

@@ -75,6 +75,8 @@ export function buildBubble(): Promise<string> {
 let child: ChildProcess | null = null;
 /** A call is on: a rebuild that finishes now starts the bubble. */
 let wanted = false;
+/** A call is on and the bubble is (or will be) showing: it wants the mic's levels for its glow. */
+export const bubbleWanted = () => wanted;
 
 /** At call start: show the bubble if the user built it and didn't turn it off. Never fails the call. */
 export function startBubble(): void {
