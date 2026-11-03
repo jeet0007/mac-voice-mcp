@@ -1154,6 +1154,9 @@ test("call.json disappearing (the session ended) makes the server hang up", asyn
   const { client } = await connect(sb.env({ STUB_SCENARIO: "call" }));
   try {
     await client.callTool({ name: "call", arguments: { action: "start" } });
+    // As in real use, the session ends while the call is listening. Removed sooner, a slow CI Mac stops
+    // the stand-in recorder before Node has even started it, so it can't log that it was stopped.
+    assert.ok(await waitFor(() => /^rec -/m.test(sb.readLog())), "the recorder started");
     const t = Date.now();
     rmSync(callFile(sb));
     assert.ok(await waitFor(() => /^rec stopped$/m.test(sb.readLog())), "the recorder stopped");
