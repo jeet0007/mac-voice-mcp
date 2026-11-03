@@ -65,8 +65,9 @@ export interface VoiceChoice {
 }
 
 export const VOICE_UPGRADE_HINT =
-  "for a much more natural voice, download a Premium one: System Settings → Accessibility → Spoken Content → " +
-  "System Voice → Manage Voices… (for example English → Ava (Premium) or Zoe (Premium)). It's used automatically — no restart needed.";
+  "it speaks with the voice chosen in System Settings → Accessibility → Spoken Content → System Voice. For a much more " +
+  "natural one, pick a Premium voice there (Manage Voices… to download one, e.g. English → Ava (Premium)), or set " +
+  "VOICE_MCP_VOICE=best to use the most natural voice installed.";
 
 let voiceChoice: Promise<VoiceChoice> | undefined;
 
@@ -77,11 +78,10 @@ export function resetVoiceChoice(): void {
 
 export function chooseVoice(): Promise<VoiceChoice> {
   voiceChoice ??= (async (): Promise<VoiceChoice> => {
-    if (CONFIG.voice) {
-      return CONFIG.voice.toLowerCase() === "default"
-        ? { label: "the system voice (VOICE_MCP_VOICE=default)", canUpgrade: false }
-        : { voice: CONFIG.voice, label: `${CONFIG.voice} (set by VOICE_MCP_VOICE)`, canUpgrade: false };
-    }
+    // Unset or "default": the voice chosen in System Settings (say without -v). "best": the most natural one installed.
+    const wanted = CONFIG.voice?.toLowerCase();
+    if (!wanted || wanted === "default") return { label: "the system voice (System Settings → Spoken Content)", canUpgrade: IS_MAC };
+    if (wanted !== "best") return { voice: CONFIG.voice, label: `${CONFIG.voice} (set by VOICE_MCP_VOICE)`, canUpgrade: false };
     const bin = IS_MAC ? findTts() : null;
     if (!bin) return { label: "the system voice", canUpgrade: false };
     try {

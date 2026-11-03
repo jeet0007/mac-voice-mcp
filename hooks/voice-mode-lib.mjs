@@ -128,8 +128,9 @@ export function interjectionReason(texts, { call = false } = {}) {
 }
 
 /**
- * Handle one hook event. Returns { exitCode: 0 } to carry on, or { exitCode: 2, stderr } to
- * send Claude back (Stop only).
+ * Handle one hook event. Returns { exitCode: 0 } to carry on, { exitCode: 0, context } to add
+ * context to the tool result Claude reads next (what the user said meanwhile; shown to the user as
+ * a note, not an error), or { exitCode: 2, stderr } to send Claude back (Stop only).
  */
 export function handle(input, { env = process.env, now = Date.now() } = {}) {
   const session = input?.session_id;
@@ -157,7 +158,7 @@ export function handle(input, { env = process.env, now = Date.now() } = {}) {
         // (its tool calls fire this hook too, with agent_id set): the words are for the main Claude.
         if (input.agent_id) return { exitCode: 0 };
         const said = takeInterjections(dir, session, now);
-        return said.length ? { exitCode: 2, stderr: interjectionReason(said, { call: onCall(dir, session) }) } : { exitCode: 0 };
+        return said.length ? { exitCode: 0, context: interjectionReason(said, { call: onCall(dir, session) }) } : { exitCode: 0 };
       }
       if (heardUser(input.tool_input, input.tool_response)) {
         if (stayInVoice) writeState(dir, session, { on: true, at: now, nudged: false });

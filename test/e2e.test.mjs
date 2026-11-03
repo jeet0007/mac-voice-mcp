@@ -1030,10 +1030,10 @@ test("a call: one recorder throughout, listen hears the user, say returns at onc
   }
 });
 
-test("on a call, a soft tick plays while Claude thinks, until it speaks; VOICE_MCP_CALL_THINKING_SOUND=0 turns it off", async () => {
+test("on a call, VOICE_MCP_CALL_THINKING_SOUND=1 plays a soft tick while Claude thinks, until it speaks; off by default", async () => {
   // The tick is a macOS system sound: elsewhere there is none.
   const ticks = (sb) => sb.readLog().match(/^afplay -v 0\.2 .*Tink\.aiff$/gm)?.length ?? 0;
-  for (const [env, on] of [[{}, process.platform === "darwin"], [{ VOICE_MCP_CALL_THINKING_SOUND: "0" }, false]]) {
+  for (const [env, on] of [[{ VOICE_MCP_CALL_THINKING_SOUND: "1" }, process.platform === "darwin"], [{}, false]]) {
     const sb = sandbox();
     fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
     const { client } = await connect(sb.env({ STUB_SCENARIO: "call", ...env }));
@@ -1154,6 +1154,9 @@ test("call.json disappearing (the session ended) makes the server hang up", asyn
   const { client } = await connect(sb.env({ STUB_SCENARIO: "call" }));
   try {
     await client.callTool({ name: "call", arguments: { action: "start" } });
+    // As in real use, the session ends while the call is listening. Removed sooner, a slow CI Mac stops
+    // the stand-in recorder before Node has even started it, so it can't log that it was stopped.
+    assert.ok(await waitFor(() => /^rec -/m.test(sb.readLog())), "the recorder started");
     const t = Date.now();
     rmSync(callFile(sb));
     assert.ok(await waitFor(() => /^rec stopped$/m.test(sb.readLog())), "the recorder stopped");

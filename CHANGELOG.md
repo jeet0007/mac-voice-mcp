@@ -5,6 +5,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+- **The voice is your system voice.** voice-mcp now speaks with the voice chosen in System Settings → Accessibility → Spoken Content → System Voice, instead of picking the most natural Premium or Enhanced voice installed. `VOICE_MCP_VOICE=best` brings back the old choice; a voice name still picks that voice.
+- **The thinking tick on a call is off by default.** Up to six ticks after everything you said was too much. `VOICE_MCP_CALL_THINKING_SOUND=1` turns it back on.
+
+### Fixed
+- **What you say while Claude works no longer shows as a "hook error".** The plugin hands it to Claude as context on the next tool result instead of a blocking hook error, so Claude Code shows it as a note. (At the end of a turn it still has to block, so that one keeps the hook label.)
+
 ## [0.8.0] - 2026-10-31
 
 ### Added

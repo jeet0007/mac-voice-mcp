@@ -157,8 +157,8 @@ test("after every tool, the shell check exits at once with nothing said, and han
   assert.equal(r.stderr, "");
   leaveInInbox(env, "use the other branch");
   r = runSh();
-  assert.equal(r.status, 2);
-  assert.match(r.stderr, /the user said by voice: "use the other branch"/);
+  assert.equal(r.status, 0, "not a blocking error: Claude Code shows it as a note");
+  assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /the user said by voice: "use the other branch"/);
 });
 
 test("the shell check looks in the same inbox as the hook, wherever the cache is", () => {
@@ -175,8 +175,8 @@ test("the shell check looks in the same inbox as the hook, wherever the cache is
     leaveInInbox(env, "use the other branch");
     const event = JSON.stringify({ session_id: "s1", hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: {}, tool_response: "ok" });
     const r = spawnSync("sh", [path.join(ROOT, "hooks", "after-tool.sh")], { input: event, env: shellEnv, encoding: "utf8" });
-    assert.equal(r.status, 2, root);
-    assert.match(r.stderr, /"use the other branch"/);
+    assert.equal(r.status, 0, root);
+    assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /"use the other branch"/);
   }
 });
 
@@ -226,8 +226,8 @@ test("what the user said while Claude worked is handed over after its next tool 
   spoke();
   leaveInInbox(env, "use the other branch");
   const r = run("PostToolUse", { tool_name: "Bash", tool_input: { command: "ls" }, tool_response: "ok" });
-  assert.equal(r.exitCode, 2);
-  assert.match(r.stderr, /While you were working, the user said by voice: "use the other branch"/);
+  assert.equal(r.exitCode, 0);
+  assert.match(r.context, /While you were working, the user said by voice: "use the other branch"/);
   assert.deepEqual(run("PostToolUse", { tool_name: "Bash", tool_input: {}, tool_response: "ok" }), { exitCode: 0 }, "delivered once");
 });
 
@@ -237,7 +237,7 @@ test("a subagent's tool calls leave what the user said for the main Claude", () 
   leaveInInbox(env, "use the other branch");
   const sub = run("PostToolUse", { tool_name: "Bash", tool_input: {}, tool_response: "ok", agent_id: "a1", agent_type: "fork" });
   assert.deepEqual(sub, { exitCode: 0 });
-  assert.equal(run("PostToolUse", { tool_name: "Bash", tool_input: {}, tool_response: "ok" }).exitCode, 2, "main Claude gets it");
+  assert.match(run("PostToolUse", { tool_name: "Bash", tool_input: {}, tool_response: "ok" }).context, /use the other branch/, "main Claude gets it");
 });
 
 test("another session's interjections stay put, and Stop delivers them even after the one nudge", () => {
@@ -255,7 +255,7 @@ test("VOICE_MCP_STAY_IN_VOICE=0 turns off the nudges but still hands over what t
   const ev = (event, extra = {}) => handle({ session_id: "s1", hook_event_name: event, ...extra }, { env });
   ev("PostToolUse", { tool_name: TOOL, tool_input: { text_to_speak: "Deploy?" }, tool_response: heard });
   leaveInInbox(env, "wait");
-  assert.equal(ev("PostToolUse", { tool_name: "Read", tool_input: {}, tool_response: "x" }).exitCode, 2);
+  assert.match(ev("PostToolUse", { tool_name: "Read", tool_input: {}, tool_response: "x" }).context, /"wait"/);
   assert.deepEqual(ev("Stop"), { exitCode: 0 });
 });
 
@@ -268,7 +268,7 @@ test("a spoken update that doesn't wait for an answer keeps the mic open while C
   assert.equal(JSON.parse(readFileSync(mark, "utf8")).session, "s1", "still listening");
   assert.ok(JSON.parse(readFileSync(mark, "utf8")).at > Date.now(), "marked again, so the server knows this turn is still in voice mode");
   leaveInInbox(env, "skip the slow tests");
-  assert.equal(run("PostToolUse", { tool_name: "Bash", tool_input: {}, tool_response: "ok" }).exitCode, 2, "and what's said still reaches Claude");
+  assert.match(run("PostToolUse", { tool_name: "Bash", tool_input: {}, tool_response: "ok" }).context, /skip the slow tests/, "and what's said still reaches Claude");
 
   // Not while the mic is closed (a goodbye after typing), and not when the update failed.
   const b = setup();
@@ -324,8 +324,8 @@ test("call start marks the call as this session's; what the user says on it is h
   const other = handle({ session_id: "s2", hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: {}, tool_response: "ok" }, { env });
   assert.deepEqual(other, { exitCode: 0 }, "another session doesn't get it");
   const r = run("PostToolUse", { tool_name: "Bash", tool_input: {}, tool_response: "ok" });
-  assert.equal(r.exitCode, 2);
-  assert.match(r.stderr, /the user said by voice: "use the other branch".*next natural pause \(say\)/);
+  assert.equal(r.exitCode, 0);
+  assert.match(r.context, /the user said by voice: "use the other branch".*next natural pause \(say\)/);
   assert.deepEqual(run("PostToolUse", { tool_name: "Bash", tool_input: {}, tool_response: "ok" }), { exitCode: 0 }, "delivered once");
 });
 

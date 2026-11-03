@@ -68,7 +68,7 @@ Setup checks what's already there before it changes anything:
 
 | Needed | Provided by | If it's missing |
 |---|---|---|
-| Voice | macOS `say`, using the most natural voice installed | Nothing to do. For a far better voice, add a free Premium one, or the Kokoro voice (see [Voices](voices.md)). |
+| Voice | macOS `say`, with the voice chosen in System Settings | Nothing to do. For a far better voice, choose a free Premium one in System Settings, or add the Kokoro voice (see [Voices](voices.md)). |
 | Microphone capture | SoX (`rec`). ffmpeg works as a fallback, but setup recommends SoX | `brew install sox` |
 | Speech-to-text | whisper.cpp (`whisper-cli` and `whisper-server`, Metal-accelerated) | `brew install whisper-cpp` |
 | Speech model | `base.en`, ~140 MB | Downloaded once to `~/.cache/mac-voice-mcp/models/` |
