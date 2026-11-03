@@ -12,13 +12,13 @@ jobs:
   test:
     strategy:
       fail-fast: false
-      # Each supported Node version once: the oldest (22) and newest (26) on macOS, where people use
-      # it, and the middle LTS (24) on Linux, which keeps the espeak-ng path working.
+      # Two jobs cover it: macOS, where people use it, on the oldest supported Node (22); and Linux on
+      # the newest (26), which is fast, keeps the espeak-ng path working, and catches Mac-only
+      # assumptions. The real speech round trip is its own workflow (speech.yml), run when speech code changes.
       matrix:
         include:
           - { os: macos-latest, node: 22 }
-          - { os: macos-latest, node: 26 }
-          - { os: ubuntu-latest, node: 24 }
+          - { os: ubuntu-latest, node: 26 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -31,102 +31,3 @@ jobs:
       - if: runner.os == 'macOS'
         run: swiftc -typecheck native/call-bubble.swift
       - run: npm test
-
-  # The real thing, minus the microphone: our own setup installs SoX, whisper.cpp and the model,
-  # doctor checks it, and the round-trip test speaks known sentences with the real macOS voice and
-  # transcribes them with the real whisper.cpp. Word accuracy and speed have hard limits.
-  speech-roundtrip:
-    name: Speech round trip (real say + whisper.cpp)
-    runs-on: macos-latest
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - name: Cache the speech model
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/mac-voice-mcp/models
-          key: whisper-model-base.en-v1
-      - name: Install with our own setup (Homebrew SoX + whisper.cpp, model download)
-        run: node dist/index.js setup --install
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: "1"
-      # Some runners' default voice writes almost no audio (0.1 s for a sentence), which made every
-      # transcript empty. Pin a classic voice for the round trip when the runner has one.
-      - name: Voices on this runner
-        run: |
-          say -v '?' | grep -E '\sen_' || true
-          V=$(say -v '?' | grep -oE '^(Samantha|Alex|Fred) ' | head -1 | xargs)
-          echo "Round-trip voice: ${V:-the system voice}"
-          if [ -n "$V" ]; then echo "VOICE_MCP_VOICE=$V" >> "$GITHUB_ENV"; fi
-      # Doctor's limits are for real Macs (Premium voice, GPU). Here it checks the plumbing and
-      # records the numbers; the round-trip test below is the gate.
-      - name: Doctor (no speakers on CI)
-        run: node dist/index.js doctor --no-loopback
-        continue-on-error: true
-        env:
-          VOICE_MCP_DEBUG: "1"
-      - name: Round trip
-        run: node --test test/roundtrip.test.mjs
-        env:
-          VOICE_MCP_DEBUG: "1"
-          VOICE_MCP_ROUNDTRIP: "1"
-          VOICE_MCP_ROUNDTRIP_REPORT: roundtrip-report.json
-          # For GitHub's runners: robotic voices (often Fred) and CPU-only whisper. A broken pipeline
-          # scores ~100% wrong; one sentence in a robotic voice can be ~40% wrong. CPU-only whisper on a
-          # busy runner takes 3-11 s per clip; the time limit only catches a hang.
-          VOICE_MCP_ROUNDTRIP_LIMITS: '{"plainEach":0.5,"plainOverall":0.2,"jargonEach":0.6,"warmTranscribeMs":30000}'
-      # If the round trip fails, capture the voice's and whisper.cpp's own view. (Empty transcripts
-      # once turned out to be a runner voice that wrote 0.1 s of audio for a whole sentence.)
-      - name: Diagnose whisper.cpp
-        if: failure()
-        run: |
-          set -x
-          sw_vers; sysctl -n machdep.cpu.brand_string; whisper-cli --version 2>&1 | head -3 || true
-          brew info --json=v2 whisper-cpp | python3 -c "import sys,json;print(json.load(sys.stdin)['formulae'][0]['installed'][0]['version'])"
-          say -o /tmp/diag.wav --file-format=WAVE --data-format=LEI16@16000 "The build passed and all tests are green."
-          ls -la /tmp/diag.wav ~/.cache/mac-voice-mcp/models/
-          M=~/.cache/mac-voice-mcp/models/ggml-base.en.bin
-          shasum -a 256 "$M"
-          time whisper-cli -m "$M" -f /tmp/diag.wav -nt 2>&1 | tail -25
-          time whisper-cli -m "$M" -f /tmp/diag.wav -nt -ng 2>&1 | tail -5
-      # The same round trip with the optional Kokoro voice, installed by our own setup:
-      # can whisper understand it, and how soon does it start talking?
-      - name: Cache the Kokoro voice
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/mac-voice-mcp/kokoro
-          key: kokoro-js-1.2.1-fp32-v1
-      - name: Install the Kokoro voice with our own setup
-        run: node dist/index.js setup --kokoro
-      - name: Doctor with Kokoro
-        run: node dist/index.js doctor --no-loopback
-        continue-on-error: true
-        env:
-          VOICE_MCP_TTS: kokoro
-      - name: Round trip with Kokoro
-        run: node --test test/roundtrip.test.mjs
-        env:
-          VOICE_MCP_TTS: kokoro
-          VOICE_MCP_ROUNDTRIP: "1"
-          VOICE_MCP_ROUNDTRIP_REPORT: roundtrip-kokoro-report.json
-          # GitHub's Mac VMs are several times slower than a real Mac at this (first runs: 3.5-6.4 s to the
-          # first sound), so the time limit here only catches a broken or hung engine. Speed on a real Mac
-          # is judged by `doctor` (PASS at 1.5 s).
-          VOICE_MCP_ROUNDTRIP_LIMITS: '{"plainEach":0.35,"plainOverall":0.2,"jargonEach":0.6,"warmTranscribeMs":30000,"firstSoundMs":12000}'
-      - name: Keep the numbers
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: speech-roundtrip-report
-          path: |
-            roundtrip-report.json
-            roundtrip-kokoro-report.json
-            ~/.cache/mac-voice-mcp/doctor/*.json
-          if-no-files-found: ignore
