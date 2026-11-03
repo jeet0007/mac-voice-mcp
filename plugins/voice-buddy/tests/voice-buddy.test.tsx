@@ -248,7 +248,7 @@ test("after a reload mid-call, this window's call is picked up again from call.j
   expect(submitted).toEqual([JSON.stringify({ text: 'are you still there', origin: 'plugin', asUser: true })])
 })
 
-test("on a call the buddy shows it with the call's duration and Claude speaking, unless the call bubble is up", async ($, on) => {
+test("on a call the buddy shows it with the call's duration, and Claude speaking on it as usual", async ($, on) => {
   const { clock, files } = callEngine(on, {})
   on('ui.render', ($$, e) => {
     const { Text } = $$.ui.resolve(e)
@@ -275,16 +275,6 @@ test("on a call the buddy shows it with the call's duration and Claude speaking,
   expect(await speaking.find({ type: 'Text', text: /Speaking/ })).toBeDefined()
   expect(await speaking.find({ type: 'Text', text: /^ · on a call · 1:06$/ })).toBeDefined()
   await speaking.unmount()
-  files[`${DIR}/bubble.pid`] = '42' // the floating call bubble shows the call instead
-  await clock.advance(300)
-  const bubbled = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect((await bubbled.find({ type: 'Text' }))?.text).toBe('engine')
-  await bubbled.unmount()
-  delete files[`${DIR}/bubble.pid`] // the bubble quit: the buddy is back
-  await clock.advance(300)
-  const back = await $.ui.mount({ ...BAND, surface: 'desktop' })
-  expect(await back.find({ type: 'Text', text: /Speaking/ })).toBeDefined()
-  await back.unmount()
   delete files[`${DIR}/call.json`] // hung up
   await clock.advance(1000)
   const after = await $.ui.mount({ ...BAND, surface: 'terminal' })

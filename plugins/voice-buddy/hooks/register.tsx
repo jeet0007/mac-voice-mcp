@@ -144,8 +144,6 @@ async function currentMood($: EngineInterface): Promise<Mood | null> {
   const dir = await voiceModeDir($)
   if (!dir) return null
   callStartedAt = await callStart($, dir)
-  // The floating call bubble (voice-mode/bubble.pid while it runs) already shows the call: no need for both.
-  if (callStartedAt !== null && (await $.fs.exists(`${dir}/bubble.pid`))) return null
   if (running > 0 || callStartedAt !== null || (await $.clock.now()) <= updateUntil) {
     try {
       const { phase } = JSON.parse(await $.fs.read(`${dir}/phase.json`)) as { phase?: string }
@@ -255,8 +253,7 @@ async function tick($: EngineInterface): Promise<void> {
       mood = now
       $.ui.invalidate('ui.render')
     }
-    // On a call keep checking, so the buddy comes back if the bubble goes away.
-    if (mood === null && !onCall) {
+    if (mood === null) {
       timer?.cancel()
       timer = null
       return
