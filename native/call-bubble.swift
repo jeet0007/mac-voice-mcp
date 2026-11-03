@@ -31,7 +31,7 @@ let placeFile = dir.appendingPathComponent("bubble.json")
 let muteFile = dir.appendingPathComponent("mute")
 let levelsPath = dir.appendingPathComponent("levels").path
 
-// Same colours as Voice Buddy's blob.ts.
+// Claude's colours: orange while it speaks, blue while it listens.
 let speaking = NSColor(red: 0xd9 / 255.0, green: 0x77 / 255.0, blue: 0x57 / 255.0, alpha: 1)
 let listening = NSColor(red: 0x4f / 255.0, green: 0x9d / 255.0, blue: 0xde / 255.0, alpha: 1)
 let mutedGrey = NSColor(white: 0.55, alpha: 1)

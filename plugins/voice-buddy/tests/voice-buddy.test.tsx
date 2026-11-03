@@ -1,5 +1,4 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { blobCells, blobPath, blobSvg, LOOKS } from '../hooks/blob.ts'
 
 const SPEAK = 'mcp__plugin_mac-voice-mcp_voice-mcp__speak_and_listen'
 const STOP = '/home/me/.cache/mac-voice-mcp/voice-mode/stop'
@@ -97,16 +96,14 @@ test('during a voice turn the buddy shows what it is doing, on every surface', a
     const { Text } = $$.ui.resolve(e)
     return <Text>engine</Text>
   })
-  on('ui.blit', () => ({ value: {} }))
   on('tool.call', async () => {
     await clock.advance(100) // the buddy checks what the turn is doing
     const terminal = await $.ui.mount({ ...BAND, surface: 'terminal' })
     expect(await terminal.find({ type: 'Text', text: /Listening/ })).toBeDefined()
-    expect(await terminal.find({ type: 'Raster' })).toBeDefined()
     await terminal.unmount()
     for (const surface of ['desktop', 'vscode', 'mobile'] as const) {
       const ui = await $.ui.mount({ ...BAND, surface })
-      expect(await ui.find({ type: 'Svg' })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /Listening/ })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /type to interrupt/ })).toBeDefined()
       await ui.unmount()
     }
@@ -254,7 +251,6 @@ test("on a call the buddy shows it with the call's duration, and Claude speaking
     const { Text } = $$.ui.resolve(e)
     return <Text>engine</Text>
   })
-  on('ui.blit', () => ({ value: {} }))
   files[`${DIR}/call.json`] = JSON.stringify({ pid: 1, session: 's1', startedAt: 1_000_000 })
   await $.tool.call({ tool: CALL, action: 'start' } as never)
   await clock.advance(65_300) // the buddy refreshes every 240 ms
@@ -288,11 +284,4 @@ test("typing during a call doesn't write the stop file (a typo shouldn't cut Cla
   await $.prompt.edit(key('h'))
   await clock.settle()
   expect(files[`${DIR}/stop`]).toBeUndefined()
-})
-
-test('the blob loops seamlessly, and its frames fit the Raster', async () => {
-  for (const look of Object.values(LOOKS)) expect(blobPath(1, look, 20, 20, 14)).toBe(blobPath(0, look, 20, 20, 14))
-  const cells = blobCells('speaking', 0.3, 8, 4)
-  expect(cells.length).toBe(Math.ceil((8 * 4 * 12) / 3) * 4) // base64 of 8x4 cells, 12 bytes each
-  expect(blobSvg('listening')).toContain('<animate attributeName="d"')
 })

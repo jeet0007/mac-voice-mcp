@@ -48,18 +48,7 @@ It's optional and built on your Mac from source, never downloaded: setup offers 
 /plugin install voice-buddy@mac-voice-mcp
 ```
 
-**The buddy.** While voice is on in a window, a small animated blob sits above the prompt and shows what the voice turn is doing:
-
-| Colour | Means |
-|---|---|
-| Orange, lively | Claude is speaking |
-| Blue, breathing | Listening for your answer |
-| Purple, quick | Got it, transcribing |
-| Grey | Waiting for another voice session to finish |
-| Green, calm | Listening for "Claude, …" while Claude works |
-| Bright green, pulsing | On a call, with how long it has lasted (orange and blue while Claude speaks and listens on it) |
-
-It's drawn with coloured blocks in the terminal and as a smooth animated shape in the desktop app and VS Code. Each window shows only its own voice.
+**The buddy.** While voice is on in a window, a one-line status sits above the prompt and shows what the voice turn is doing: "Speaking", "Listening", "Got it, transcribing", "Waiting for another voice session", "Listening for "Claude, …"", or "On a call" with how long it has lasted ("Muted" while the call is muted). Each window shows only its own voice.
 
 ### Interrupt by typing
 
