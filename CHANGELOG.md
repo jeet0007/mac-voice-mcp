@@ -11,7 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **Voice Buddy shows a muted call** as "Muted", so it agrees with the bubble.
 
 ### Changed
-- **Voice Buddy is a one-line status now, without its animated blob.** The call bubble shows Claude's blob, and the terminal no longer redraws an animation 12 times a second.
+- **Voice Buddy 0.3.0 is a one-line status, without its animated blob.** The call bubble shows Claude's blob, and the terminal no longer redraws an animation 12 times a second. Already have it? Run `/plugin marketplace update mac-voice-mcp`, then `/reload-plugins`.
 
 ## [0.8.1] - 2026-11-03
 
