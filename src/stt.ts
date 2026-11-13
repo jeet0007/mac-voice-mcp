@@ -180,7 +180,12 @@ class WarmWhisperServer {
     throw new Error("whisper-server did not become ready in time");
   }
 
-  async transcribe(wav: Buffer, signal?: AbortSignal): Promise<string> {
+  /** The server is up and its model loaded (or loading): a partial may go to it without starting anything. */
+  get isWarm(): boolean {
+    return !!this.ready && this.running;
+  }
+
+  async transcribe(wav: Buffer, signal?: AbortSignal, timeoutMs = 120_000): Promise<string> {
     if (!this.ready) throw new Error("whisper-server is not running");
     const base = await this.ready;
     const form = new FormData();
@@ -189,7 +194,7 @@ class WarmWhisperServer {
     form.append("temperature_inc", "0.2");
     form.append("response_format", "json");
 
-    const res = await fetchWithin(`${base}/inference`, { method: "POST", body: form }, 120_000, signal);
+    const res = await fetchWithin(`${base}/inference`, { method: "POST", body: form }, timeoutMs, signal);
     if (signal?.aborted) throw new CancelledError();
     if (!res.ok) throw new Error(`whisper-server HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const json = (await res.json()) as { text?: string; error?: string };
@@ -234,6 +239,25 @@ export function prewarm(model: string): void {
 
 export function stopWhisperServer(): void {
   warmServer.stop();
+}
+
+/** A partial transcript can be asked for: the warm server is up. Never starts a server, never falls back to whisper-cli. */
+export function partialsAvailable(): boolean {
+  return serverUsable() && warmServer.isWarm;
+}
+
+/**
+ * A rough transcript of an utterance still being said, for the live transcript (docs/specs/live-transcript.md):
+ * the warm whisper-server only, audio from memory. Resolves null on any failure or abort, with nothing logged
+ * (partial words are display only: never in logs, even with VOICE_MCP_DEBUG).
+ */
+export async function transcribePartial(wav: Buffer, signal: AbortSignal): Promise<string | null> {
+  if (!partialsAvailable()) return null;
+  try {
+    return await warmServer.transcribe(wav, signal, 5000);
+  } catch {
+    return null;
+  }
 }
 
 /** Which engine the next transcription will use — for the setup report. */

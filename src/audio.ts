@@ -6,6 +6,7 @@ import path from "node:path";
 import { CONFIG, debug, IS_MAC, IS_WIN, log } from "./config.js";
 import { Endpointer, FRAME_BYTES, FRAME_MS, wavHeader, type EndReason, type EndpointerDiagnostics } from "./endpointer.js";
 import { KokoroError, kokoroEnabled, speakKokoro, synthesizeKokoroToFile } from "./kokoro.js";
+import { utteranceFrames, type LiveTranscript } from "./live-transcript.js";
 import { wavSeconds } from "./pcm.js";
 import { trackSpeaker } from "./speakers.js";
 import { activeChildren, CancelledError, run, SetupError, startWaiting, tail, which, type RunResult, type Waiting } from "./proc.js";
@@ -538,6 +539,8 @@ export interface ContinuousOptions {
   onLevel?: (db: number, thresholdDb: number) => void;
   /** true once the user has talked for BARGE_IN_MS, false when that utterance ends or turns out to be a blip. */
   onSpeech?: (talking: boolean) => void;
+  /** Gets every heard frame, to ask for rough transcripts while the user talks (src/live-transcript.ts). */
+  live?: LiveTranscript;
   dir: string;
 }
 
@@ -587,12 +590,20 @@ export async function listenContinuously(signal: AbortSignal, opts: ContinuousOp
         if (frames.length) {
           endpointer = fresh();
           frames = [];
+          opts.live?.end();
         }
       } else {
         frames.push(frame);
         const reason = endpointer.push(frame);
         opts.onLevel?.(endpointer.lastDb, endpointer.lastThresholdDb);
+        if (!reason && opts.live && endpointer.speaking) {
+          opts.live.frame(endpointer.speechSeconds, endpointer.quietMs, () => {
+            const pcm = Buffer.concat(utteranceFrames(frames, endpointer.speechStartFrame));
+            return Buffer.concat([wavHeader(pcm.length), pcm]);
+          });
+        }
         if (reason) {
+          opts.live?.end(); // before onUtterance: a partial still out is dropped, the final goes alone
           if (reason !== "no-speech") {
             const [first, last] = endpointer.trimRange(frames.length);
             const pcm = Buffer.concat(frames.slice(first, last));
