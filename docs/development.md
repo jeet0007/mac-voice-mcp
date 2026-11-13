@@ -35,10 +35,10 @@ Turn the volume up, keep the room quiet, and stop voice mode in other sessions w
 | `speech-text.ts` | Rewriting screen text for speech, cleaning up transcripts (pure, unit-tested) |
 | `endpointer.ts` | Turn-taking voice-activity detection (pure, unit-tested) |
 | `audio.ts` | Text-to-speech, chimes, streaming mic capture |
-| `kokoro.ts`, `kokoro-worker.ts` | The optional Kokoro voice: install, a warm worker process, sentence-by-sentence playback, fallback |
+| `kokoro.ts`, `kokoro-worker.ts` | The optional Kokoro voice: install, a warm worker process, sentence-by-sentence playback, fallback, and a background warm-up at the start of a call and a listen |
 | `kokoro-text.ts`, `pcm.ts` | Pronunciation fixes and sentence chunks for Kokoro, PCM conversion (pure, unit-tested) |
 | `model.ts` | Finding, symlinking or downloading the model |
-| `stt.ts` | The warm `whisper-server` with orphan guard, and the `whisper-cli` fallback |
+| `stt.ts` | The warm `whisper-server` with orphan guard, and the `whisper-cli` fallback. A turn is transcribed from memory (`transcribeBuffer`); only `whisper-cli` needs a temp file |
 | `setup.ts` | Requirement checks and consent-based background installs |
 | `lock.ts` | One voice turn (or call) at a time across every session on the Mac |
 | `worklisten.ts` | Listening for "Claude, …" while Claude works, the inbox and phase file shared with the plugin hook and Voice Buddy |
