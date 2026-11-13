@@ -43,7 +43,7 @@ Claude ◀──────────────── "Yes, and tag Priya."
 
 - 🔒 **On-device.** whisper.cpp transcribes on your Mac. Recordings are deleted after each turn.
 - 📞 **Calls.** Run `/mac-voice-mcp:call` and the mic stays open until you hang up: talk whenever you like, while Claude works or waits. With headphones you can talk over Claude, and an optional floating bubble shows the call with mute and hang up ([more](docs/usage.md#calls)).
-- 💬 **Natural turn-taking.** A soft chime, then it waits for you to start, and hands back about 1.5 seconds after you stop. No push-to-talk.
+- 💬 **Natural turn-taking.** A soft tick when the mic opens, then it waits for you to start, and hands back about 1.5 seconds after you stop. No push-to-talk.
 - ⚡ **Fast replies.** A warm whisper.cpp server keeps the model loaded, so transcribing takes a fraction of a second on Apple Silicon.
 - 🗣️ **A natural voice, if you want one.** Uses your best macOS voice, or the optional [Kokoro](docs/voices.md#the-kokoro-voice-optional) neural voice.
 - ✋ **Asks before installing anything.** Setup checks what you already have and reuses it.
