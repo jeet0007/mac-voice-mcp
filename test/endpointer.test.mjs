@@ -146,3 +146,40 @@ test("the last frame's level and threshold: speech sits above the threshold, a q
   ep.push(frame("speech"));
   assert.ok(ep.lastDb > ep.lastThresholdDb, `speech ${ep.lastDb} dB is over ${ep.lastThresholdDb} dB`);
 });
+
+// --- level-exact synthetic frames (a sine at a given dBFS) for the turn-taking regressions ---
+function toneFrame(db) {
+  const buf = Buffer.alloc(FRAME_SAMPLES * 2);
+  const amp = db === null ? 0 : Math.SQRT2 * 32768 * 10 ** (db / 20);
+  for (let i = 0; i < FRAME_SAMPLES; i++) buf.writeInt16LE(Math.round(amp * Math.sin(i / 5) + rand() * 3), i * 2);
+  return buf;
+}
+const LONG = { maxMs: 30_000, startTimeoutMs: 15_000, endSilenceMs: 1_500, marginDb: 12, minSpeechDb: -48 };
+
+/** Script of [dB, ms] segments, then -60 dB room forever. Returns [reason, endpointer, framesFed]. */
+function runLevels(script, opts = LONG) {
+  const ep = new Endpointer(opts);
+  let fed = 0;
+  const levels = script.flatMap(([db, dur]) => Array(ms(dur)).fill(db));
+  const total = ms(opts.maxMs + opts.startTimeoutMs) + 100;
+  for (let i = 0; i < total; i++) {
+    fed++;
+    const r = ep.push(toneFrame(i < levels.length ? levels[i] : -60));
+    if (r) return [r, ep, fed];
+  }
+  return [null, ep, fed];
+}
+
+test("a short answer like \"yes\" (210 ms and 270 ms) ends the turn as end-of-turn", () => {
+  for (const dur of [210, 270]) {
+    const [reason, ep] = runLevels([[-60, 1000], [-25, dur]]);
+    assert.equal(reason, "end-of-turn", `${dur} ms yes`);
+    assert.ok(ep.speechStartFrame >= 0);
+  }
+});
+
+test("a very short click (90 ms) is still ignored", () => {
+  const [reason] = runLevels([[-60, 1000], [-25, 90]]);
+  assert.equal(reason, "no-speech");
+});
+

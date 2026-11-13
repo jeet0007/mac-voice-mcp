@@ -4,7 +4,7 @@
  *
  *   - waits for speech (≥120 ms above threshold) for up to `startTimeoutMs`
  *   - once speaking, ends the turn after `endSilenceMs` of quiet
- *   - ignores blips shorter than 300 ms (a cough, a click) and keeps listening
+ *   - ignores blips shorter than 180 ms (a cough, a click) and keeps listening
  *   - hard stop at `maxMs`
  *   - while `ignoring` (our own "mic open" chime is playing), frames are neither speech nor background
  */
@@ -28,7 +28,7 @@ export interface EndpointerOptions {
 }
 
 const ONSET_FRAMES = 4; // 120 ms of sound before we believe it's speech
-const MIN_UTTERANCE_MS = 300; // shorter bursts are treated as noise
+const MIN_UTTERANCE_MS = 180; // shorter bursts are treated as noise (a one-word "yes" is ~200 ms)
 const SETTLE_FRAMES = 3; // ignore the first 90 ms while the mic settles
 const FLOOR_WINDOW_FRAMES = 50; // background level = quietest frame of the last 1.5 s
 const STEADY_SPREAD_DB = 2.5; // sound this steady for a whole end-silence window is noise, not speech
