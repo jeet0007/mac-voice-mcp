@@ -5,6 +5,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+- **Replies are transcribed as soon as you stop talking.** voice-mcp no longer waits for the mic to close before it starts transcribing. The audio stays in memory instead of a temporary file.
+- **The Kokoro voice is loaded when a call starts and while you talk,** so a reply doesn't start with a cold voice.
+
 ## [0.9.0] - 2026-11-03
 
 ### Added
