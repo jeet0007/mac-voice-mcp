@@ -5,7 +5,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, symlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, symlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -160,7 +160,7 @@ test("if the built-in voice fails, the tone is all there is, and the failure is 
   assert.deepEqual(sb.events().slice(0, 1), ["Basso 0.6"]);
 });
 
-test("the notes for Claude: spoken now, tone only inside the window, nothing when no line was said", () => {
+test("the notes for Claude: spoken now, tone only inside the window, and a tone-only note whenever no line was said", () => {
   const sb = sandbox();
   const out = JSON.parse(
     inServer(
@@ -168,13 +168,18 @@ test("the notes for Claude: spoken now, tone only inside the window, nothing whe
       `console.log(JSON.stringify([
         cues.errorNote({ spoken: true, line: "L", repeat: false }),
         cues.errorNote({ spoken: false, line: "L", repeat: true }),
-        cues.errorNote({ spoken: false, line: "L", repeat: false }),
+        cues.errorNote({ spoken: false, line: "L", repeat: false, toned: true }),
+        cues.errorNote({ spoken: false, line: "L", repeat: false, toned: false }),
       ]))`,
     ),
   );
   assert.match(out[0], /^voice-mcp note: the user already heard this out loud \("L"\)\. Do not say it again by voice, and do not call speak_and_listen again until it is fixed\. Explain the fix on screen\.$/);
   assert.match(out[1], /^voice-mcp note: the user heard an error tone, and the spoken explanation earlier\. /);
-  assert.equal(out[2], null);
+  const loop = /Do not say it by voice, and do not call speak_and_listen again until it is fixed\. Explain the fix on screen\.$/;
+  assert.match(out[2], /^voice-mcp note: the user heard an error tone only, with no spoken explanation\. /);
+  assert.match(out[2], loop);
+  assert.match(out[3], /^voice-mcp note: voice can't work right now, and nothing was said out loud\. /);
+  assert.match(out[3], loop);
 });
 
 // --- Through the real server -------------------------------------------------------------------
@@ -210,7 +215,7 @@ test("words heard: Pop at 0.5 and no Purr", MAC, async () => {
 test("a sound but no words: Pop at once, then Purr", MAC, async () => {
   const sb = sandbox();
   fakeModel(sb.cache);
-  const client = await connect(sb.env({ STUB_TRANSCRIPT: "[gunshot]" }));
+  const client = await connect(sb.env({ STUB_TRANSCRIPT: "[gunshot]", STUB_STT_DELAY_MS: "300" })); // the words take a moment, so the Pop is heard first
   try {
     const r = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Ready?" } });
     assert.match(text(r), /picked up a sound but no words/);
@@ -365,6 +370,102 @@ test("the server instructions carry the one-line rule and stay under 2 KB", asyn
     assert.match(instructions, /voice-mcp note/);
     assert.match(instructions.replace(/\s+/g, " "), /already heard an error means: explain on screen, don't retry by voice/);
     assert.ok(Buffer.byteLength(instructions) < 2048, `${Buffer.byteLength(instructions)} bytes`);
+  } finally {
+    await client.close();
+  }
+});
+
+// --- Review fixes: tone-only note, another session's mic, Pop then Purr ---------------------------
+
+test("spoken errors off: the tone plays and Claude still gets a note, so it doesn't retry by voice", MAC, async () => {
+  const sb = sandbox();
+  fakeModel(sb.cache);
+  const client = await connect(sb.env({ STUB_SCENARIO: "zero", VOICE_MCP_START_TIMEOUT_SECONDS: "2", VOICE_MCP_SPOKEN_ERRORS: "0" }));
+  try {
+    const r = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Hello?" } });
+    assert.equal(r.isError, true);
+    assert.match(text(r), /microphone access is blocked/);
+    assert.match(text(r), /voice-mcp note: the user heard an error tone only, with no spoken explanation\. Do not say it by voice, and do not call speak_and_listen again until it is fixed/);
+    assert.deepEqual(sb.events().filter((e) => !e.startsWith("say Hello")), ["Tink 0.6", "rec stopped", "Basso 0.6"]);
+  } finally {
+    await client.close();
+  }
+});
+
+test("another session holds the mic: a setup error gets the tone only, no line, and a tone-only note", MAC, async () => {
+  const sb = sandbox({ tools: ["whisper-cli", "whisper-server"] }); // no recorder
+  fakeModel(sb.cache);
+  mkdirSync(sb.cache, { recursive: true });
+  writeFileSync(path.join(sb.cache, "mic.lock"), JSON.stringify({ pid: process.pid, since: Date.now() }));
+  const client = await connect(sb.env());
+  try {
+    const r = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Hello there?" } });
+    assert.equal(r.isError, true);
+    assert.match(text(r), /voice-mcp is not set up yet/);
+    assert.match(text(r), /voice-mcp note: the user heard an error tone only/);
+    assert.doesNotMatch(text(r), /already heard this out loud/);
+    assert.deepEqual(sb.events(), ["Basso 0.6"], "no spoken line while another session may be listening");
+    assert.doesNotMatch(sb.readLog(), /^speak /m);
+  } finally {
+    await client.close();
+  }
+});
+
+test("another session holds the mic: the ready line after an install is not spoken", MAC, async () => {
+  const sb = sandbox();
+  fakeModel(sb.cache);
+  writeFileSync(path.join(sb.cache, "mic.lock"), JSON.stringify({ pid: process.pid, since: Date.now() }));
+  const client = await connect(sb.env());
+  try {
+    const r = await client.callTool({ name: "voice_setup", arguments: { install: true } });
+    assert.match(text(r), /READY/);
+    await new Promise((res) => setTimeout(res, 400));
+    assert.doesNotMatch(sb.readLog(), /^speak /m);
+  } finally {
+    await client.close();
+  }
+});
+
+test("a turn-end error line is spoken while we still hold the mic lock", MAC, async () => {
+  const sb = sandbox();
+  fakeModel(sb.cache);
+  const lock = path.join(sb.cache, "mic.lock");
+  const client = await connect(sb.env({ STUB_SCENARIO: "zero", VOICE_MCP_START_TIMEOUT_SECONDS: "2", STUB_SAY_MS: "600", STUB_EXIT_DELAY_MS: "300" }));
+  try {
+    const held = [];
+    const watch = setInterval(() => {
+      const log = sb.readLog();
+      // the error line is the one that starts after the first speak-end (Claude's own line)
+      held.push({ speaking: /speak "I only hear silence/.test(log) === false && /tts-start/.test(log), lock: existsSync(lock), log });
+    }, 20);
+    await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Hello?" } });
+    clearInterval(watch);
+    const lines = sb.readLog().split("\n");
+    const start = lines.findIndex((l) => l.startsWith('speak "I only hear silence'));
+    assert.ok(start >= 0, "the line was spoken");
+    // from the moment the error line is logged as started until the call returned, the lock was held
+    const during = held.filter((h) => h.log.includes('speak "I only hear silence') && !h.log.includes('speak-end "I only hear silence'));
+    assert.ok(during.length > 0, "sampled while the line was playing");
+    assert.ok(during.every((h) => h.lock), "the mic lock was held while the line played");
+    assert.equal(existsSync(lock), false, "released after the line");
+  } finally {
+    await client.close();
+  }
+});
+
+test("a sound but no words: Purr starts within 500 ms of the Pop, even if the Pop is still playing, and the Pop is stopped", MAC, async () => {
+  const sb = sandbox();
+  fakeModel(sb.cache);
+  const client = await connect(sb.env({ STUB_TRANSCRIPT: "[gunshot]", STUB_AFPLAY_SLOW: "Pop:1500", STUB_STT_DELAY_MS: "300" }));
+  try {
+    await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Ready?" } });
+    await new Promise((res) => setTimeout(res, 800));
+    const times = Object.fromEntries(
+      readFileSync(`${sb.log}.afplay-times`, "utf8").trim().split("\n").map((l) => l.split(" ")).filter(([n]) => n === "Pop" || n === "Purr"),
+    );
+    assert.ok(times.Pop && times.Purr, "both sounds played: " + readFileSync(`${sb.log}.afplay-times`, "utf8"));
+    const gap = Number(times.Purr) - Number(times.Pop);
+    assert.ok(gap < 500, `Purr started ${gap} ms after Pop`);
   } finally {
     await client.close();
   }

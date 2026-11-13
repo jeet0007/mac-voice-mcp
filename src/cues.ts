@@ -10,6 +10,7 @@
 import { existsSync } from "node:fs";
 import { speakBuiltIn } from "./audio.js";
 import { CONFIG, debug, IS_MAC } from "./config.js";
+import { acquireMicLock, MicBusyError } from "./lock.js";
 import { run, sleep, which } from "./proc.js";
 
 export type Cue = "open" | "close" | "no-speech" | "error";
@@ -44,21 +45,21 @@ export const REPEAT_WINDOW_MS = 10 * 60_000;
 const AFTER_TONE_MS = 200;
 
 /** Play a system sound; true when it played. A missing sound or player is never fatal. macOS only. */
-export async function playSound(name: string, volume: number): Promise<boolean> {
+export async function playSound(name: string, volume: number, signal?: AbortSignal): Promise<boolean> {
   const sound = `/System/Library/Sounds/${name}.aiff`;
   if (!IS_MAC || !existsSync(sound)) return false;
   try {
-    await run(which("afplay") ?? "/usr/bin/afplay", ["-v", String(volume), sound], { timeoutMs: 3000 });
+    await run(which("afplay") ?? "/usr/bin/afplay", ["-v", String(volume), sound], { timeoutMs: 3000, signal });
     return true;
   } catch {
     return false;
   }
 }
 
-/** One cue's tone. VOICE_MCP_CHIME=0 turns every tone off. */
-export async function cue(c: Cue): Promise<boolean> {
+/** One cue's tone. VOICE_MCP_CHIME=0 turns every tone off. Aborting `signal` stops the sound if it is still playing. */
+export async function cue(c: Cue, signal?: AbortSignal): Promise<boolean> {
   if (!CONFIG.chime) return false;
-  return playSound(CUES[c].sound, CUES[c].volume);
+  return playSound(CUES[c].sound, CUES[c].volume, signal);
 }
 
 const lastSpoken = new Map<SpokenError, number>();
@@ -74,6 +75,10 @@ export interface Announced {
   line: string;
   /** Spoken earlier in the window, so only the tone played. */
   repeat: boolean;
+  /** The error tone played. */
+  toned?: boolean;
+  /** Another session holds the mic, so only the tone played: a line would be recorded as that user's words. */
+  micElsewhere?: boolean;
 }
 
 /**
@@ -87,16 +92,58 @@ export async function announceError(kind: SpokenError, opts: { now?: number } = 
   const before = lastSpoken.get(kind);
   const repeat = before !== undefined && now - before < REPEAT_WINDOW_MS;
   const toned = await cue("error");
-  if (!CONFIG.spokenErrors || repeat) return { spoken: false, line, repeat };
+  if (!CONFIG.spokenErrors || repeat) return { spoken: false, line, repeat, toned };
   if (toned) await sleep(AFTER_TONE_MS);
   try {
     await speakBuiltIn(line);
   } catch (err) {
     debug("spoken error line failed:", err instanceof Error ? err.message : err);
-    return { spoken: false, line, repeat: false };
+    return { spoken: false, line, repeat: false, toned };
   }
   lastSpoken.set(kind, now);
-  return { spoken: true, line, repeat: false };
+  return { spoken: true, line, repeat: false, toned };
+}
+
+/**
+ * Take the mic lock without waiting. Held: its release function. Someone else's: null, because anything
+ * we said now would be recorded and transcribed as that other session's user.
+ */
+async function micIfFree(): Promise<(() => void) | null> {
+  try {
+    return await acquireMicLock({ waitMs: 0 });
+  } catch (err) {
+    if (err instanceof MicBusyError) return null;
+    throw err;
+  }
+}
+
+/**
+ * announceError for a moment when we don't hold the mic lock (setup checks before a turn). Another
+ * session holds it: the tone only, no line. Otherwise the line is spoken with the lock held, so no other
+ * session can open the mic over it.
+ */
+export async function announceErrorIfMicFree(kind: SpokenError): Promise<Announced> {
+  const release = await micIfFree();
+  if (!release) {
+    const toned = await cue("error");
+    return { spoken: false, line: SPOKEN_ERRORS[kind], repeat: false, toned, micElsewhere: true };
+  }
+  try {
+    return await announceError(kind);
+  } finally {
+    release();
+  }
+}
+
+/** Say one fixed line only if no other session holds the mic (the lock is held while it plays). */
+export async function sayLineIfMicFree(line: string): Promise<boolean> {
+  const release = await micIfFree();
+  if (!release) return false;
+  try {
+    return await sayLine(line);
+  } finally {
+    release();
+  }
 }
 
 /** Say one fixed line in the built-in voice (never throws). */
@@ -124,5 +171,10 @@ export function errorNote(a: Announced): string | null {
       "and do not call speak_and_listen again until it is fixed. Explain the fix on screen."
     );
   }
-  return null;
+  // No line was said (spoken errors are off, another session has the mic, or the voice failed): without this
+  // note Claude could retry by voice in a loop.
+  return (
+    (a.toned ? "voice-mcp note: the user heard an error tone only, with no spoken explanation. " : "voice-mcp note: voice can't work right now, and nothing was said out loud. ") +
+    "Do not say it by voice, and do not call speak_and_listen again until it is fixed. Explain the fix on screen."
+  );
 }

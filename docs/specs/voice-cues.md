@@ -32,7 +32,7 @@ Durations measured from the files (`afinfo`). Volumes are `afplay -v`.
 | **Mic open** (recording really started, after `MIC_WARMUP_MS`) | Tink | 0.6 | 0.56 s | short, high, "go ahead" | none |
 | **Mic closed, words were heard** (end of speech) | Pop | 0.5 | 1.6 s (soft decay) | familiar "got it" | volume 0.6 to 0.5: Pop's tail is long and the user may already be listening for Claude |
 | **Mic closed, no speech** (start timeout: user never spoke) | Purr | 0.45 | 0.76 s | low and soft: "nothing came in", clearly unlike Pop, not a failure | new |
-| **Heard a sound, but whisper found no words** (cough, door) | Pop at once, then Purr 0.45 when the empty transcript is known | | | the Pop is instant feedback that recording stopped; Purr says it didn't count | new |
+| **Heard a sound, but whisper found no words** (cough, door) | Pop at once, then Purr 0.45 the moment the empty transcript is known (a Pop still playing is stopped, never waited for) | | | the Pop is instant feedback that recording stopped; Purr says it didn't count | new |
 | **Error** (anything in the table below, except a busy mic) | Basso | 0.6 | 0.77 s | low "no", the standard macOS error tone | new |
 | Thinking tick (calls), work-listener "got it" | unchanged | | | | none |
 
@@ -147,3 +147,13 @@ Small, optional.
 
 New sound files, user-pickable sounds, volume settings, speaking errors through Kokoro, localisation of the
 spoken lines (English only in v1), sounds for mute and hang-up.
+
+## Review rules (added after the Privacy and UX review)
+
+- **No line without a note.** Whenever the tone played but no line was said (VOICE_MCP_SPOKEN_ERRORS=0, another
+  session holds the mic, or `say` failed), Claude still gets a "voice-mcp note": the user heard an error tone
+  only; explain on screen and don't call `speak_and_listen` again until it is fixed.
+- **Another session's open mic.** Before any error line or the ready line, the mic lock is taken without waiting.
+  Held elsewhere: the tone only (errors) or nothing (ready line), never a spoken line. Free: the line is spoken
+  with the lock held, so no other session opens its mic over it. At the end of a turn the line is spoken after the
+  recorder has exited and before the lock is released.

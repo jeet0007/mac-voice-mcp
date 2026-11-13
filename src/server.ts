@@ -30,7 +30,7 @@ import {
   STILL_ON_CALL,
   VOICE_MODE_PROMPT,
 } from "./texts.js";
-import { READY_LINE, sayLine } from "./cues.js";
+import { READY_LINE, sayLineIfMicFree } from "./cues.js";
 import { exclusive, finishSpeaking, preflight, speakAndListen, trackSpeaking } from "./voice.js";
 
 /** The longest `listen` may wait: the Cowork bridge drops tool calls after 60 s. */
@@ -210,7 +210,7 @@ export function createServer(): StdioMcpServer {
           await finishSpeaking(); // its checks use the speaker too
           const done = await runSetupFlow({ install: install === true, kokoro: kokoro === true, bubble: bubble === true, onProgress: progress });
           // The first READY after an install: one short line out loud, once per server process.
-          if (done.announceReady) trackSpeaking(sayLine(READY_LINE));
+          if (done.announceReady) trackSpeaking(sayLineIfMicFree(READY_LINE));
           return done;
         });
         return { content: [{ type: "text", text: outcome.report }] };
