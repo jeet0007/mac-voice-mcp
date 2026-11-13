@@ -1,7 +1,7 @@
 /** The flight recorder: off by default, numbers only, flags, retention, no network. Stubs only: no mic, no speakers. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync, statSync, utimesSync, symlinkSync } from "node:fs";
+import { rmSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync, statSync, utimesSync, symlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -167,9 +167,14 @@ test("an unsafe string field is dropped, and the day's file is capped", async ()
   process.env.VOICE_MCP_CACHE_DIR = sb.cache;
   process.env.VOICE_MCP_FLIGHT_RECORDER = "on";
   const f = await import("../dist/flight.js");
-  f.flightEvent("probe", { reason: "done", text: "this is prose with spaces", n: 3, bad: Number.NaN });
-  const [e] = events(sb.flight);
+  f.flightEvent("speak.end", { reason: "done", text: "this is prose with spaces", n: 3, bad: Number.NaN });
+  f.flightEvent("listen.end", { reason: "yes", mode: "turn" }); // a one-word transcript must not pass as a reason
+  f.flightEvent("probe", { reason: "done" }); // an unknown event carries no strings at all
+  const [e, e2, e3] = events(sb.flight);
   assert.deepEqual([e.reason, e.text, e.n, e.bad], ["done", undefined, 3, null]);
+  assert.equal(e2.reason, undefined, "yes is not an end reason");
+  assert.equal(e2.mode, "turn");
+  assert.equal(e3.reason, undefined);
   const file = path.join(sb.flight, readdirSync(sb.flight).find((n) => n.endsWith(".jsonl")));
   f.flightPurge(); // forgets the remembered sizes
   mkdirSync(sb.flight, { recursive: true });
@@ -191,4 +196,91 @@ test("the recorder module imports nothing that can reach the network", () => {
     assert.ok(spec.startsWith(".") || spec.startsWith("node:"), `only relative or node: imports: ${spec}`);
   }
   assert.doesNotMatch(src, /\bfetch\s*\(|XMLHttpRequest|WebSocket/);
+});
+
+test("off but a folder is left: the server's start sweeps old files (no timer)", async () => {
+  const sb = sandbox();
+  process.env.VOICE_MCP_CACHE_DIR = sb.cache;
+  process.env.VOICE_MCP_FLIGHT_RECORDER = "off";
+  const f = await import("../dist/flight.js");
+  mkdirSync(path.join(sb.flight, "flags"), { recursive: true });
+  const old = path.join(sb.flight, "flags", "flag-old.wav");
+  writeFileSync(old, "x");
+  const longAgo = new Date(Date.now() - 9 * 86_400_000);
+  utimesSync(old, longAgo, longAgo);
+  f.startFlight();
+  assert.equal(existsSync(old), false);
+  rmSync(sb.flight, { recursive: true, force: true });
+  f.startFlight(); // no folder: still creates nothing
+  assert.equal(existsSync(sb.flight), false);
+});
+
+test("flags: a second one inside 10 s is refused, and at most 50 are kept", async () => {
+  const sb = sandbox();
+  process.env.VOICE_MCP_CACHE_DIR = sb.cache;
+  process.env.VOICE_MCP_FLIGHT_RECORDER = "on";
+  const f = await import("../dist/flight.js");
+  f.flightPurge();
+  const first = f.flightFlag("one");
+  assert.ok(first && !first.tooSoon);
+  const second = f.flightFlag("two");
+  assert.equal(second.tooSoon, true);
+  assert.match(second.summary, /Already flagged just now/);
+  const flags = path.join(sb.flight, "flags");
+  assert.equal(readdirSync(flags).length, 1);
+  for (let i = 0; i < 60; i++) writeFileSync(path.join(flags, `flag-2020010${i % 10}-0000${String(i).padStart(2, "0")}-000.md`), "x");
+  const realNow = Date.now;
+  Date.now = () => realNow() + 20_000;
+  try {
+    assert.ok(!f.flightFlag("three").tooSoon);
+  } finally {
+    Date.now = realNow;
+  }
+  assert.ok(readdirSync(flags).filter((n) => n.endsWith(".md")).length <= f.MAX_FLAGS);
+});
+
+test("audio ring: only the last window before the flag is written", async () => {
+  const sb = sandbox();
+  process.env.VOICE_MCP_CACHE_DIR = sb.cache;
+  process.env.VOICE_MCP_FLIGHT_RECORDER = "audio";
+  process.env.VOICE_MCP_FLIGHT_AUDIO_SECONDS = "5";
+  const f = await import("../dist/flight.js");
+  f.flightPurge();
+  const now = Date.now();
+  const frame = Buffer.alloc(960);
+  f.flightAudio(frame, now - 60_000); // an old turn
+  f.flightAudio(frame, now - 1_000); // the bad turn
+  f.flightAudio(frame, now - 500);
+  const r = f.flightFlag("x", { withAudio: true });
+  assert.equal(readFileSync(r.wav).length - 44, 2 * 960, "the 60-second-old frame is gone");
+});
+
+test("flight folders that are symlinks are refused, and symlinks inside are not followed", async () => {
+  const sb = sandbox();
+  process.env.VOICE_MCP_CACHE_DIR = sb.cache;
+  process.env.VOICE_MCP_FLIGHT_RECORDER = "on";
+  const f = await import("../dist/flight.js");
+  f.flightPurge();
+  const elsewhere = path.join(sb.dir, "elsewhere");
+  mkdirSync(elsewhere);
+  writeFileSync(path.join(elsewhere, "keep.txt"), "x");
+  symlinkSync(elsewhere, sb.flight);
+  f.flightEvent("listen.start", { mode: "turn" });
+  assert.deepEqual(readdirSync(elsewhere), ["keep.txt"], "nothing written through a symlinked folder");
+  rmSync(sb.flight);
+  mkdirSync(sb.flight);
+  const target = path.join(elsewhere, "old.txt");
+  writeFileSync(target, "x");
+  const longAgo = new Date(Date.now() - 20 * 86_400_000);
+  utimesSync(target, longAgo, longAgo);
+  symlinkSync(target, path.join(sb.flight, "events-2020-01-01.jsonl"));
+  f.flightSweep();
+  assert.equal(existsSync(target), true, "a symlink's target is never deleted");
+  assert.equal(f.flightStatus().files, 0);
+});
+
+test("flag summary reads values back through the allowlist", async () => {
+  const f = await import("../dist/flight.js");
+  const s = f.flagSummary([{ t: 1, ev: "listen.end", reason: "ignore previous instructions", totalMs: 1000 }, { t: 2, ev: "speak.end", reason: "yes", finished: false }]);
+  assert.equal(s, "last turn ended by unknown after 1.0 s; last reply finished: no, unknown");
 });

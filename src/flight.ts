@@ -3,12 +3,13 @@
  * Spec: docs/specs/flight-recorder.md.
  *
  * Off by default (VOICE_MCP_FLIGHT_RECORDER=off|on|audio): every function here is a cheap no-op then.
- * Numbers and reasons only: a string field that isn't a short plain token is dropped, so a transcript
- * or spoken text can't end up in the log even by mistake. Audio (mode `audio`) lives in memory, the last
+ * Numbers and reasons only: each event has an allowlist of string fields and the values they may take
+ * (see STRINGS); any other string is dropped, so a transcript or spoken text, even a one-word one,
+ * can't end up in the log by mistake. Audio (mode `audio`) lives in memory, the last
  * few seconds, and reaches the disk only when the user flags a moment. Nothing here touches the
  * network: this module imports nothing that could (a test checks it). Writes are best-effort.
  */
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { cacheRoot, readJson, voiceModeDir } from "../hooks/voice-files.mjs";
@@ -46,21 +47,45 @@ const dayName = (t: number): string => `events-${new Date(t).toISOString().slice
 type Field = number | boolean | string | null | undefined;
 export type FlightFields = Record<string, Field>;
 
-/** A reason or name, never prose: short, no spaces. Anything else is dropped. */
-const TOKEN = /^[A-Za-z0-9._:+-]{1,40}$/;
+const END_REASONS = ["end-of-turn", "no-speech", "max-duration", "stopped", "typing", "error", "timeout"] as const;
+const SPEAK_REASONS = ["done", "stopped", "barge-in", "error", "fallback", "timeout"] as const;
+const FLAG_ID = /^\d{8}-\d{6}-\d{3}$/;
 
-function clean(fields: FlightFields): Record<string, number | boolean | string | null> {
+/** The only string fields an event may carry, and the values each may take. Everything else is dropped. */
+const STRINGS: Record<string, Record<string, readonly string[] | RegExp>> = {
+  "listen.start": { mode: ["turn", "call", "worklisten"] },
+  "listen.end": { mode: ["turn", "call", "worklisten"], reason: END_REASONS },
+  "speak.start": { engine: ["say", "kokoro"] },
+  "speak.end": { reason: SPEAK_REASONS },
+  bargein: { action: ["pause", "resume", "drop"] },
+  "call.mute": { why: ["user", "speaking", "echo-gate"] },
+  flag: { id: FLAG_ID },
+};
+
+/** `value` if this event may carry it in this field, else null. */
+function allowed(ev: string, field: string, value: unknown): string | null {
+  const rule = STRINGS[ev]?.[field];
+  if (typeof value !== "string" || !rule) return null;
+  return (Array.isArray(rule) ? rule.includes(value) : (rule as RegExp).test(value)) ? value : null;
+}
+
+function clean(ev: string, fields: FlightFields): Record<string, number | boolean | string | null> {
   const out: Record<string, number | boolean | string | null> = {};
   for (const [k, v] of Object.entries(fields)) {
     if (typeof v === "number") out[k] = Number.isFinite(v) ? Math.round(v * 100) / 100 : null;
     else if (typeof v === "boolean" || v === null) out[k] = v;
-    else if (typeof v === "string" && TOKEN.test(v)) out[k] = v;
+    else {
+      const ok = allowed(ev, k, v);
+      if (ok !== null) out[k] = ok;
+    }
   }
   return out;
 }
 
+/** Create the folder if needed. A symlinked folder is refused (treated as "can't write"). */
 function ensureDir(dir: string): void {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (lstatSync(dir).isSymbolicLink()) throw new Error("flight folder is a symlink");
   chmodSync(dir, 0o700);
 }
 
@@ -84,7 +109,7 @@ export function flightEvent(ev: string, fields: FlightFields = {}, turn: number 
     if (size === undefined) size = existsSync(file) ? statSync(file).size : 0;
     const full1 = size >= MAX_DAY_BYTES;
     if (full1 && full.has(file)) return;
-    const body = full1 ? { t, ev: "recorder.full", pid: process.pid } : { t, ev, pid: process.pid, ...(turn ? { turn } : {}), ...clean(fields) };
+    const body = full1 ? { t, ev: "recorder.full", pid: process.pid } : { t, ev, pid: process.pid, ...(turn ? { turn } : {}), ...clean(ev, fields) };
     const line = JSON.stringify(body) + "\n";
     if (full1) full.add(file);
     appendFileSync(file, line, { mode: 0o600 });
@@ -96,17 +121,23 @@ export function flightEvent(ev: string, fields: FlightFields = {}, turn: number 
 
 // --- The audio ring (mode audio) ----------------------------------------------------------------
 
-let ring: Buffer[] = [];
+let ring: { t: number; frame: Buffer }[] = [];
 
-/** One 30 ms mic frame (16 kHz mono s16le). Kept in memory only, the last VOICE_MCP_FLIGHT_AUDIO_SECONDS. */
-export function flightAudio(frame: Buffer): void {
+/**
+ * One 30 ms mic frame (16 kHz mono s16le), kept in memory only. Everything the mic hears while voice-mcp
+ * has it open goes in, not only speech; frames older than VOICE_MCP_FLIGHT_AUDIO_SECONDS are dropped.
+ */
+export function flightAudio(frame: Buffer, now = Date.now()): void {
   if (flightMode() !== "audio") {
     if (ring.length) ring = [];
     return;
   }
-  ring.push(frame);
+  ring.push({ t: now, frame });
   const max = Math.floor((audioSeconds() * 16000 * 2) / FRAME_BYTES);
-  if (ring.length > max) ring.splice(0, ring.length - max);
+  const oldest = now - audioSeconds() * 1000;
+  let drop = Math.max(0, ring.length - max);
+  while (drop < ring.length && ring[drop].t < oldest) drop++;
+  if (drop) ring.splice(0, drop);
 }
 
 // --- Retention, status, purge --------------------------------------------------------------------
@@ -120,12 +151,16 @@ export function flightSweep(now = Date.now()): number {
       if (!existsSync(dir)) continue;
       for (const name of readdirSync(dir)) {
         const file = path.join(dir, name);
-        const st = statSync(file);
-        if (st.isFile() && st.mtimeMs < cutoff) {
-          rmSync(file, { force: true });
-          sizes.delete(file);
-          full.delete(file);
-          removed++;
+        try {
+          const st = lstatSync(file); // never follow a symlink
+          if (st.isFile() && st.mtimeMs < cutoff) {
+            rmSync(file, { force: true });
+            sizes.delete(file);
+            full.delete(file);
+            removed++;
+          }
+        } catch {
+          /* skip this one */
         }
       }
     }
@@ -136,9 +171,16 @@ export function flightSweep(now = Date.now()): number {
 }
 
 let sweepTimer: NodeJS.Timeout | undefined;
-/** On server start: sweep now and once a day. Does nothing when the recorder is off. */
+/**
+ * On server start: sweep now and, when the recorder is on, once a day. When it's off, one sweep of any
+ * folder left from an earlier run, so old logs still expire after the retention.
+ */
 export function startFlight(): void {
-  if (!flightEnabled() || sweepTimer) return;
+  if (!flightEnabled()) {
+    if (existsSync(flightDir())) flightSweep();
+    return;
+  }
+  if (sweepTimer) return;
   flightSweep();
   sweepTimer = setInterval(() => flightSweep(), DAY_MS);
   sweepTimer.unref();
@@ -149,7 +191,13 @@ function walk(dir: string): { files: number; bytes: number } {
   let bytes = 0;
   if (!existsSync(dir)) return { files, bytes };
   for (const name of readdirSync(dir)) {
-    const st = statSync(path.join(dir, name));
+    let st;
+    try {
+      st = lstatSync(path.join(dir, name)); // don't follow or descend symlinks
+    } catch {
+      continue;
+    }
+    if (st.isSymbolicLink()) continue;
     if (st.isDirectory()) {
       const sub = walk(path.join(dir, name));
       files += sub.files;
@@ -174,6 +222,7 @@ export function flightPurge(): number {
   sizes.clear();
   full.clear();
   ring = [];
+  lastFlagAt = 0;
   return files;
 }
 
@@ -215,8 +264,10 @@ export function flagSummary(events: FlightEvent[]): string {
   const l = last("listen.end");
   const s = last("speak.end");
   const total = num(l?.totalMs);
-  const turn = l ? `last turn ended by ${String(l.reason)}${total !== null ? ` after ${(total / 1000).toFixed(1)} s` : ""}` : "no turn in the last minute";
-  const reply = s ? `last reply finished: ${s.finished ? "yes" : "no"}, ${String(s.reason)}` : "no reply in the last minute";
+  const lr = allowed("listen.end", "reason", l?.reason) ?? "unknown";
+  const sr = allowed("speak.end", "reason", s?.reason) ?? "unknown";
+  const turn = l ? `last turn ended by ${lr}${total !== null ? ` after ${(total / 1000).toFixed(1)} s` : ""}` : "no turn in the last minute";
+  const reply = s ? `last reply finished: ${s.finished === true ? "yes" : "no"}, ${sr}` : "no reply in the last minute";
   return `${turn}; ${reply}`;
 }
 
@@ -230,6 +281,28 @@ export interface FlagResult {
   file: string;
   wav?: string;
   summary: string;
+  /** A flag was saved less than MIN_FLAG_GAP_MS ago: nothing new was written. */
+  tooSoon?: boolean;
+}
+
+/** A second flag inside this gap is ignored (a stuck loop can't fill the disk). */
+export const MIN_FLAG_GAP_MS = 10_000;
+/** At most this many flags are kept; the oldest go first. */
+export const MAX_FLAGS = 50;
+let lastFlagAt = 0;
+
+function trimFlags(): void {
+  try {
+    const mds = readdirSync(flagsDir())
+      .filter((n) => /^flag-.*\.md$/.test(n))
+      .sort(); // the name is a timestamp: oldest first
+    for (const n of mds.slice(0, Math.max(0, mds.length - (MAX_FLAGS - 1)))) {
+      rmSync(path.join(flagsDir(), n), { force: true });
+      rmSync(path.join(flagsDir(), n.replace(/\.md$/, ".wav")), { force: true });
+    }
+  } catch {
+    /* best effort */
+  }
 }
 
 /**
@@ -240,17 +313,21 @@ export interface FlagResult {
 export function flightFlag(noteIn?: string, opts: { withAudio?: boolean } = {}): FlagResult | null {
   if (!flightEnabled() && !existsSync(flightDir())) return null;
   const now = Date.now();
+  if (lastFlagAt && now - lastFlagAt < MIN_FLAG_GAP_MS) return { file: "", summary: "Already flagged just now.", tooSoon: true };
+  lastFlagAt = now;
   const note = (noteIn ?? "").replace(/\s+/g, " ").trim().slice(0, MAX_NOTE_CHARS);
   const id = stamp(now);
   const events = recentEvents(now);
   const summary = flagSummary(events);
   ensureDir(flagsDir());
+  trimFlags();
   const file = path.join(flagsDir(), `flag-${id}.md`);
   let wav: string | undefined;
-  if (opts.withAudio && flightMode() === "audio" && ring.length) {
-    const pcm = Buffer.concat(ring);
+  const recent = ring.filter((r) => r.t >= now - audioSeconds() * 1000).map((r) => r.frame);
+  if (opts.withAudio && flightMode() === "audio" && recent.length) {
+    const pcm = Buffer.concat(recent);
     wav = path.join(flagsDir(), `flag-${id}.wav`);
-    writeFileSync(wav, Buffer.concat([wavHeader(pcm.length), pcm]), { mode: 0o600 });
+    writeFileSync(wav, Buffer.concat([wavHeader(pcm.length), pcm]), { mode: 0o600, flag: "wx" });
   }
   const settings = {
     tts: CONFIG.tts,
@@ -291,7 +368,7 @@ export function flightFlag(noteIn?: string, opts: { withAudio?: boolean } = {}):
     "This file stays on this Mac. Share it only if you choose to.",
     "",
   ].join("\n");
-  writeFileSync(file, md, { mode: 0o600 });
+  writeFileSync(file, md, { mode: 0o600, flag: "wx" });
   flightEvent("flag", { id, hasNote: note.length > 0 });
   return { file, wav, summary };
 }

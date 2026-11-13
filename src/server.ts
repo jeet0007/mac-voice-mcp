@@ -182,8 +182,9 @@ export function createServer(): StdioMcpServer {
     {
       title: "Flag a moment",
       description:
-        "Save the last minute of what voice-mcp did (levels, why turns ended, whether speech finished: no transcripts) to a local file, " +
-        "when the user says a voice turn went wrong. Only works when the user turned the flight recorder on. Returns the file's path.",
+        "Call only when the user explicitly asks to flag or report a bad voice turn; never on your own. " +
+        "Saves the last minute of what voice-mcp did (levels, why turns ended, whether speech finished: no transcripts) to a local file. " +
+        "Only works when the user turned the flight recorder on. Returns the file's path.",
       inputSchema: { note: z.string().max(500).optional().describe("Optional: what went wrong, in the user's words.") },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
@@ -194,6 +195,7 @@ export function createServer(): StdioMcpServer {
       try {
         const flag = flightFlag(note, { withAudio: flightMode() === "audio" });
         if (!flag) return reply("Nothing to flag yet.", [], true);
+        if (flag.tooSoon) return reply("Already flagged just now.");
         return reply(`Flagged. Saved on this Mac: ${flag.file}${flag.wav ? ` (audio: ${flag.wav})` : ""}\n${flag.summary}`);
       } catch (err) {
         return failed("flag", err);

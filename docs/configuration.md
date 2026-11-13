@@ -57,7 +57,7 @@ Off by default. An opt-in, on-device log for "why was that turn cut off?": numbe
 | `VOICE_MCP_FLIGHT_DAYS` | `7` | Days to keep logs and flags, `1` to `30`. |
 | `VOICE_MCP_FLIGHT_AUDIO_SECONDS` | `30` | Length of the in-memory audio ring, `5` to `60`. |
 
-Commands: `mac-voice-mcp flag ["note"]` saves the last minute to `flight/flags/`; `mac-voice-mcp flight status` shows what is kept; `mac-voice-mcp flight purge` deletes it all. Claude can also call the `flag` tool when you say a turn went wrong. `doctor` mentions it when it's on. (`VOICE_MCP_RECORDER` is the SoX/ffmpeg choice, unrelated.)
+Commands: `mac-voice-mcp flag ["note"]` saves the last minute to `flight/flags/`; `mac-voice-mcp flight status` shows what is kept; `mac-voice-mcp flight purge` deletes it all. Claude can also call the `flag` tool, only when you ask it to; the note it writes is free text and can contain words you said. A running server's in-memory audio is not cleared by `flight purge`: restart voice-mcp to drop it. Flags: one per 10 seconds, 50 kept. `doctor` mentions it when it's on. (`VOICE_MCP_RECORDER` is the SoX/ffmpeg choice, unrelated.)
 
 ## Calls
 

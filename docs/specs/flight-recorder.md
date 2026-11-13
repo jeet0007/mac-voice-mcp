@@ -41,7 +41,7 @@ When it is on, `doctor` says so, with the folder.
 - Events: `events-YYYY-MM-DD.jsonl`, one JSON object per line.
 - Flags: `flags/flag-<timestamp>.md`, and `flags/flag-<timestamp>.wav` when audio is on.
 - Retention: on server start and once a day, files older than `VOICE_MCP_FLIGHT_DAYS` are deleted. Each day's
-  event file is capped at 10 MB; past that, events are dropped for the day and one `recorder.full` line is written.
+  event file is capped at about 10 MB (per process); past that, events are dropped for the day and one `recorder.full` line is written.
 - Writes are best-effort: a failed write never breaks a turn.
 
 ## Events
@@ -61,7 +61,7 @@ Every line: `t` (ms since epoch), `ev`, `pid`, and `turn` (a per-process counter
 | `stop.seen` | a stop request ends speech or listening | `stopAt`, `ownStartAt` |
 | `flag` | user flagged a moment | `id`, `hasNote` |
 
-No event carries transcript text, spoken text, file paths of audio, or tool arguments.
+String fields are an allowlist per event (reasons, engine, mode, action, why, the flag id); any other string is dropped, so even a one-word transcript can't land in a field. No event carries transcript text, spoken text, file paths of audio, or tool arguments.
 
 ## Flagging
 
