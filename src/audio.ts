@@ -396,6 +396,12 @@ export interface ListenOptions {
    * user to talk — the "mic open" chime. While its promise is pending, the sound it makes is ignored.
    */
   onListening?: () => Promise<unknown> | void;
+  /**
+   * Called right after the recorder is spawned, with a promise that resolves once it has exited.
+   * It reaches the caller on every path (also when the turn is cancelled and listenForTurn throws),
+   * so a mic lock or a next recorder can wait for the old one to be really gone.
+   */
+  onRecorder?: (exited: Promise<void>) => void;
 }
 
 /**
@@ -445,6 +451,7 @@ export async function listenForTurn(maxSeconds: number, outFile: string | null, 
 
   let markExited!: () => void;
   const recorderExited = new Promise<void>((r) => (markExited = r));
+  opts.onRecorder?.(recorderExited);
   // Resolves with the exit code, or "decided" as soon as the turn is over and there is audio:
   // the recorder is stopped in the background, and nothing waits for it to exit.
   const exitCode = await new Promise<number | null | "decided">((resolve, reject) => {

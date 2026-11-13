@@ -56,3 +56,23 @@ test("the turn is handed back without waiting for a slow recorder to exit; the r
     delete process.env.STUB_EXIT_DELAY_MS;
   }
 });
+
+test("a turn cancelled right after the decision still hands over the recorder's exit, so nothing starts before it is gone", async () => {
+  writeFileSync(log, "");
+  process.env.STUB_EXIT_DELAY_MS = "900";
+  try {
+    let exited = null;
+    // Already aborted: the recording runs, the turn is decided, and only then is the cancel noticed
+    // (the window where listenForTurn throws before it can return `recorderExited`).
+    await assert.rejects(
+      listenForTurn(10, null, AbortSignal.abort(), { onRecorder: (e) => (exited = e) }),
+      (e) => e.name === "CancelledError" || /cancel/i.test(e.message),
+    );
+    assert.ok(exited instanceof Promise, "the caller got the exit promise even though listenForTurn threw");
+    assert.ok(!/rec exited/.test(readFileSync(log, "utf8")), "the recorder was still exiting when the cancel was thrown");
+    await exited;
+    assert.match(readFileSync(log, "utf8"), /rec stopped\nrec exited/);
+  } finally {
+    delete process.env.STUB_EXIT_DELAY_MS;
+  }
+});

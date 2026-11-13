@@ -229,11 +229,14 @@ async function turn(
     prewarmKokoro(); // no-op unless its worker was idle-stopped or recycled: the next reply isn't cold
     const tListen = Date.now();
     // The chime plays once the mic is really recording, so the first word is never lost.
-    const heard = await listenForTurn(seconds, null, signal, { onListening: () => chime("start") });
-    recorder.exited = heard.recorderExited;
+    // The exit promise is handed over right at spawn, so the mic lock outlives the recorder even when the turn is cancelled.
+    const heard = await listenForTurn(seconds, null, signal, {
+      onListening: () => chime("start"),
+      onRecorder: (exited) => (recorder.exited = exited),
+    });
     void chime("stop");
     const t1 = Date.now();
-    debug("listen:", heard);
+    debug(`listen: ${heard.reason}, ${heard.wav.length} bytes of audio, ${heard.speechSeconds.toFixed(1)} s of speech, digitalSilence=${heard.digitalSilence}`);
     const timing = (transcribedMs?: number) =>
       timingNote({ spokeMs: spoke, spoken, listenedMs: t1 - tListen, talkedSeconds: heard.speechSeconds, transcribedMs });
 
