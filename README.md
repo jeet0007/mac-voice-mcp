@@ -73,7 +73,7 @@ You need a Mac (Apple Silicon recommended) and **Node.js 22 or newer**.
 
 **3. Allow the microphone.** The first time Claude listens, macOS asks. Click **Allow**.
 
-**4. Talk.** Run `/mac-voice-mcp:talk fix the flaky login test`, or ask Claude to *"check in with me by voice when you need a decision"*. Reply after the chime.
+**4. Talk.** Run `/mac-voice-mcp:talk fix the flaky login test`, or ask Claude to *"check in with me by voice when you need a decision"*. Reply after the tick.
 Or start a call with `/mac-voice-mcp:call` and talk like on the phone; say "hang up" to end it.
 
 ### Allow voice turns without prompts
