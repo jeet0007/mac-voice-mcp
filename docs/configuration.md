@@ -49,6 +49,16 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 | `VOICE_MCP_CACHE_DIR` | `~/.cache/mac-voice-mcp` | Where models are downloaded or symlinked. |
 | `VOICE_MCP_DEBUG` | `0` | Verbose logs with per-turn timings, written to stderr. |
 
+## Flight recorder
+Off by default. An opt-in, on-device log for "why was that turn cut off?": numbers and reasons only, never transcripts or spoken text. See [Privacy and security](privacy-security.md).
+| Variable | Default | |
+|---|---|---|
+| `VOICE_MCP_FLIGHT_RECORDER` | `off` | `on`: log events to `~/.cache/mac-voice-mcp/flight/`. `audio`: also keep the last seconds of mic audio in memory, written as a WAV only when you flag a moment. |
+| `VOICE_MCP_FLIGHT_DAYS` | `7` | Days to keep logs and flags, `1` to `30`. |
+| `VOICE_MCP_FLIGHT_AUDIO_SECONDS` | `30` | Length of the in-memory audio ring, `5` to `60`. |
+
+Commands: `mac-voice-mcp flag ["note"]` saves the last minute to `flight/flags/`; `mac-voice-mcp flight status` shows what is kept; `mac-voice-mcp flight purge` deletes it all. Claude can also call the `flag` tool when you say a turn went wrong. `doctor` mentions it when it's on. (`VOICE_MCP_RECORDER` is the SoX/ffmpeg choice, unrelated.)
+
 ## Calls
 
 | Variable | Default | |
