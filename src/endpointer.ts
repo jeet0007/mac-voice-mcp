@@ -4,8 +4,10 @@
  *
  *   - waits for speech (≥120 ms above threshold) for up to `startTimeoutMs`
  *   - once speaking, ends the turn after `endSilenceMs` of quiet
- *   - ignores blips shorter than 180 ms (a cough, a click) and keeps listening
- *   - hard stop at `maxMs`
+ *   - ignores blips shorter than 180 ms of voice (a cough, a click) and keeps listening;
+ *     a real short answer like "yes" (~200 ms) still counts
+ *   - `maxMs` is how long the user may talk, counted from when they start; a hard overall
+ *     cap of `startTimeoutMs + maxMs` keeps a stuck mic from listening forever
  *   - while `ignoring` (our own "mic open" chime is playing), frames are neither speech nor background
  */
 
@@ -53,6 +55,7 @@ function meanStd(values: number[]): [number, number] {
 
 export class Endpointer {
   private readonly maxFrames: number;
+  private readonly hardCapFrames: number;
   private readonly startTimeoutFrames: number;
   private readonly endSilenceFrames: number;
   private readonly historySize: number;
@@ -83,6 +86,7 @@ export class Endpointer {
   constructor(private readonly opts: EndpointerOptions) {
     this.maxFrames = Math.ceil(opts.maxMs / FRAME_MS);
     this.startTimeoutFrames = Math.ceil(Math.min(opts.startTimeoutMs, opts.maxMs) / FRAME_MS);
+    this.hardCapFrames = this.startTimeoutFrames + this.maxFrames;
     this.endSilenceFrames = Math.ceil(opts.endSilenceMs / FRAME_MS);
     this.historySize = Math.max(FLOOR_WINDOW_FRAMES, this.endSilenceFrames, Math.ceil(1000 / FRAME_MS));
   }
@@ -176,8 +180,13 @@ export class Endpointer {
   }
 
   private timeLimit(): EndReason | null {
-    if (this.frames >= this.maxFrames) return this.everStarted ? "max-duration" : "no-speech";
-    if (!this.everStarted && this.frames >= this.startTimeoutFrames) return "no-speech";
+    if (this.everStarted) {
+      // maxMs counts from when the user began talking; the hard cap covers a stuck mic.
+      const talked = this.speechStartFrame >= 0 ? this.frames - this.speechStartFrame : 0;
+      if (talked >= this.maxFrames || this.frames >= this.hardCapFrames) return "max-duration";
+      return null;
+    }
+    if (this.frames >= this.startTimeoutFrames) return "no-speech";
     return null;
   }
 

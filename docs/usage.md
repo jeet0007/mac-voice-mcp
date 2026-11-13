@@ -5,7 +5,7 @@
 - **"Work on X and check in with me by voice when you need a decision."** Claude works quietly and only speaks at decision points.
 - **`/mac-voice-mcp:talk fix the flaky login test`** (plugin), or **`/mcp__voice-mcp__voice_mode fix the flaky login test`** (added by hand). Claude reads its plan back to you, then checks in at each checkpoint. Say "stop voice mode" or "I'm back" to end it.
 - **"Read me a 20-second summary of this PR and ask if I should approve it."** Use this for one-off briefings.
-- **Just talk after the chime.** You don't need to hurry or fill silence. If you're still talking at the 30-second safety cap (`listen_seconds`), Claude is told your reply may be cut off and asks you to continue.
+- **Just talk after the chime.** You don't need to hurry or fill silence. If you're still talking 30 seconds after you started (`listen_seconds`, counted from your first word), Claude is told your reply may be cut off and asks you to continue.
 
 ## Voice mode
 

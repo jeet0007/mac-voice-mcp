@@ -272,7 +272,7 @@ async function turn(
       const l = heard.levels;
       const f = (n: number) => (Number.isFinite(n) ? n.toFixed(0) : "?");
       notes.push(
-        `voice-mcp note: listening stopped at the ${seconds}-second limit while the user was still talking, ` +
+        `voice-mcp note: listening stopped after ${seconds} seconds of talking (the limit) while the user was still talking, ` +
           "so the reply may be cut off. Ask them to continue if it seems unfinished. " +
           `(Audio levels, for tuning: background ${f(l.floorDb)} dB, voice ${f(l.speechDb)} dB, ` +
           `last second ${f(l.recentDb)} ± ${l.recentSpreadDb.toFixed(1)} dB.)`,

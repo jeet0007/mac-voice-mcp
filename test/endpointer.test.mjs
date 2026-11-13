@@ -183,3 +183,15 @@ test("a very short click (90 ms) is still ignored", () => {
   assert.equal(reason, "no-speech");
 });
 
+test("max duration counts from when the user starts talking, not from the start of listening", () => {
+  const [reason, , fed] = runLevels([[-60, 12_000], [-25, 25_000]]);
+  assert.equal(reason, "end-of-turn");
+  assert.ok(fed * FRAME_MS > 37_000, `ended at ${fed * FRAME_MS} ms`);
+});
+
+test("talking past the limit from speech start still gives max-duration", () => {
+  const [reason, , fed] = runLevels([[-60, 12_000], [-25, 60_000]]);
+  assert.equal(reason, "max-duration");
+  assert.ok(Math.abs(fed * FRAME_MS - 42_000) < 200, `stopped at ${fed * FRAME_MS} ms`);
+});
+
