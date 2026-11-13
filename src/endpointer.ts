@@ -33,6 +33,9 @@ const ONSET_FRAMES = 4; // 120 ms of sound before we believe it's speech
 const MIN_UTTERANCE_MS = 180; // shorter bursts are treated as noise (a one-word "yes" is ~200 ms)
 const SETTLE_FRAMES = 3; // ignore the first 90 ms while the mic settles
 const FLOOR_WINDOW_FRAMES = 50; // background level = quietest frame of the last 1.5 s
+// While the user is talking, the background estimate may not rise above this far below their voice,
+// so speech that only varies a few dB from syllable to syllable is not mistaken for background.
+const FLOOR_CEILING_BELOW_SPEECH_DB = 24;
 const STEADY_SPREAD_DB = 2.5; // sound this steady for a whole end-silence window is noise, not speech
 const STEADY_BELOW_SPEECH_DB = 6; // …as long as it's also clearly quieter than the user's voice
 
@@ -124,6 +127,11 @@ export class Endpointer {
     // noise after speech — as well as one that gets quieter.
     if (this.history.length) {
       this.floorDb = Math.min(-30, Math.max(-90, Math.min(...this.history.slice(-FLOOR_WINDOW_FRAMES))));
+      // Once the user is talking, the quietest recent frame can be just a soft syllable. Don't let
+      // that lift the floor close to the voice, or the next soft syllable counts as silence.
+      if (this.started && !Number.isNaN(this.speechDb)) {
+        this.floorDb = Math.min(this.floorDb, this.speechDb - FLOOR_CEILING_BELOW_SPEECH_DB);
+      }
     }
     const threshold = Math.max(this.floorDb + this.opts.marginDb, this.opts.minSpeechDb);
     this.lastThresholdDb = threshold;

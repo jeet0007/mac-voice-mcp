@@ -195,3 +195,14 @@ test("talking past the limit from speech start still gives max-duration", () => 
   assert.ok(Math.abs(fed * FRAME_MS - 42_000) < 200, `stopped at ${fed * FRAME_MS} ms`);
 });
 
+test("speech that varies only 8 or 10 dB between syllables does not end the turn early", () => {
+  for (const low of [-33, -35]) {
+    const script = [[-60, 1000]];
+    for (let i = 0; i < 24; i++) script.push([-25, 210], [low, 210]); // ~10 s of syllables, no pauses
+    const speechEndMs = ms(1000) * FRAME_MS + 24 * 2 * ms(210) * FRAME_MS;
+    const [reason, , fed] = runLevels(script);
+    assert.equal(reason, "end-of-turn", `-25/${low}`);
+    const afterSpeechMs = fed * FRAME_MS - speechEndMs;
+    assert.ok(afterSpeechMs >= 1400 && afterSpeechMs <= 2100, `-25/${low}: ended ${afterSpeechMs} ms after speech stopped`);
+  }
+});
