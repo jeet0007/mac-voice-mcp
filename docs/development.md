@@ -59,7 +59,7 @@ The package installs two commands: `mac-voice-mcp` (the one `npx -y mac-voice-mc
 
 ## Reviewing the call bubble without a mic
 
-`native/call-bubble.swift` runs without a call or a server. `scripts/bubble-demo.sh [out-dir]` builds it with your own `swiftc` into a temp folder, starts `call-bubble --demo` (a pill that needs no `call.json`, plus a scripted talk: short partials, a final, a long three-line tail-fit, a clear), and takes a screenshot of the screen every 2 s into `out-dir` (default `./bubble-demo-shots`; macOS may ask to let your terminal record the screen). It never touches your real cache or a real call. To drive it yourself:
+`native/call-bubble.swift` runs without a call or a server. `scripts/bubble-demo.sh [out-dir]` builds it with your own `swiftc` into a temp folder, starts `call-bubble --demo` (a pill that needs no `call.json`, plus a scripted talk: short partials, a final, a long three-line tail-fit, a clear), and takes a screenshot every 2 s of just the screen corner where the bubble sits (not the whole screen), into `out-dir` (default: a new temp folder, printed when it starts, so nothing lands in the repo). macOS asks to let your terminal record the screen the first time; the shots can show the on-screen words, so delete them when you're done. The script also repeats one partial after the idle fade, to show the panel stays hidden instead of blinking. It never touches your real cache or a real call. To drive it yourself:
 
 ```bash
 swiftc -O native/call-bubble.swift -o /tmp/call-bubble

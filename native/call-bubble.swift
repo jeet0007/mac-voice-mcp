@@ -286,6 +286,7 @@ final class Transcript {
 
   var state = TState.hidden
   var raw = ""             // the words as received
+  var lastPartial = ""     // survives the idle fade: the same words again must not bring the panel back
   var width: CGFloat = tMinWidth   // grows during one utterance, resets when hidden
   var lines = 1
   var below = true
@@ -305,6 +306,7 @@ final class Transcript {
                              styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
     window.level = .floating
     window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+    window.sharingType = .none            // screen sharing and recording never show what you say
     window.ignoresMouseEvents = true      // click-through: drag the pill to move things
     window.isOpaque = false
     window.backgroundColor = .clear
@@ -388,7 +390,7 @@ final class Transcript {
   func fit(_ text: String, width w: CGFloat, cap: Int) -> String {
     let limit = CGFloat(cap) * tLine + 0.5
     if heightOf(text, width: w) <= limit { return text }
-    let chars = Array(text)
+    let chars = Array(text.suffix(400))   // only the newest 400 characters are ever measured
     var lo = 0, hi = chars.count   // smallest start offset that fits
     while lo < hi {
       let mid = (lo + hi) / 2
@@ -403,7 +405,7 @@ final class Transcript {
   /// Sets the text, the size and the 72%/96% look; returns the frame it wants.
   @discardableResult
   func layout(_ text: String) -> NSRect {
-    let textWidth = ceil(attributed(text.replacingOccurrences(of: "\n", with: " ")).boundingRect(with: NSSize(width: 10_000, height: tLine), options: []).width)
+    let textWidth = ceil(attributed(String(text.suffix(400)).replacingOccurrences(of: "\n", with: " ")).boundingRect(with: NSSize(width: 10_000, height: tLine), options: []).width)
     let maxW = min(tMaxWidth, (screenVisible().width - 2 * tEdge))
     width = max(width, min(max(textWidth + 2 * tPad, tMinWidth), maxW))
     let inner = width - 2 * tPad
@@ -552,22 +554,28 @@ final class Transcript {
     let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
     if muted || t.isEmpty { return }
     if state == .final, Date().timeIntervalSince(finalAt) < 0.4 { return }   // a late reply to the utterance just finished
-    if state == .partial, t == raw { return }                                  // same words: no new idle timer
+    if t == lastPartial { return }                                             // same words (even after the idle fade): nothing new
+    lastPartial = t
     show(t, isFinal: false)
   }
 
   func final(_ text: String) {
     let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
     if muted || t.isEmpty { return }
+    lastPartial = ""
     show(t, isFinal: true)
   }
 
-  func clear() { if state != .hidden { fadeOut(0.2) } }
+  func clear() {
+    lastPartial = ""
+    if state != .hidden { fadeOut(0.2) }
+  }
 
   /// Called every frame of the pill's timer with what the files say; acts on changes only.
   func observe(muted nowMuted: Bool, speaking: Bool) {
     if nowMuted != muted {
       muted = nowMuted
+      lastPartial = ""
       if muted, state != .hidden { fadeOut(0.12) }
     }
     if speaking != wasSpeaking {
@@ -639,6 +647,8 @@ if demo && !CommandLine.arguments.contains("--no-script") {
     (2.8, "final", "So I think we should move the retry into the upload function."),
     (8.0, "partial", "can you also"), (8.7, "partial", "can you also check"), (9.4, "partial", "can you also check the"),
     (10.1, "partial", "can you also check the back-off"),
+    // The same words again after the idle fade (about 12 s): the panel must stay hidden, not blink.
+    (13.0, "partial", "can you also check the back-off"), (14.2, "partial", "can you also check the back-off"),
     (15.0, "partial", String(long.prefix(60))), (15.7, "partial", String(long.prefix(110))), (16.4, "partial", String(long.prefix(150))), (17.1, "partial", long),
     (18.0, "final", long + "."),
     (24.0, "clear", ""),

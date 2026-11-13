@@ -247,6 +247,8 @@ no mic or speakers:
 - Not logged, not even with `VOICE_MCP_DEBUG`. The flight recorder records at most counts and timings
   (`partials`, `partialMs`), never text.
 - The bubble writes nothing; it drops the text when the panel hides.
+- The transcript window sets `sharingType = .none`, so screen sharing and screen recording during a call don't capture it.
+- `scripts/bubble-demo.sh` captures only the bubble's corner of the screen into a temp folder (macOS asks for screen-recording permission the first time).
 - Privacy Reviewer sign-off before this is called done.
 
 ## Acceptance

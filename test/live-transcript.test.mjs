@@ -99,3 +99,13 @@ test("a request carries at most the last 30 s, and starts a little before the sp
   assert.equal(tail.length, 1000);
   assert.equal(tail[0], all[1000]);
 });
+
+test("whisper repeating the same words for a long stretch is shown once", async () => {
+  const { asked, shown, frames } = live({ everyMs: 400 });
+  for (let i = 0; i < 8; i++) {
+    frames(600, 2);
+    asked.at(-1).resolve("the same words");
+    await tick();
+  }
+  assert.deepEqual(shown, ["the same words"]);
+});
