@@ -1,9 +1,10 @@
 /** The round trip: speak → listen for one turn → transcribe. */
 import { chime, findRecorder, listenForTurn, MIC_PERMISSION_HINT, RECORDER_MISSING, speak, type Spoken } from "./audio.js";
 import { CONFIG, debug, DEFAULT_LISTEN_SECONDS, log, MAX_LISTEN_SECONDS, MAX_SPEAK_CHARS } from "./config.js";
+import { announceError, cue, errorNote, type SpokenError } from "./cues.js";
 import { prewarmKokoro } from "./kokoro.js";
 import { acquireMicLock, MicBusyError } from "./lock.js";
-import { ensureModel } from "./model.js";
+import { ensureModel, isModelDownloading } from "./model.js";
 import { CancelledError, resetWhichCache, SetupError, sleep } from "./proc.js";
 import { prepareSpeech } from "./speech-text.js";
 import { findWhisperCli, findWhisperServer, prewarm, STT_MISSING, transcribeBuffer } from "./stt.js";
@@ -15,13 +16,33 @@ export interface VoiceResult {
   notes: string[];
   /** The user answered out loud (a real transcript, not "no speech" or an error). */
   heard?: boolean;
+  /** A spoken error to announce once the mic is released (see cues.ts); the text above stays the explanation. */
+  announce?: SpokenError;
 }
 
 /** Everything speak_and_listen needs, checked before saying a word. Never installs anything. */
 export async function preflight(): Promise<{ model: string }> {
-  if (!findRecorder()) throw new SetupError(RECORDER_MISSING);
-  if (!findWhisperCli() && !findWhisperServer()) throw new SetupError(STT_MISSING);
-  return { model: await ensureModel({ download: false }) };
+  let kind: SpokenError | null = null;
+  try {
+    if (!findRecorder()) {
+      kind = "no-recorder";
+      throw new SetupError(RECORDER_MISSING);
+    }
+    if (!findWhisperCli() && !findWhisperServer()) {
+      kind = "no-whisper";
+      throw new SetupError(STT_MISSING);
+    }
+    kind = isModelDownloading() ? "model-downloading" : "no-model";
+    const model = await ensureModel({ download: false });
+    return { model };
+  } catch (err) {
+    // Nothing is playing or recording yet, so the user hears the error tone and one line, not Claude's text.
+    if (kind && err instanceof SetupError) {
+      const note = errorNote(await announceError(kind));
+      if (note) Object.assign(err, { voiceNote: note });
+    }
+    throw err;
+  }
 }
 
 export type Phase = "waiting" | "speaking" | "listening" | "transcribing";
@@ -142,6 +163,11 @@ export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {
     showPhase(null);
     void recorder.exited.then(release);
   }
+  if (result.announce) {
+    // The mic is released: the tone and the line can't be recorded now.
+    const note = errorNote(await announceError(result.announce));
+    if (note) result.notes.push(note);
+  }
   result.notes.unshift(...laterNotes.splice(0));
   if (waiting) result.notes.unshift(waiting);
   // They answered out loud: keep listening while Claude works, for "Claude, …" (once the turn's recorder is gone).
@@ -234,7 +260,6 @@ async function turn(
       onListening: () => chime("start"),
       onRecorder: (exited) => (recorder.exited = exited),
     });
-    void chime("stop");
     const t1 = Date.now();
     debug(`listen: ${heard.reason}, ${heard.wav.length} bytes of audio, ${heard.speechSeconds.toFixed(1)} s of speech, digitalSilence=${heard.digitalSilence}`);
     const timing = (transcribedMs?: number) =>
@@ -252,6 +277,7 @@ async function turn(
             MIC_PERMISSION_HINT
           : `The microphone returned pure digital silence, which usually means microphone access is blocked. ${MIC_PERMISSION_HINT}`,
         notes,
+        announce: "silence",
       };
     }
     const waited = Math.min(CONFIG.startTimeoutSeconds, seconds);
@@ -259,12 +285,17 @@ async function turn(
       `(No speech detected — the user did not reply within ${waited} seconds. The microphone is now off. ` +
       "Ask once more out loud. If there's still no answer, stop and say on screen that voice mode is paused " +
       "and they can type anything to carry on — speaking won't work until you call speak_and_listen again.)";
-    if (heard.reason === "no-speech") return { ok: true, text: noSpeech, notes: [...notes, timing()] };
+    if (heard.reason === "no-speech") {
+      void cue("no-speech"); // a low purr: nothing came in
+      return { ok: true, text: noSpeech, notes: [...notes, timing()] };
+    }
+    const popped = cue("close"); // a pop: the mic is closed
 
     onPhase?.("transcribing");
     const transcript = await transcribeBuffer(heard.wav, model, signal);
     const transcribed = Date.now() - t1;
     if (!transcript) {
+      void popped.then(() => cue("no-speech")); // the pop was instant; the purr says it didn't count
       // Something was loud enough to sound like speech (a cough, typing, a door), but whisper found no words in it.
       // Starts with "(No speech detected" so the plugin's voice-mode hook knows the user wasn't heard.
       const noWords =

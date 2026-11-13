@@ -7,7 +7,7 @@ Status: design · Owner: Jeet · Designed by the Voice MCP UX Designer · Source
 
 1. The mic cues don't tell apart "got it" from "I heard nothing": a silent room and a finished sentence both
    end with the same Pop.
-2. When a voice turn can't work (mic blocked, no recorder, no whisper, no model, mic busy), the reason goes
+2. When a voice turn can't work (mic blocked, no recorder, no whisper, no model), the reason goes
    only to Claude as text. A hands-free user hears nothing, and Claude's reply to that text is often another
    `speak_and_listen`, which fails the same way.
 
@@ -33,7 +33,7 @@ Durations measured from the files (`afinfo`). Volumes are `afplay -v`.
 | **Mic closed, words were heard** (end of speech) | Pop | 0.5 | 1.6 s (soft decay) | familiar "got it" | volume 0.6 to 0.5: Pop's tail is long and the user may already be listening for Claude |
 | **Mic closed, no speech** (start timeout: user never spoke) | Purr | 0.45 | 0.76 s | low and soft: "nothing came in", clearly unlike Pop, not a failure | new |
 | **Heard a sound, but whisper found no words** (cough, door) | Pop at once, then Purr 0.45 when the empty transcript is known | | | the Pop is instant feedback that recording stopped; Purr says it didn't count | new |
-| **Error** (anything in the table below) | Basso | 0.6 | 0.77 s | low "no", the standard macOS error tone | new |
+| **Error** (anything in the table below, except a busy mic) | Basso | 0.6 | 0.77 s | low "no", the standard macOS error tone | new |
 | Thinking tick (calls), work-listener "got it" | unchanged | | | | none |
 
 - `VOICE_MCP_CHIME=0` turns off **all** the tones above (existing switch, wider reach). It does not silence
@@ -56,7 +56,7 @@ fix goes on screen via Claude).
 | No whisper (`STT_MISSING`, `src/stt.ts`) | "I can't understand speech yet. Please check the screen for setup." | 11 |
 | Model missing (preflight finds no model) | "My speech model is missing. Please check the screen for setup." | 11 |
 | Model still downloading (`isModelDownloading`) | "My speech model is still downloading. Try again in a minute." | 11 |
-| Mic busy in another window (`MicBusyError`, `src/lock.ts`) | "The microphone is busy in another window." | 7 |
+| Mic busy in another window (`MicBusyError`, `src/lock.ts`) | **none: no tone, no line** | |
 
 Rules:
 
@@ -65,9 +65,8 @@ Rules:
    Claude's original text is not spoken on a failed turn.
 2. **Once per kind per 10 minutes** per server process (a `Map<kind, lastSpokenAt>`). Within that window a
    repeat failure plays the Basso only. The first one after 10 minutes speaks again.
-3. **Mic busy** is spoken too, because the alternative is silence, but only as the 7-word line, never twice
-   in 10 minutes, and without taking the mic lock (it is not ours). It is a short interjection in the other
-   window's session; accepted.
+3. **Mic busy is never spoken and has no tone.** Another window's session has the mic open, so our voice
+   would be recorded and transcribed as that user's words. The tool result keeps today's text only.
 4. **Order.** `finishSpeaking()` first (one speaker), release the mic lock, then Basso, 200 ms, then the line.
    Total about 2.5 s. Never while the mic is open.
 5. **`VOICE_MCP_CHIME=0`:** skips the tone, still speaks the line. New `VOICE_MCP_SPOKEN_ERRORS=0` turns the
@@ -101,8 +100,8 @@ export const CUES: Record<Cue, { sound: string; volume: number }> = {
   "no-speech": { sound: "Purr", volume: 0.45 },
   error: { sound: "Basso", volume: 0.6 },
 };
-export type SpokenError = "silence" | "no-recorder" | "no-whisper" | "no-model" | "model-downloading" | "mic-busy";
-export const SPOKEN_ERRORS: Record<SpokenError, string> = { /* the six lines above, verbatim */ };
+export type SpokenError = "silence" | "no-recorder" | "no-whisper" | "no-model" | "model-downloading";
+export const SPOKEN_ERRORS: Record<SpokenError, string> = { /* the five lines above, verbatim */ };
 export async function cue(c: Cue): Promise<void>;                    // honours CONFIG.chime
 export async function announceError(kind: SpokenError): Promise<{ spoken: boolean; line: string }>; // tone + 200 ms + say, dedupe
 ```

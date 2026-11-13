@@ -4,6 +4,7 @@
 
 | Symptom | Fix |
 |---|---|
+| What the sounds mean | A soft **tick**: the mic is open, go ahead. A **pop**: it heard you. A low **purr**: it heard nothing (say it again). A low **thud**: something is wrong, and it says what in one short line (microphone access, a missing recorder or speech model). The same problem is spoken once per 10 minutes; in between you only hear the thud. `VOICE_MCP_CHIME=0` turns the sounds off, `VOICE_MCP_SPOKEN_ERRORS=0` the spoken lines. A microphone busy in another window is never spoken, so it can't be recorded as that window's words. |
 | Not sure what's wrong | Run `npx -y mac-voice-mcp@latest doctor`. It checks setup, the voice and transcription, and your speakers and mic, and says which part fails. |
 | "voice-mcp is not set up yet" | Ask Claude to *set up voice*, or run `npx -y mac-voice-mcp@latest setup`. |
 | "microphone returned pure digital silence" | macOS is blocking the mic for the host app. Go to **System Settings → Privacy & Security → Microphone**, enable Claude / Cursor / your terminal, then restart that app. If the message says it's recording with ffmpeg, the input device is the likelier cause: run `brew install sox`. |
