@@ -12,6 +12,8 @@ const log = path.join(dir, "log.txt");
 writeFileSync(log, "");
 writeFileSync(path.join(dir, "stub-model.bin"), "x");
 Object.assign(process.env, {
+  // Its own temp folder: test files run in parallel, and another one's temp dirs must not show up in this listing.
+  TMPDIR: mkdtempSync(path.join(dir, "tmp-")),
   STUB_LOG: log,
   STUB_SCENARIO: "answer",
   STUB_TRANSCRIPT: "Claude, use the other branch.",

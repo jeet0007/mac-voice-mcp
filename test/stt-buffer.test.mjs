@@ -11,6 +11,8 @@ const dir = mkdtempSync(path.join(os.tmpdir(), "voice-mcp-sttbuf-"));
 const log = path.join(dir, "log.txt");
 writeFileSync(log, "");
 Object.assign(process.env, {
+  // Its own temp folder: test files run in parallel, and another one's temp dirs must not show up in this listing.
+  TMPDIR: mkdtempSync(path.join(dir, "tmp-")),
   STUB_LOG: log,
   VOICE_MCP_EXTRA_PATH: "",
   VOICE_MCP_WHISPER_SERVER: "1",
