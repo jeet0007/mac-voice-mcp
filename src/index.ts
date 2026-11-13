@@ -147,6 +147,10 @@ function runFlightCli(args: string[], note: string): number {
       console.error("Nothing to flag: the flight recorder is off and has no log. Set VOICE_MCP_FLIGHT_RECORDER=on for the server, then try again.");
       return 1;
     }
+    if (flag.tooSoon) {
+      console.error(flag.summary);
+      return 0;
+    }
     console.error(`${flag.summary}\nSaved on this Mac (nothing was sent anywhere): ${flag.file}`);
     return 0;
   }

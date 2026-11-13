@@ -319,6 +319,7 @@ export function flightFlag(noteIn?: string, opts: { withAudio?: boolean } = {}):
   const id = stamp(now);
   const events = recentEvents(now);
   const summary = flagSummary(events);
+  ensureDir(flightDir()); // first, so a symlinked flight/ is refused before anything is created inside it
   ensureDir(flagsDir());
   trimFlags();
   const file = path.join(flagsDir(), `flag-${id}.md`);
@@ -368,7 +369,12 @@ export function flightFlag(noteIn?: string, opts: { withAudio?: boolean } = {}):
     "This file stays on this Mac. Share it only if you choose to.",
     "",
   ].join("\n");
-  writeFileSync(file, md, { mode: 0o600, flag: "wx" });
+  try {
+    writeFileSync(file, md, { mode: 0o600, flag: "wx" });
+  } catch (err) {
+    if (wav) rmSync(wav, { force: true }); // no audio left behind without its flag file
+    throw err;
+  }
   flightEvent("flag", { id, hasNote: note.length > 0 });
   return { file, wav, summary };
 }

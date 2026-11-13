@@ -277,6 +277,16 @@ test("flight folders that are symlinks are refused, and symlinks inside are not 
   f.flightSweep();
   assert.equal(existsSync(target), true, "a symlink's target is never deleted");
   assert.equal(f.flightStatus().files, 0);
+  // A flag through a symlinked flight/ is refused too (own process: the 10 s flag gap is per process).
+  rmSync(sb.flight, { recursive: true });
+  symlinkSync(elsewhere, sb.flight);
+  const flagUrl = new URL("../dist/flight.js", import.meta.url).href;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", `const f = await import(${JSON.stringify(flagUrl)}); try { f.flightFlag("x"); console.log("wrote"); } catch { console.log("refused"); }`], {
+    env: { ...process.env, VOICE_MCP_CACHE_DIR: sb.cache, VOICE_MCP_FLIGHT_RECORDER: "on" },
+    encoding: "utf8",
+  });
+  assert.equal(r.stdout.trim(), "refused", r.stderr);
+  assert.deepEqual(readdirSync(elsewhere).sort(), ["keep.txt", "old.txt"], "no flags folder written through a symlinked flight/");
 });
 
 test("flag summary reads values back through the allowlist", async () => {
