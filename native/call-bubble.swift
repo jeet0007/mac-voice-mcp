@@ -13,6 +13,11 @@
 // - Hang up: removes call.json, which the server treats as an end.
 // - Drag anywhere else to move it; where it was left (the pill's origin) is kept in voice-mode/bubble.json.
 // It exits once call.json is gone or the server that wrote it has died.
+// Live transcript (docs/specs/live-transcript.md): the server that started it writes one JSON line per
+// event to stdin ({"type":"partial"|"final","text":"…"} or {"type":"clear"}), and a small click-through
+// panel under (or over) the pill shows the words, only while there are some. A bubble whose stdin is
+// empty or closed works as before. `call-bubble --demo` runs without a call and plays a scripted
+// transcript (add `--no-script` to feed it by stdin yourself); see docs/development.md.
 //
 // voice-mcp builds it with: swiftc -O native/call-bubble.swift -o <cache>/bin/call-bubble
 import AppKit
@@ -20,6 +25,7 @@ import AppKit
 extension String { var nilIfEmpty: String? { isEmpty ? nil : self } }
 
 // The same folder as cacheRoot() in hooks/voice-files.mjs, so run it with the server's VOICE_MCP_CACHE_DIR or XDG_CACHE_HOME.
+let demo = CommandLine.arguments.contains("--demo")
 let env = ProcessInfo.processInfo.environment
 let cacheDir = env["VOICE_MCP_CACHE_DIR"]?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
   ?? URL(fileURLWithPath: env["XDG_CACHE_HOME"]?.nilIfEmpty ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cache").path)
@@ -240,10 +246,416 @@ NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, ob
 }
 
 /** The call's start (ms since 1970), or nil once it's over: call.json gone, or the server that wrote it died. */
+let demoStart = Date().timeIntervalSince1970 * 1000
 func callStart() -> Double? {
+  if demo { return demoStart }
   guard let call = readJSON(callFile), let pid = (call["pid"] as? NSNumber)?.int32Value,
         kill(pid, 0) == 0 || errno == EPERM else { return nil }
   return (call["startedAt"] as? NSNumber)?.doubleValue ?? Date().timeIntervalSince1970 * 1000
+}
+
+
+// MARK: - Live transcript
+
+let tPad: CGFloat = 14        // left and right
+let tPadV: CGFloat = 10       // top and bottom
+let tLine: CGFloat = 20
+let tGap: CGFloat = 8         // between the pill and the panel
+let tRadius: CGFloat = 16
+let tMaxWidth: CGFloat = 360
+let tMinWidth: CGFloat = 120
+let tMaxLines = 3
+let tEdge: CGFloat = 8        // least distance to the screen's edge
+let tFont = NSFont.systemFont(ofSize: 15, weight: .regular)
+
+/// Never key, never main: it can't take focus from whatever the user is typing in.
+final class TranscriptPanel: NSPanel {
+  override var canBecomeKey: Bool { false }
+  override var canBecomeMain: Bool { false }
+}
+
+enum TState { case hidden, partial, final, fading }
+
+final class Transcript {
+  let window: TranscriptPanel
+  let solid = NSView()
+  let glass: NSVisualEffectView
+  let hairline = NSView()
+  let label = NSTextField(labelWithString: "")
+  let ws = NSWorkspace.shared
+
+  var state = TState.hidden
+  var raw = ""             // the words as received
+  var width: CGFloat = tMinWidth   // grows during one utterance, resets when hidden
+  var lines = 1
+  var below = true
+  var cap = tMaxLines
+  var work: DispatchWorkItem?
+  var generation = 0
+  var finalAt = Date.distantPast
+  var muted = false
+  var wasSpeaking = false
+
+  var reduceMotion: Bool { ws.accessibilityDisplayShouldReduceMotion }
+  var highContrast: Bool { ws.accessibilityDisplayShouldIncreaseContrast }
+  var reduceTransparency: Bool { ws.accessibilityDisplayShouldReduceTransparency }
+
+  init() {
+    window = TranscriptPanel(contentRect: NSRect(x: 0, y: 0, width: tMinWidth, height: tLine + 2 * tPadV),
+                             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+    window.level = .floating
+    window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+    window.ignoresMouseEvents = true      // click-through: drag the pill to move things
+    window.isOpaque = false
+    window.backgroundColor = .clear
+    window.hasShadow = true
+    window.hidesOnDeactivate = false
+    window.alphaValue = 0
+
+    glass = NSVisualEffectView(frame: window.contentView!.bounds)
+    glass.material = .hudWindow
+    glass.blendingMode = .behindWindow
+    glass.state = .active
+    glass.appearance = NSAppearance(named: .darkAqua)
+    glass.autoresizingMask = [.width, .height]
+    glass.maskImage = NSImage(size: NSSize(width: 2 * tRadius + 1, height: 2 * tRadius + 1), flipped: false) { rect in
+      NSBezierPath(roundedRect: rect, xRadius: tRadius, yRadius: tRadius).fill()
+      return true
+    }
+    glass.maskImage?.capInsets = NSEdgeInsets(top: tRadius, left: tRadius, bottom: tRadius, right: tRadius)
+    glass.maskImage?.resizingMode = .stretch
+
+    for v in [solid, hairline] {
+      v.wantsLayer = true
+      v.frame = glass.bounds
+      v.autoresizingMask = [.width, .height]
+      v.layer?.cornerRadius = tRadius
+    }
+    solid.isHidden = true
+
+    label.isEditable = false
+    label.isSelectable = false
+    label.maximumNumberOfLines = tMaxLines
+    label.usesSingleLineMode = false
+    label.lineBreakMode = .byWordWrapping
+    label.cell?.wraps = true
+    label.setAccessibilityLabel("Live transcript")   // read on demand; never announced
+    label.setAccessibilityRole(.staticText)
+    label.wantsLayer = true
+
+    let root = window.contentView!
+    root.addSubview(glass)
+    root.addSubview(solid)
+    root.addSubview(hairline)
+    root.addSubview(label)
+    applyAccessibility()
+    NotificationCenter.default.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+      self?.applyAccessibility()
+      self?.restyle()
+    }
+  }
+
+  // MARK: Look
+
+  func applyAccessibility() {
+    let flat = highContrast || reduceTransparency
+    glass.isHidden = flat
+    solid.isHidden = !flat
+    solid.layer?.backgroundColor = (highContrast
+      ? NSColor(red: 0x1c / 255.0, green: 0x1c / 255.0, blue: 0x1e / 255.0, alpha: 0.95)
+      : NSColor(red: 0x2c / 255.0, green: 0x2c / 255.0, blue: 0x2e / 255.0, alpha: 1)).cgColor
+    hairline.layer?.borderWidth = highContrast ? 1 : 0.5
+    hairline.layer?.borderColor = NSColor(white: 1, alpha: highContrast ? 0.55 : 0.10).cgColor
+  }
+
+  /// Partial words look provisional (72%), a final settles (96%); Increase Contrast raises both.
+  var textAlpha: CGFloat { state == .final ? (highContrast ? 1.0 : 0.96) : (highContrast ? 0.85 : 0.72) }
+
+  func attributed(_ text: String) -> NSAttributedString {
+    let style = NSMutableParagraphStyle()
+    style.minimumLineHeight = tLine
+    style.maximumLineHeight = tLine
+    style.alignment = .natural
+    style.lineBreakMode = .byWordWrapping
+    return NSAttributedString(string: text, attributes: [.font: tFont, .paragraphStyle: style, .foregroundColor: NSColor.white])
+  }
+
+  func heightOf(_ text: String, width w: CGFloat) -> CGFloat {
+    ceil(attributed(text).boundingRect(with: NSSize(width: w, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin]).height)
+  }
+
+  /// The newest words that fit `cap` lines at `w`, with "… " in front when the start is cut. Never scrolls, never cuts the tail.
+  func fit(_ text: String, width w: CGFloat, cap: Int) -> String {
+    let limit = CGFloat(cap) * tLine + 0.5
+    if heightOf(text, width: w) <= limit { return text }
+    let chars = Array(text)
+    var lo = 0, hi = chars.count   // smallest start offset that fits
+    while lo < hi {
+      let mid = (lo + hi) / 2
+      if heightOf("… " + String(chars[mid...]), width: w) <= limit { hi = mid } else { lo = mid + 1 }
+    }
+    var start = lo
+    // Start on a word when a space is close.
+    if start > 0, start < chars.count, let space = chars[start..<min(chars.count, start + 12)].firstIndex(of: " ") { start = space + 1 }
+    return "… " + String(chars[min(start, chars.count)...])
+  }
+
+  /// Sets the text, the size and the 72%/96% look; returns the frame it wants.
+  @discardableResult
+  func layout(_ text: String) -> NSRect {
+    let textWidth = ceil(attributed(text.replacingOccurrences(of: "\n", with: " ")).boundingRect(with: NSSize(width: 10_000, height: tLine), options: []).width)
+    let maxW = min(tMaxWidth, (screenVisible().width - 2 * tEdge))
+    width = max(width, min(max(textWidth + 2 * tPad, tMinWidth), maxW))
+    let inner = width - 2 * tPad
+    let shown = fit(text, width: inner, cap: cap)
+    lines = max(1, min(cap, Int(round(heightOf(shown, width: inner) / tLine))))
+    label.attributedStringValue = attributed(shown)
+    label.setAccessibilityValue(shown)
+    let size = NSSize(width: width, height: CGFloat(lines) * tLine + 2 * tPadV)
+    window.contentView?.setFrameSize(size)
+    label.frame = NSRect(x: tPad, y: tPadV, width: inner, height: CGFloat(lines) * tLine)
+    return frame(for: size)
+  }
+
+  /// Re-apply the colours after a partial/final change or an accessibility change.
+  func restyle() { label.alphaValue = textAlpha }
+
+  // MARK: Place
+
+  func pillFrame() -> NSRect { panel.frame.insetBy(dx: margin, dy: margin) }
+
+  func screen() -> NSScreen? {
+    let c = NSPoint(x: pillFrame().midX, y: pillFrame().midY)
+    return NSScreen.screens.first { $0.frame.contains(c) } ?? NSScreen.main
+  }
+
+  func screenVisible() -> NSRect { (screen() ?? NSScreen.screens[0]).visibleFrame }
+
+  /// Chosen when the panel appears: below the pill if three lines fit, else above, else the roomier side with fewer lines.
+  func chooseSide() {
+    let pill = pillFrame(), vis = screenVisible()
+    let full = CGFloat(tMaxLines) * tLine + 2 * tPadV
+    if pill.minY - tGap - full >= vis.minY + tEdge { below = true; cap = tMaxLines }
+    else if pill.maxY + tGap + full <= vis.maxY - tEdge { below = false; cap = tMaxLines }
+    else {
+      let roomBelow = pill.minY - tGap - (vis.minY + tEdge)
+      let roomAbove = (vis.maxY - tEdge) - (pill.maxY + tGap)
+      below = roomBelow >= roomAbove
+      cap = max(1, min(tMaxLines, Int(floor(((below ? roomBelow : roomAbove) - 2 * tPadV) / tLine))))
+    }
+  }
+
+  /// The edge facing the pill stays put and the panel grows away from it; centred on the pill, kept 8 inside the screen.
+  func frame(for size: NSSize) -> NSRect {
+    let pill = pillFrame(), vis = screenVisible()
+    var x = pill.midX - size.width / 2
+    x = max(vis.minX + tEdge, min(x, vis.maxX - tEdge - size.width))
+    let y = below ? pill.minY - tGap - size.height : pill.maxY + tGap
+    return NSRect(x: x, y: y, width: size.width, height: size.height)
+  }
+
+  func reposition() {
+    guard state != .hidden else { return }
+    window.setFrame(frame(for: window.frame.size), display: true)
+  }
+
+  // MARK: Show and hide
+
+  func fadeDuration(_ d: Double) -> Double { reduceMotion ? 0.1 : d }
+
+  func schedule(after seconds: Double, _ block: @escaping () -> Void) {
+    work?.cancel()
+    let item = DispatchWorkItem(block: block)
+    work = item
+    DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: item)
+  }
+
+  func animate(_ duration: Double, ease: CAMediaTimingFunctionName, _ changes: @escaping () -> Void, done: (() -> Void)? = nil) {
+    NSAnimationContext.runAnimationGroup({ ctx in
+      ctx.duration = duration
+      ctx.timingFunction = CAMediaTimingFunction(name: ease)
+      ctx.allowsImplicitAnimation = true
+      changes()
+    }, completionHandler: done)
+  }
+
+  /// Text to show now: `isFinal` settles it at 96% for a moment, a partial waits for the next words.
+  func show(_ text: String, isFinal: Bool) {
+    generation += 1
+    raw = text
+    let wasHidden = state == .hidden
+    let wasFading = state == .fading
+    if wasHidden { width = tMinWidth; chooseSide() }
+    state = isFinal ? .final : .partial
+    if isFinal { finalAt = Date() }
+    let target = layout(text)
+    let slide: CGFloat = reduceMotion ? 0 : 6
+    if wasHidden {
+      var start = target
+      start.origin.y += below ? slide : -slide   // from the pill's side toward its place
+      window.setFrame(start, display: false)
+      window.alphaValue = 0
+      panel.addChildWindow(window, ordered: .above)
+      window.orderFront(nil)
+      restyle()
+      animate(fadeDuration(0.12), ease: .easeOut) { self.window.animator().alphaValue = 1; if slide != 0 { self.window.animator().setFrame(target, display: true) } }
+      if slide == 0 { window.setFrame(target, display: true) }
+    } else {
+      if wasFading { animate(fadeDuration(0.08), ease: .easeOut) { self.window.animator().alphaValue = 1 } }
+      if reduceMotion {
+        window.setFrame(target, display: true)
+        label.alphaValue = textAlpha
+      } else {
+        animate(0.12, ease: .easeOut) {
+          self.window.animator().setFrame(target, display: true)
+          self.label.animator().alphaValue = self.textAlpha
+        }
+      }
+    }
+    let words = text.split { $0 == " " || $0 == "\n" }.count
+    if isFinal {
+      let hold = min(3.0, 1.5 + 0.1 * Double(max(0, words - 8)))
+      schedule(after: hold) { self.fadeOut(0.25) }
+    } else {
+      schedule(after: 1.8) { self.fadeOut(0.25) }
+    }
+  }
+
+  func fadeOut(_ duration: Double) {
+    guard state != .hidden else { return }
+    work?.cancel()
+    state = .fading
+    generation += 1
+    let mine = generation
+    animate(fadeDuration(duration), ease: .easeIn, { self.window.animator().alphaValue = 0 }, done: { [weak self] in
+      guard let self, self.generation == mine, self.state == .fading else { return }
+      self.hideNow()
+    })
+  }
+
+  func hideNow() {
+    work?.cancel()
+    generation += 1
+    state = .hidden
+    raw = ""
+    width = tMinWidth
+    window.alphaValue = 0
+    panel.removeChildWindow(window)
+    window.orderOut(nil)
+    label.attributedStringValue = NSAttributedString(string: "")
+    label.setAccessibilityValue("")
+  }
+
+  // MARK: Events
+
+  func partial(_ text: String) {
+    let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    if muted || t.isEmpty { return }
+    if state == .final, Date().timeIntervalSince(finalAt) < 0.4 { return }   // a late reply to the utterance just finished
+    if state == .partial, t == raw { return }                                  // same words: no new idle timer
+    show(t, isFinal: false)
+  }
+
+  func final(_ text: String) {
+    let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    if muted || t.isEmpty { return }
+    show(t, isFinal: true)
+  }
+
+  func clear() { if state != .hidden { fadeOut(0.2) } }
+
+  /// Called every frame of the pill's timer with what the files say; acts on changes only.
+  func observe(muted nowMuted: Bool, speaking: Bool) {
+    if nowMuted != muted {
+      muted = nowMuted
+      if muted, state != .hidden { fadeOut(0.12) }
+    }
+    if speaking != wasSpeaking {
+      wasSpeaking = speaking
+      guard speaking, state != .hidden else { return }
+      if state == .final {
+        let onScreen = Date().timeIntervalSince(finalAt)
+        if onScreen >= 1.0 { fadeOut(0.2) } else { schedule(after: 1.0 - onScreen) { self.fadeOut(0.2) } }
+      } else { fadeOut(0.2) }
+    }
+  }
+}
+
+let transcript = Transcript()
+NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: panel, queue: .main) { _ in transcript.reposition() }
+
+/// One JSON object per line on stdin. Lines over 8 KB, bad JSON and unknown types are ignored; nothing is kept or written.
+final class LineReader {
+  var buffer = Data()
+  var skipping = false
+  let maxLine = 8 * 1024
+
+  func feed(_ data: Data) {
+    for byte in data {
+      if byte == 10 {
+        if !skipping, !buffer.isEmpty { handle(buffer) }
+        buffer.removeAll(keepingCapacity: true)
+        skipping = false
+      } else if !skipping {
+        buffer.append(byte)
+        if buffer.count > maxLine { skipping = true; buffer.removeAll(keepingCapacity: true) }
+      }
+    }
+  }
+
+  func handle(_ line: Data) {
+    guard let obj = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any], let type = obj["type"] as? String else { return }
+    let text = obj["text"] as? String ?? ""
+    DispatchQueue.main.async {
+      switch type {
+      case "partial": transcript.partial(text)
+      case "final": transcript.final(text)
+      case "clear": transcript.clear()
+      default: break
+      }
+    }
+  }
+}
+
+if isatty(0) == 0 {
+  let reader = LineReader()
+  FileHandle.standardInput.readabilityHandler = { handle in
+    let data = handle.availableData
+    if data.isEmpty {   // the server is gone or never wrote: stop reading, hide, carry on as before
+      handle.readabilityHandler = nil
+      DispatchQueue.main.async { transcript.hideNow() }
+      return
+    }
+    reader.feed(data)
+  }
+}
+
+/// `--demo`: a scripted talk, so the panel can be reviewed with no mic and no call.
+if demo && !CommandLine.arguments.contains("--no-script") {
+  let long = "so I think we should move the retry into the upload function and add a short back-off, then make the tests wait for it instead of sleeping, and finally log how many tries it took"
+  let script: [(Double, String, String)] = [
+    (0.5, "partial", "so I think we"), (1.2, "partial", "so I think we should move the retry"),
+    (1.9, "partial", "so I think we should move the retry into the upload function"),
+    (2.8, "final", "So I think we should move the retry into the upload function."),
+    (8.0, "partial", "can you also"), (8.7, "partial", "can you also check"), (9.4, "partial", "can you also check the"),
+    (10.1, "partial", "can you also check the back-off"),
+    (15.0, "partial", String(long.prefix(60))), (15.7, "partial", String(long.prefix(110))), (16.4, "partial", String(long.prefix(150))), (17.1, "partial", long),
+    (18.0, "final", long + "."),
+    (24.0, "clear", ""),
+  ]
+  func play() {
+    for (at, type, text) in script {
+      DispatchQueue.main.asyncAfter(deadline: .now() + at) {
+        switch type {
+        case "partial": transcript.partial(text)
+        case "final": transcript.final(text)
+        default: transcript.clear()
+        }
+      }
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 27, execute: play)
+  }
+  play()
 }
 
 var level: CGFloat = 0
@@ -261,6 +673,7 @@ Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { _ in
   pill.t += pill.talking ? 1.6 / 30 : 1.0 / 30
   pill.needsDisplay = true
 
+  transcript.observe(muted: muted, speaking: pill.talking)
   let mic = pill.talking || muted ? nil : micLevel()
   level += ((mic?.level ?? 0) - level) * 0.25
   if level < 0.01 { level = 0 }
