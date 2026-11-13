@@ -5,9 +5,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- **Distinct sounds for each moment of a turn.** A soft tick means the mic is open, a pop means it heard you, a low purr means it heard nothing, and a low thud means something is wrong. `VOICE_MCP_CHIME=0` turns the tones off.
+- **When voice can't work, you hear why.** If the mic is blocked, there's no recorder or speech engine, or the model is missing or still downloading, voice-mcp says one short line out loud, once, and Claude explains the fix on screen. `VOICE_MCP_SPOKEN_ERRORS=0` turns the spoken lines off.
+
 ### Changed
 - **Replies are transcribed as soon as you stop talking.** voice-mcp no longer waits for the mic to close before it starts transcribing. The audio stays in memory instead of a temporary file.
 - **The Kokoro voice is loaded when a call starts and while you talk,** so a reply doesn't start with a cold voice.
+- **A mic that's busy in another window stays silent.** voice-mcp no longer speaks over it.
+- **`voice_setup` gives a friendlier report.** It explains the mic permission prompt and what each sound means, and after an install it says once, out loud, that voice is ready.
 
 ## [0.9.0] - 2026-11-03
 
