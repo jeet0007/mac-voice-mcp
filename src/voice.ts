@@ -1,14 +1,12 @@
 /** The round trip: speak → listen for one turn → transcribe. */
-import { mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import { chime, findRecorder, listenForTurn, MIC_PERMISSION_HINT, RECORDER_MISSING, speak, type Spoken } from "./audio.js";
 import { CONFIG, debug, DEFAULT_LISTEN_SECONDS, log, MAX_LISTEN_SECONDS, MAX_SPEAK_CHARS } from "./config.js";
+import { prewarmKokoro } from "./kokoro.js";
 import { acquireMicLock, MicBusyError } from "./lock.js";
 import { ensureModel } from "./model.js";
 import { CancelledError, resetWhichCache, SetupError, sleep } from "./proc.js";
 import { prepareSpeech } from "./speech-text.js";
-import { findWhisperCli, findWhisperServer, prewarm, STT_MISSING, transcribe } from "./stt.js";
+import { findWhisperCli, findWhisperServer, prewarm, STT_MISSING, transcribeBuffer } from "./stt.js";
 import { interjectionNote, showPhase, stopRequestedSince, takeInbox, workListener } from "./worklisten.js";
 
 export interface VoiceResult {
@@ -129,22 +127,25 @@ export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {
   }
   if (!listen) return speakInBackground(textToSpeak, { release, onPhase, waiting, keepListening: wasListening, startedAt });
   let result: VoiceResult;
+  // The recorder of this turn is stopped in the background once the turn is decided; the mic lock
+  // is held until it has really exited.
+  const recorder: { exited: Promise<void> } = { exited: Promise.resolve() };
   // The user starts typing: stop talking and listening now, not after the 15-second wait for speech.
   const typing = watchForTyping(startedAt, signal);
   try {
-    result = await turn(textToSpeak, seconds, model!, typing.signal, onPhase);
+    result = await turn(textToSpeak, seconds, model!, typing.signal, onPhase, recorder);
   } catch (err) {
     if (!(typing.typed && err instanceof CancelledError)) throw err;
     result = { ok: true, text: USER_TYPED, notes: [] };
   } finally {
     typing.dispose();
     showPhase(null);
-    release();
+    void recorder.exited.then(release);
   }
   result.notes.unshift(...laterNotes.splice(0));
   if (waiting) result.notes.unshift(waiting);
-  // They answered out loud: keep listening while Claude works, for "Claude, …".
-  if (result.heard) workListener.start();
+  // They answered out loud: keep listening while Claude works, for "Claude, …" (once the turn's recorder is gone).
+  if (result.heard) void recorder.exited.then(() => workListener.start());
   return result;
 }
 
@@ -213,12 +214,11 @@ async function turn(
   model: string,
   signal: AbortSignal | undefined,
   onPhase: ((phase: Phase) => void) | undefined,
+  recorder: { exited: Promise<void> },
 ): Promise<VoiceResult> {
   const speech = prepareSpeech(textToSpeak, { maxWords: CONFIG.maxSpeakWords, maxChars: MAX_SPEAK_CHARS });
   const notes = [...speech.notes];
-  const tmpDir = await mkdtemp(path.join(os.tmpdir(), "voice-mcp-"));
-  const wav = path.join(tmpDir, "reply.wav");
-  try {
+  {
     const t0 = Date.now();
     onPhase?.("speaking");
     const spoken = await speak(speech.text, signal);
@@ -226,9 +226,11 @@ async function turn(
     const fallback = fallbackNote(spoken);
     if (fallback) notes.push(fallback);
     onPhase?.("listening");
+    prewarmKokoro(); // no-op unless its worker was idle-stopped or recycled: the next reply isn't cold
     const tListen = Date.now();
     // The chime plays once the mic is really recording, so the first word is never lost.
-    const heard = await listenForTurn(seconds, wav, signal, { onListening: () => chime("start") });
+    const heard = await listenForTurn(seconds, null, signal, { onListening: () => chime("start") });
+    recorder.exited = heard.recorderExited;
     void chime("stop");
     const t1 = Date.now();
     debug("listen:", heard);
@@ -257,7 +259,7 @@ async function turn(
     if (heard.reason === "no-speech") return { ok: true, text: noSpeech, notes: [...notes, timing()] };
 
     onPhase?.("transcribing");
-    const transcript = await transcribe(wav, model, signal);
+    const transcript = await transcribeBuffer(heard.wav, model, signal);
     const transcribed = Date.now() - t1;
     if (!transcript) {
       // Something was loud enough to sound like speech (a cough, typing, a door), but whisper found no words in it.
@@ -279,8 +281,6 @@ async function turn(
       );
     }
     return { ok: true, text: transcript, notes: [...notes, timing(transcribed)], heard: true };
-  } finally {
-    await rm(tmpDir, { recursive: true, force: true });
   }
 }
 

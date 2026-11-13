@@ -190,6 +190,7 @@ class WorkListener {
           clearInterval(watch);
           signal.removeEventListener("abort", onStop);
         }
+        await heard.recorderExited; // one recorder at a time: the next loop (or a turn) opens the mic again
         if (signal.aborted) return;
         if (heard.reason === "no-speech" || heard.digitalSilence) continue;
         const text = await transcribe(wav, model, signal);

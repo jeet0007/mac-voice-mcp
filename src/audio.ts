@@ -306,6 +306,13 @@ export interface ListenResult {
   speechSeconds: number;
   /** Audio levels behind the decision, for tuning. */
   levels: EndpointerDiagnostics;
+  /** The trimmed utterance as a complete 16 kHz mono WAV, so it can be transcribed without a file. */
+  wav: Buffer;
+  /**
+   * Resolves once the recorder process has exited. listenForTurn returns as soon as the turn is
+   * decided, while the recorder is still being stopped: hold the mic lock until this resolves.
+   */
+  recorderExited: Promise<void>;
 }
 
 function recorderArgs(r: Recorder): string[] {
@@ -392,7 +399,8 @@ export interface ListenOptions {
 }
 
 /**
- * Listen for one conversational turn and write it to `outFile` (16 kHz mono WAV).
+ * Listen for one conversational turn: the utterance comes back as `wav` (16 kHz mono WAV), and is
+ * also written to `outFile` when one is given.
  * Streams raw PCM from the recorder, runs the endpointer on it live, and stops the
  * recorder the moment the user finishes. Leading and trailing silence are trimmed
  * (keeping a little padding) so whisper gets just the utterance.
@@ -401,7 +409,7 @@ export interface ListenOptions {
  * someone who starts talking right at the chime is never cut off: opening a mic takes a moment,
  * longer with Bluetooth.
  */
-export async function listenForTurn(maxSeconds: number, outFile: string, signal?: AbortSignal, opts: ListenOptions = {}): Promise<ListenResult> {
+export async function listenForTurn(maxSeconds: number, outFile: string | null, signal?: AbortSignal, opts: ListenOptions = {}): Promise<ListenResult> {
   const recorder = findRecorder();
   if (!recorder) throw new SetupError(RECORDER_MISSING);
 
@@ -435,7 +443,11 @@ export async function listenForTurn(maxSeconds: number, outFile: string, signal?
   const child = spawn(recorder.bin, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
   activeChildren.add(child);
 
-  const exitCode = await new Promise<number | null>((resolve, reject) => {
+  let markExited!: () => void;
+  const recorderExited = new Promise<void>((r) => (markExited = r));
+  // Resolves with the exit code, or "decided" as soon as the turn is over and there is audio:
+  // the recorder is stopped in the background, and nothing waits for it to exit.
+  const exitCode = await new Promise<number | null | "decided">((resolve, reject) => {
     const stop = () => {
       if (child.exitCode === null) child.kill("SIGTERM");
       setTimeout(() => child.exitCode === null && child.kill("SIGKILL"), 1500).unref();
@@ -443,6 +455,7 @@ export async function listenForTurn(maxSeconds: number, outFile: string, signal?
     const safety = setTimeout(() => {
       reason ??= "max-duration";
       stop();
+      if (frames.length) resolve("decided");
     }, (maxSeconds + 5) * 1000);
     const onAbort = () => stop();
     signal?.addEventListener("abort", onAbort, { once: true });
@@ -460,17 +473,22 @@ export async function listenForTurn(maxSeconds: number, outFile: string, signal?
         if (!announced && frames.length >= warmupFrames) announce();
       }
       pending = pending.subarray(off);
-      if (reason) stop();
+      if (reason) {
+        stop();
+        resolve("decided");
+      }
     });
     child.on("error", (e) => {
       clearTimeout(safety);
       activeChildren.delete(child);
+      markExited();
       reject(e);
     });
     child.on("close", (code) => {
       clearTimeout(safety);
       signal?.removeEventListener("abort", onAbort);
       activeChildren.delete(child);
+      markExited();
       resolve(code);
     });
   });
@@ -485,13 +503,16 @@ export async function listenForTurn(maxSeconds: number, outFile: string, signal?
 
   const [first, last] = endpointer.trimRange(frames.length);
   const pcm = Buffer.concat(frames.slice(first, last));
-  await writeFile(outFile, Buffer.concat([wavHeader(pcm.length), pcm]));
+  const wav = Buffer.concat([wavHeader(pcm.length), pcm]);
+  if (outFile) await writeFile(outFile, wav);
 
   return {
     reason: reason ?? "max-duration",
     digitalSilence: !endpointer.anyNonZero,
     speechSeconds: endpointer.speechSeconds,
     levels: endpointer.diagnostics(),
+    wav,
+    recorderExited,
   };
 }
 
