@@ -5,6 +5,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+- **Typing in another Claude window no longer stops this window's speech.** Voice Buddy's stop request now says which session typed, and each voice-mcp only listens to its own. An older Voice Buddy still works as before. Already have it? Run `/plugin marketplace update mac-voice-mcp`, then `/reload-plugins`.
+- **A stuck Kokoro voice no longer means silence.** If the Kokoro voice makes no sound for 30 seconds (`VOICE_MCP_KOKORO_STALL_SECONDS`), voice-mcp resets it and the built-in voice finishes the reply.
+- **Claude is told when a long reply was shortened.** If the text to speak runs over 120 words, Claude is told how much was spoken and to make sure the rest is on screen.
+- **Claude is told when lines were left out of what you said.** Speech-to-text sometimes invents lines such as "Thanks for watching". They are still left out, and Claude is now told which, so it can ask you if something looks missing.
+- **Real sentences that start with "Translated" or "Transcription" are no longer dropped.** Only a credit line such as "Transcription by …", or one that is your whole reply, is left out.
+
 ## [0.9.0] - 2026-11-03
 
 ### Added
