@@ -180,7 +180,7 @@ class WarmWhisperServer {
     throw new Error("whisper-server did not become ready in time");
   }
 
-  async transcribe(wavFile: string, signal?: AbortSignal): Promise<string> {
+  async transcribe(wavFile: string, signal?: AbortSignal, dropped?: string[]): Promise<string> {
     if (!this.ready) throw new Error("whisper-server is not running");
     const base = await this.ready;
     const form = new FormData();
@@ -195,7 +195,7 @@ class WarmWhisperServer {
     const json = (await res.json()) as { text?: string; error?: string };
     if (json.error) throw new Error(`whisper-server: ${json.error}`);
     this.touch();
-    return cleanTranscript(json.text ?? "");
+    return cleanTranscript(json.text ?? "", dropped);
   }
 
   private touch(): void {
@@ -245,22 +245,23 @@ export function describeStt(): string {
   return parts.join("; ");
 }
 
-async function transcribeCli(bin: string, wavFile: string, model: string, signal?: AbortSignal): Promise<string> {
+async function transcribeCli(bin: string, wavFile: string, model: string, signal?: AbortSignal, dropped?: string[]): Promise<string> {
   const args = ["-m", model, "-f", wavFile, "-l", CONFIG.language, "-t", String(CONFIG.threads), "-nt", "-np"];
   if (CONFIG.prompt) args.push("--prompt", CONFIG.prompt);
   const result = await run(bin, args, { signal, timeoutMs: 180_000 });
   if (result.code !== 0) {
     throw new Error(`whisper.cpp failed (exit ${result.code}): ${tail(result.stderr) || "no output"}`);
   }
-  return cleanTranscript(result.stdout);
+  return cleanTranscript(result.stdout, dropped);
 }
 
-export async function transcribe(wavFile: string, model: string, signal?: AbortSignal): Promise<string> {
+/** `dropped`, when given, receives whatever cleaning removed as invented (whisper's stock sentences). */
+export async function transcribe(wavFile: string, model: string, signal?: AbortSignal, dropped?: string[]): Promise<string> {
   const started = Date.now();
   if (serverUsable()) {
     try {
       await warmServer.warm(model);
-      const text = await warmServer.transcribe(wavFile, signal);
+      const text = await warmServer.transcribe(wavFile, signal, dropped);
       debug(`transcribed via whisper-server in ${Date.now() - started} ms`);
       return text;
     } catch (e) {
@@ -271,7 +272,7 @@ export async function transcribe(wavFile: string, model: string, signal?: AbortS
   }
   const cli = findWhisperCli();
   if (!cli) throw new SetupError(STT_MISSING);
-  const text = await transcribeCli(cli, wavFile, model, signal);
+  const text = await transcribeCli(cli, wavFile, model, signal, dropped);
   debug(`transcribed via whisper-cli in ${Date.now() - started} ms`);
   return text;
 }
