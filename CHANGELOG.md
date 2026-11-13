@@ -5,6 +5,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- **A live transcript panel on calls.** While you speak, the call bubble shows what voice-mcp has heard so far in a small panel, so you know your words arrived before Claude answers. The panel never takes focus, fades about 1.5 to 2 seconds after your last words, and is hidden from screen sharing and recording. It lives in memory on your Mac: nothing is written to disk and nothing is sent anywhere. It works in calls only, with the call bubble and the warm whisper server. The `base.en` model is recommended: words reach the panel in about 230 to 310 ms, against about 480 to 530 ms with `small.en`, and your final transcript isn't slowed. `VOICE_MCP_LIVE_TRANSCRIPT=0` turns it off.
+
 ### Changed
 - **Replies are transcribed as soon as you stop talking.** voice-mcp no longer waits for the mic to close before it starts transcribing. The audio stays in memory instead of a temporary file.
 - **The Kokoro voice is loaded when a call starts and while you talk,** so a reply doesn't start with a cold voice.
