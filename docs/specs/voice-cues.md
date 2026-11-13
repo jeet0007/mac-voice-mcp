@@ -150,10 +150,10 @@ spoken lines (English only in v1), sounds for mute and hang-up.
 
 ## Review rules (added after the Privacy and UX review)
 
-- **No line without a note.** Whenever the tone played but no line was said (VOICE_MCP_SPOKEN_ERRORS=0, another
-  session holds the mic, or `say` failed), Claude still gets a "voice-mcp note": the user heard an error tone
-  only; explain on screen and don't call `speak_and_listen` again until it is fixed.
+- **No line without a note.** Whenever no line was said (VOICE_MCP_SPOKEN_ERRORS=0, `say` failed, or another
+  session holds the mic), Claude still gets a "voice-mcp note": the user heard the error tone only (or, when another
+  session holds the mic, nothing at all); explain on screen and don't call `speak_and_listen` again until it is fixed.
 - **Another session's open mic.** Before any error line or the ready line, the mic lock is taken without waiting.
-  Held elsewhere: the tone only (errors) or nothing (ready line), never a spoken line. Free: the line is spoken
+  Held elsewhere: nothing at all, no tone and no line (same as mic busy). Free: the line is spoken
   with the lock held, so no other session opens its mic over it. At the end of a turn the line is spoken after the
   recorder has exited and before the lock is released.

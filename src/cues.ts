@@ -119,15 +119,13 @@ async function micIfFree(): Promise<(() => void) | null> {
 
 /**
  * announceError for a moment when we don't hold the mic lock (setup checks before a turn). Another
- * session holds it: the tone only, no line. Otherwise the line is spoken with the lock held, so no other
+ * session holds it: no sound at all (not even the tone). Otherwise the line is spoken with the lock held, so no other
  * session can open the mic over it.
  */
 export async function announceErrorIfMicFree(kind: SpokenError): Promise<Announced> {
   const release = await micIfFree();
-  if (!release) {
-    const toned = await cue("error");
-    return { spoken: false, line: SPOKEN_ERRORS[kind], repeat: false, toned, micElsewhere: true };
-  }
+  // Another session's mic is open: stay fully silent, like mic busy. Even the tone would land in its recording.
+  if (!release) return { spoken: false, line: SPOKEN_ERRORS[kind], repeat: false, toned: false, micElsewhere: true };
   try {
     return await announceError(kind);
   } finally {

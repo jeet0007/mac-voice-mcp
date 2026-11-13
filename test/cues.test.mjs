@@ -392,7 +392,7 @@ test("spoken errors off: the tone plays and Claude still gets a note, so it does
   }
 });
 
-test("another session holds the mic: a setup error gets the tone only, no line, and a tone-only note", MAC, async () => {
+test("another session holds the mic: a setup error is fully silent, and Claude is told nothing was said", MAC, async () => {
   const sb = sandbox({ tools: ["whisper-cli", "whisper-server"] }); // no recorder
   fakeModel(sb.cache);
   mkdirSync(sb.cache, { recursive: true });
@@ -402,9 +402,9 @@ test("another session holds the mic: a setup error gets the tone only, no line, 
     const r = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Hello there?" } });
     assert.equal(r.isError, true);
     assert.match(text(r), /voice-mcp is not set up yet/);
-    assert.match(text(r), /voice-mcp note: the user heard an error tone only/);
+    assert.match(text(r), /voice-mcp note: voice can't work right now, and nothing was said out loud/);
     assert.doesNotMatch(text(r), /already heard this out loud/);
-    assert.deepEqual(sb.events(), ["Basso 0.6"], "no spoken line while another session may be listening");
+    assert.deepEqual(sb.events(), [], "no tone and no line while another session may be listening");
     assert.doesNotMatch(sb.readLog(), /^speak /m);
   } finally {
     await client.close();
