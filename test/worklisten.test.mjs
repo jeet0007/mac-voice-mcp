@@ -52,3 +52,21 @@ test("the inbox is private to this account, and a runaway transcript is cut shor
   const [entry] = takeInbox();
   assert.equal(entry.text, `${"x".repeat(INBOX_MAX_CHARS)}…`);
 });
+
+test("a stop carries its session: ours and unmarked stops are honoured, another window's is ignored", async () => {
+  const { writeFileSync } = await import("node:fs");
+  const { stopFile, stopRequestedSince } = await import("../dist/worklisten.js");
+  mkdirSync(path.dirname(stopFile()), { recursive: true });
+  const since = Date.now() - 1000;
+  const stop = (o) => writeFileSync(stopFile(), JSON.stringify({ at: Date.now(), ...o }));
+  stop({ session: "mine" });
+  assert.equal(stopRequestedSince(since, "mine"), true, "own session");
+  stop({ session: "other" });
+  assert.equal(stopRequestedSince(since, "mine"), false, "another window's stop");
+  stop({});
+  assert.equal(stopRequestedSince(since, "mine"), true, "no id: an older plugin, still honoured");
+  stop({ session: "other" });
+  assert.equal(stopRequestedSince(since, null), true, "own session not known yet: as before");
+  stop({ session: "mine" });
+  assert.equal(stopRequestedSince(Date.now() + 5000, "mine"), false, "older than since");
+});
