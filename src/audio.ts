@@ -4,6 +4,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { CONFIG, debug, IS_MAC, IS_WIN, log } from "./config.js";
+import { cue, playSound } from "./cues.js";
 import { Endpointer, FRAME_BYTES, FRAME_MS, wavHeader, type EndReason, type EndpointerDiagnostics } from "./endpointer.js";
 import { flightAudio, flightEvent } from "./flight.js";
 import { KokoroError, kokoroEnabled, speakKokoro, synthesizeKokoroToFile } from "./kokoro.js";
@@ -206,7 +207,7 @@ export function stopBuiltInVoice(): void {
 }
 
 /** macOS `say`, espeak-ng, or Windows SAPI. */
-async function speakBuiltIn(text: string, signal?: AbortSignal): Promise<void> {
+export async function speakBuiltIn(text: string, signal?: AbortSignal): Promise<void> {
   const bin = findTts();
   if (!bin) throw new SetupError("No text-to-speech engine found. Install espeak-ng (e.g. `sudo apt install espeak-ng`).");
 
@@ -263,23 +264,17 @@ export async function synthesizeToFile(text: string, outFile: string): Promise<S
   return { engine: "built-in" };
 }
 
-/** A short, quiet cue that the mic just opened ("start") or closed ("stop"). macOS only. */
+/**
+ * A short, quiet cue that the mic just opened ("start") or the work listener heard something ("stop",
+ * a soft "got it"). macOS only. A voice turn's own cues are in cues.ts.
+ */
 export async function chime(kind: "start" | "stop"): Promise<void> {
-  if (CONFIG.chime) await playSound(kind === "start" ? "Tink" : "Pop", 0.6);
+  if (kind === "start") await cue("open");
+  else if (CONFIG.chime) await playSound("Pop", 0.6);
 }
 
 /** The soft tick of a call while Claude thinks: 60 ms of sound, too short for the endpointer to take as speech. macOS only. */
 export const thinkingTick = () => playSound("Tink", 0.2);
-
-async function playSound(name: string, volume: number): Promise<void> {
-  const sound = `/System/Library/Sounds/${name}.aiff`;
-  if (!IS_MAC || !existsSync(sound)) return;
-  try {
-    await run(which("afplay") ?? "/usr/bin/afplay", ["-v", String(volume), sound], { timeoutMs: 3000 });
-  } catch {
-    /* a missing sound is never fatal */
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Listening

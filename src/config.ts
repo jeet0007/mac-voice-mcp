@@ -93,8 +93,10 @@ export const CONFIG = {
   phaseFile: envBool("VOICE_MCP_PHASE_FILE", true),
   /** Start the built-in voice ahead of each reply, so it speaks sooner (about 0.8 s with Siri voices). */
   voiceStandby: envBool("VOICE_MCP_VOICE_STANDBY", true),
-  /** Play a short sound when the mic opens/closes (macOS). */
+  /** Play short sounds when the mic opens and closes, and when something goes wrong (macOS). */
   chime: envBool("VOICE_MCP_CHIME", true),
+  /** Say one short fixed line when a voice turn can't work (no mic access, no recorder, no model…). Off: VOICE_MCP_SPOKEN_ERRORS=0. */
+  spokenErrors: envBool("VOICE_MCP_SPOKEN_ERRORS", true),
 
   // --- Listening (turn-taking)
   /** End of turn: stop listening after this much silence once the user has spoken. */

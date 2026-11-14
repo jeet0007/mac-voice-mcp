@@ -31,7 +31,8 @@ import {
   STILL_ON_CALL,
   VOICE_MODE_PROMPT,
 } from "./texts.js";
-import { exclusive, finishSpeaking, preflight, speakAndListen } from "./voice.js";
+import { READY_LINE, sayLineIfMicFree } from "./cues.js";
+import { exclusive, finishSpeaking, preflight, speakAndListen, trackSpeaking } from "./voice.js";
 
 /** The longest `listen` may wait: the Cowork bridge drops tool calls after 60 s. */
 const MAX_LISTEN_WAIT_SECONDS = 40;
@@ -40,7 +41,10 @@ const failed = (what: string, err: unknown): CallToolResult => {
   const message = err instanceof Error ? err.message : String(err);
   log(`${what} failed:`, message);
   const prefix = err instanceof SetupError ? "voice-mcp is not set up yet: " : "voice-mcp error: ";
-  return { content: [{ type: "text", text: prefix + message }], isError: true };
+  // A spoken error already told the user (cues.ts); this note keeps Claude from repeating it aloud.
+  const note = (err as { voiceNote?: unknown } | null)?.voiceNote;
+  const notes = typeof note === "string" ? [{ type: "text" as const, text: `\n\n${note}` }] : [];
+  return { content: [{ type: "text", text: prefix + message }, ...notes], isError: true };
 };
 const reply = (text: string, notes: string[] = [], isError = false): CallToolResult => ({
   content: [{ type: "text", text }, ...notes.map((note) => ({ type: "text" as const, text: `\n\n${note}` }))],
@@ -231,7 +235,10 @@ export function createServer(): StdioMcpServer {
       try {
         const outcome = await exclusive(async () => {
           await finishSpeaking(); // its checks use the speaker too
-          return runSetupFlow({ install: install === true, kokoro: kokoro === true, bubble: bubble === true, onProgress: progress });
+          const done = await runSetupFlow({ install: install === true, kokoro: kokoro === true, bubble: bubble === true, onProgress: progress });
+          // The first READY after an install: one short line out loud, once per server process.
+          if (done.announceReady) trackSpeaking(sayLineIfMicFree(READY_LINE));
+          return done;
         });
         return { content: [{ type: "text", text: outcome.report }] };
       } catch (err) {

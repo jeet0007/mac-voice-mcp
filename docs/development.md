@@ -35,6 +35,7 @@ Turn the volume up, keep the room quiet, and stop voice mode in other sessions w
 | `speech-text.ts` | Rewriting screen text for speech, cleaning up transcripts (pure, unit-tested) |
 | `endpointer.ts` | Turn-taking voice-activity detection (pure, unit-tested) |
 | `audio.ts` | Text-to-speech, chimes, streaming mic capture |
+| `cues.ts` | The sounds for a turn (tick, pop, purr, thud) and the one-time spoken error lines |
 | `kokoro.ts`, `kokoro-worker.ts` | The optional Kokoro voice: install, a warm worker process, sentence-by-sentence playback, fallback, and a background warm-up at the start of a call and a listen |
 | `kokoro-text.ts`, `pcm.ts` | Pronunciation fixes and sentence chunks for Kokoro, PCM conversion (pure, unit-tested) |
 | `model.ts` | Finding, symlinking or downloading the model |
