@@ -55,7 +55,7 @@ It's optional and built on your Mac from source, never downloaded: setup offers 
 Without Voice Buddy, what you type during a voice turn waits until the turn is over: up to 15 seconds while voice-mcp waits for you to speak. With it, your first keystroke stops Claude talking and listening at once (within about a tenth of a second), and Claude waits for your typed message instead of asking again by voice.
 
 - **It works during** a voice turn, a spoken update that's still playing ("Give me a few minutes"), and listening while Claude works ("Claude, …").
-- **Only your own window counts.** Typing in another Claude window leaves this one alone.
+- **Only your own window counts.** Typing in another Claude window leaves this one alone, once voice-mcp knows its window: after the first voice turn, while listening while Claude works is on.
 - **Typing ends voice mode,** as it always has. Run `/mac-voice-mcp:talk` to pick up again.
 - **It's a Claude Code mod,** an early-access kind of plugin. If a Claude Code update ever breaks it, voice keeps working, and **Esc** still interrupts a voice turn.
 

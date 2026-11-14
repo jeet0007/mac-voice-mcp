@@ -109,6 +109,11 @@ test("cleanTranscript keeps ordinary words that start like a credit line, and re
   assert.equal(cleanTranscript("Captions are wrong. Fix them."), "Captions are wrong. Fix them.");
   assert.equal(cleanTranscript("Transcription by CastingWords"), "");
   assert.equal(cleanTranscript("Transcription"), "");
+  assert.equal(cleanTranscript("Subtitles."), "");
+  // A one-sentence reply that only starts like a credit line is a real answer.
+  assert.equal(cleanTranscript("Translated the file to French."), "Translated the file to French.");
+  assert.equal(cleanTranscript("Transcription is wrong."), "Transcription is wrong.");
+  assert.equal(cleanTranscript("Captions are broken"), "Captions are broken");
   const dropped = [];
   assert.equal(cleanTranscript("Merge it. Thank you for watching!", dropped), "Merge it.");
   assert.deepEqual(dropped, ["Thank you for watching!"]);

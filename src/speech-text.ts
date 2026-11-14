@@ -178,10 +178,10 @@ const STOCK_SENTENCES = [
 ];
 
 /**
- * Credit lines without a "by" ("Transcription…", "Translated the file"): whisper does invent these,
- * but they are also ordinary words, so they are dropped only when they are the whole transcript.
+ * A bare credit word ("Transcription.", "Subtitles"): whisper invents these from noise. Dropped only
+ * when it is the whole transcript and nothing else is said, so "Transcription is wrong." is kept.
  */
-const LOOSE_CREDITS = /^(?:subtitles|captions|transcription|translated|transcribed)\b.*$/;
+const LOOSE_CREDITS = /^(?:subtitles|subtitled|captions|transcription|translated|transcribed)$/;
 
 const squash = (sentence: string) => sentence.toLowerCase().replace(/[.!?,"“”]/g, "").replace(/\s+/g, " ").trim();
 const isStockSentence = (sentence: string): boolean => STOCK_SENTENCES.some((re) => re.test(squash(sentence)));
