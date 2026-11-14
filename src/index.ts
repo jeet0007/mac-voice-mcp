@@ -79,7 +79,8 @@ Environment variables (all optional):
   VOICE_MCP_SPEECH_MARGIN_DB       how far above room noise counts as speech (default 12)
   VOICE_MCP_WHISPER_SERVER         0 to always use whisper-cli (no warm server)
   VOICE_MCP_SERVER_IDLE_MINUTES    stop the warm server after this idle time (default 15)
-  VOICE_MCP_CHIME                  0 to disable the mic open/close sounds
+  VOICE_MCP_CHIME                  0 to disable the mic sounds (open, close, nothing heard, error)
+  VOICE_MCP_SPOKEN_ERRORS          0 to stop saying one short line out loud when a voice turn can't work
   VOICE_MCP_CALL_BUBBLE            0 to never show the floating call bubble
   VOICE_MCP_FLIGHT_RECORDER        off (default) | on | audio: keep a local log of what a turn decided, for "flag" (7 days, never transcripts)
   VOICE_MCP_DEBUG                  1 for verbose logs and timings (stderr)`);
