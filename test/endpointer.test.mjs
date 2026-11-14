@@ -356,7 +356,9 @@ test("a loud 0.4 s start, then soft words 22 dB below it with 90-450 ms gaps: al
 // Known limits. Level and timing alone can't tell these apart from the cases above: soft words at -40 dB,
 // 300 ms on / 300 ms off, must be kept, and room sounds at -46 dB, 360 ms on / 300 ms off, must not be.
 // No version of the endpointer (main included) handles them. Telling them apart needs real audio:
-// run with VOICE_MCP_FLIGHT_RECORDER=audio and `npx mac-voice-mcp flag` after a slow or cut turn.
+// run with VOICE_MCP_FLIGHT_RECORDER=audio and have Claude call the `flag` tool after a slow or cut turn
+// (npm run test:local does this itself for slow turns). The `mac-voice-mcp flag` command runs in its own
+// process, so it saves the events but never the server's in-memory audio.
 test("known limit: after a short \"yes\", on-and-off room sounds still hold the turn open", {
   todo: "same as main; needs real audio to separate from soft speech after a cough",
 }, () => {
@@ -379,4 +381,32 @@ test("known limit: after a loud start of 1.5 s, soft words 22 dB below it are lo
     const [, ep] = runLevels(script, JEET);
     assert.ok((ep.lastVoicedFrame + 1) * FRAME_MS >= lastWordEndMs - 150, `gap ${gapMs}: last voiced at ${(ep.lastVoicedFrame + 1) * FRAME_MS} ms, last word ends at ${lastWordEndMs} ms`);
   }
+});
+
+/** A 3 s sentence (-19/-25 dB syllables), then 150 ms room sounds every 1.2 s at these levels. */
+function sentenceThenSounds(levels) {
+  const script = [[-60, 1300]];
+  for (let t = 0; t < 3000; t += 420) script.push([-19, 210], [-25, 210]);
+  const sentenceEndMs = 1300 + Math.ceil(3000 / 420) * 420;
+  for (const db of levels) script.push([-60, 1200], [db, 150]);
+  return [script, sentenceEndMs];
+}
+
+test("room sounds at one level, more than 18 dB below the voice, don't hold the turn open", () => {
+  const [script, sentenceEndMs] = sentenceThenSounds(Array(11).fill(-45));
+  const [reason, , fed] = runLevels(script, JEET);
+  assert.equal(reason, "end-of-turn");
+  assert.ok(fed * FRAME_MS - sentenceEndMs <= 2600, `ended ${fed * FRAME_MS - sentenceEndMs} ms after the sentence`);
+});
+
+// Jeet's live run 2026-11-14 08:11 (turn 3, 13.88 s): the turn ended with the voice level at -45.15 dB and the
+// floor at -69.15 (= voice - 24); this script ends at -45.9 and -69.9. Each sound is just within 18 dB of the
+// voice level, counts as voice, and pulls the level down, so the next, quieter sound counts too.
+test("known limit: room sounds that get a little quieter each time walk the voice level down and hold the turn", {
+  todo: "same as main; needs real audio to tell from speech that gets softer",
+}, () => {
+  const [script, sentenceEndMs] = sentenceThenSounds([-36, -38, -40, -41, -42, -43, -44, -45, -46, -46, -47]);
+  const [reason, , fed] = runLevels(script, JEET);
+  assert.equal(reason, "end-of-turn");
+  assert.ok(fed * FRAME_MS - sentenceEndMs <= 2600, `ended ${fed * FRAME_MS - sentenceEndMs} ms after the sentence`);
 });
