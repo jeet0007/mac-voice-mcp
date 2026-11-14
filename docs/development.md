@@ -39,6 +39,7 @@ Turn the volume up, keep the room quiet, and stop voice mode in other sessions w
 | `kokoro-text.ts`, `pcm.ts` | Pronunciation fixes and sentence chunks for Kokoro, PCM conversion (pure, unit-tested) |
 | `model.ts` | Finding, symlinking or downloading the model |
 | `stt.ts` | The warm `whisper-server` with orphan guard, and the `whisper-cli` fallback. A turn is transcribed from memory (`transcribeBuffer`); only `whisper-cli` needs a temp file |
+| `flight.ts` | The opt-in flight recorder: event log, flags, audio ring, retention. Off = no-ops; imports no network module (tested) |
 | `setup.ts` | Requirement checks and consent-based background installs |
 | `lock.ts` | One voice turn (or call) at a time across every session on the Mac |
 | `worklisten.ts` | Listening for "Claude, …" while Claude works, the inbox and phase file shared with the plugin hook and Voice Buddy |
@@ -54,7 +55,7 @@ The package installs two commands: `mac-voice-mcp` (the one `npx -y mac-voice-mc
  Three layers; none of them depend on anyone's ears.
 
 1. **`npm test`** runs everywhere, with stub binaries. It covers the MCP tools, turn-taking, setup, the mic lock, the plugin hook and the release metadata.
-2. **The "Speech round trip" CI job** runs on a real Mac. Our own `setup --install` puts in SoX, whisper.cpp and the model. Then `doctor --no-loopback` runs, and `test/roundtrip.test.mjs` speaks known sentences with the real voice and transcribes them with the real whisper.cpp. The build fails if too many words come back wrong or transcription is too slow. The same job then installs the Kokoro voice with `setup --kokoro` and repeats the round trip with it, which also checks how soon Kokoro starts talking. GitHub's Macs have only basic voices and no GPU for whisper.cpp, so the limits there are looser: it guards against breakage, and doctor on a real Mac is the quality bar. The numbers are kept as a build artifact.
+2. **The "Speech round trip" workflow** (`.github/workflows/speech.yml`) runs on a real Mac: on pull requests that change speech or transcription code, on every push to `main`, weekly, and by hand. The everyday "Tests" workflow runs the suite on macOS with Node 22 and Linux with Node 26. Our own `setup --install` puts in SoX, whisper.cpp and the model. Then `doctor --no-loopback` runs, and `test/roundtrip.test.mjs` speaks known sentences with the real voice and transcribes them with the real whisper.cpp. The build fails if too many words come back wrong or transcription is too slow. The same job then installs the Kokoro voice with `setup --kokoro` and repeats the round trip with it, which also checks how soon Kokoro starts talking. GitHub's Macs have only basic voices and no GPU for whisper.cpp, so the limits there are looser: it guards against breakage, and doctor on a real Mac is the quality bar. The numbers are kept as a build artifact.
 3. **`npm run doctor`** on your own Mac adds the one thing CI can't test, your speakers and microphone. It plays a sentence through the speakers, records it and transcribes it. Each stage gets PASS, WARN or FAIL against fixed limits, and the report is saved under `~/.cache/mac-voice-mcp/doctor/`.
 
 ## Reviewing the call bubble without a mic

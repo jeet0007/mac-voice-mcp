@@ -15,7 +15,8 @@ import os from "node:os";
 import path from "node:path";
 import { CONFIG, debug, IS_WIN, log } from "./config.js";
 import { CancelledError, isExecutable, run, SetupError, sleep, tail, which } from "./proc.js";
-import { cleanTranscript } from "./speech-text.js";
+import { flightEvent } from "./flight.js";
+import { cleanTranscript as cleanText } from "./speech-text.js";
 
 export const STT_MISSING =
   "whisper.cpp (speech-to-text) is not installed. Call the voice_setup tool to check and install what's missing " +
@@ -185,7 +186,7 @@ class WarmWhisperServer {
     return !!this.ready && this.running;
   }
 
-  async transcribe(wav: Buffer, signal?: AbortSignal, timeoutMs = 120_000): Promise<string> {
+  async transcribe(wav: Buffer, signal?: AbortSignal, dropped?: string[], timeoutMs = 120_000): Promise<string> {
     if (!this.ready) throw new Error("whisper-server is not running");
     const base = await this.ready;
     const form = new FormData();
@@ -200,7 +201,7 @@ class WarmWhisperServer {
     const json = (await res.json()) as { text?: string; error?: string };
     if (json.error) throw new Error(`whisper-server: ${json.error}`);
     this.touch();
-    return cleanTranscript(json.text ?? "");
+    return cleanTranscript(json.text ?? "", dropped);
   }
 
   private touch(): void {
@@ -254,7 +255,7 @@ export function partialsAvailable(): boolean {
 export async function transcribePartial(wav: Buffer, signal: AbortSignal): Promise<string | null> {
   if (!partialsAvailable()) return null;
   try {
-    return await warmServer.transcribe(wav, signal, 5000);
+    return await warmServer.transcribe(wav, signal, undefined, 5000);
   } catch {
     return null;
   }
@@ -269,25 +270,40 @@ export function describeStt(): string {
   return parts.join("; ");
 }
 
-async function transcribeCli(bin: string, wavFile: string, model: string, signal?: AbortSignal): Promise<string> {
+async function transcribeCli(bin: string, wavFile: string, model: string, signal?: AbortSignal, dropped?: string[]): Promise<string> {
   const args = ["-m", model, "-f", wavFile, "-l", CONFIG.language, "-t", String(CONFIG.threads), "-nt", "-np"];
   if (CONFIG.prompt) args.push("--prompt", CONFIG.prompt);
   const result = await run(bin, args, { signal, timeoutMs: 180_000 });
   if (result.code !== 0) {
     throw new Error(`whisper.cpp failed (exit ${result.code}): ${tail(result.stderr) || "no output"}`);
   }
-  return cleanTranscript(result.stdout);
+  return cleanTranscript(result.stdout, dropped);
+}
+
+/** What the last clean-up removed from a transcript, in characters (the recorder logs the number, never the text). */
+let lastDropped = 0;
+function cleanTranscript(raw: string, dropped?: string[]): string {
+  const text = cleanText(raw, dropped);
+  lastDropped = Math.max(0, raw.trim().length - text.length);
+  return text;
 }
 
 /** A WAV file on disk, or the WAV bytes already in memory (no temp file for the warm server). */
 export type WavInput = { file: string } | { wav: Buffer };
 
-async function transcribeInput(input: WavInput, model: string, signal?: AbortSignal): Promise<string> {
+async function transcribeInput(input: WavInput, model: string, signal?: AbortSignal, dropped?: string[]): Promise<string> {
+  const started = Date.now();
+  const text = await transcribeNow(input, model, signal, dropped);
+  flightEvent("stt.done", { ms: Date.now() - started, chars: text.length, words: text.split(/\s+/).filter(Boolean).length, droppedChars: lastDropped });
+  return text;
+}
+
+async function transcribeNow(input: WavInput, model: string, signal?: AbortSignal, dropped?: string[]): Promise<string> {
   const started = Date.now();
   if (serverUsable()) {
     try {
       await warmServer.warm(model);
-      const text = await warmServer.transcribe("wav" in input ? input.wav : await readFile(input.file), signal);
+      const text = await warmServer.transcribe("wav" in input ? input.wav : await readFile(input.file), signal, dropped);
       debug(`transcribed via whisper-server in ${Date.now() - started} ms`);
       return text;
     } catch (e) {
@@ -300,14 +316,14 @@ async function transcribeInput(input: WavInput, model: string, signal?: AbortSig
   if (!cli) throw new SetupError(STT_MISSING);
   let text: string;
   if ("file" in input) {
-    text = await transcribeCli(cli, input.file, model, signal);
+    text = await transcribeCli(cli, input.file, model, signal, dropped);
   } else {
     // whisper-cli only reads files: the one place audio from memory touches the disk.
     const dir = await mkdtemp(path.join(os.tmpdir(), "voice-mcp-stt-"));
     try {
       const file = path.join(dir, "reply.wav");
       await writeFile(file, input.wav);
-      text = await transcribeCli(cli, file, model, signal);
+      text = await transcribeCli(cli, file, model, signal, dropped);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -316,11 +332,12 @@ async function transcribeInput(input: WavInput, model: string, signal?: AbortSig
   return text;
 }
 
-export function transcribe(wavFile: string, model: string, signal?: AbortSignal): Promise<string> {
-  return transcribeInput({ file: wavFile }, model, signal);
+/** `dropped`, when given, receives whatever cleaning removed as invented (whisper's stock sentences). */
+export function transcribe(wavFile: string, model: string, signal?: AbortSignal, dropped?: string[]): Promise<string> {
+  return transcribeInput({ file: wavFile }, model, signal, dropped);
 }
 
 /** Transcribe a complete WAV held in memory (the turn path: no temp file with the warm server). */
-export function transcribeBuffer(wav: Buffer, model: string, signal?: AbortSignal): Promise<string> {
-  return transcribeInput({ wav }, model, signal);
+export function transcribeBuffer(wav: Buffer, model: string, signal?: AbortSignal, dropped?: string[]): Promise<string> {
+  return transcribeInput({ wav }, model, signal, dropped);
 }
