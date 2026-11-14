@@ -102,3 +102,34 @@ test("a one-word opener runs into the next sentence, so the voice doesn't stop a
   assert.equal(prepareSpeech("The build is done. Tests pass.").text, "The build is done. Tests pass.");
   assert.equal(prepareSpeech("Deploy. Then tell me.").text, "Deploy. Then tell me.");
 });
+
+test("cleanTranscript keeps ordinary words that start like a credit line, and reports what it drops", () => {
+  assert.equal(cleanTranscript("I translated the file. Thanks."), "I translated the file. Thanks.");
+  assert.equal(cleanTranscript("Translated the file. Thanks."), "Translated the file. Thanks.");
+  assert.equal(cleanTranscript("Captions are wrong. Fix them."), "Captions are wrong. Fix them.");
+  assert.equal(cleanTranscript("Transcription by CastingWords"), "");
+  assert.equal(cleanTranscript("Transcription"), "");
+  assert.equal(cleanTranscript("Subtitles."), "");
+  // A one-sentence reply that only starts like a credit line is a real answer.
+  assert.equal(cleanTranscript("Translated the file to French."), "Translated the file to French.");
+  assert.equal(cleanTranscript("Transcription is wrong."), "Transcription is wrong.");
+  assert.equal(cleanTranscript("Captions are broken"), "Captions are broken");
+  const dropped = [];
+  assert.equal(cleanTranscript("Merge it. Thank you for watching!", dropped), "Merge it.");
+  assert.deepEqual(dropped, ["Thank you for watching!"]);
+  const lone = [];
+  assert.equal(cleanTranscript("Transcription by CastingWords", lone), "");
+  assert.deepEqual(lone, ["Transcription by CastingWords"]);
+  assert.equal(cleanTranscript("Yes, go ahead.", lone), "Yes, go ahead.");
+});
+
+test("prepareSpeech tells Claude when it spoke only part of a long reply", () => {
+  const long = Array.from({ length: 60 }, (_, i) => `Sentence number ${i} is here.`).join(" ");
+  const r = prepareSpeech(long, { maxWords: 120, maxChars: 5000 });
+  assert.ok(r.text.endsWith("The rest is on screen."));
+  assert.match(r.notes.join("\n"), /only the first \d+ of 300 words were spoken/);
+  const short = prepareSpeech("All done.", { maxWords: 120, maxChars: 5000 });
+  assert.deepEqual(short.notes, []);
+  const chars = prepareSpeech("word ".repeat(50), { maxWords: 0, maxChars: 40 });
+  assert.match(chars.notes.join("\n"), /cut at 40 characters/);
+});

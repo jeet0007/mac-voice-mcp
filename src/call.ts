@@ -31,7 +31,7 @@ import { CancelledError, sleep } from "./proc.js";
 import { detectDuplex, pauseSpeech } from "./speakers.js";
 import { prewarm, transcribe } from "./stt.js";
 import { PERMISSION_NOTICE } from "./texts.js";
-import { addToInbox, inboxDir, showPhase, takeInbox, voiceModeDir, type InboxEntry } from "./worklisten.js";
+import { addToInbox, inboxDir, setOwnSession, showPhase, takeInbox, voiceModeDir, type InboxEntry } from "./worklisten.js";
 import { trackSpeaking } from "./voice.js";
 
 /** Shared with the plugin hook and Voice Buddy: who is on a call, and which session it belongs to. */
@@ -319,10 +319,12 @@ export class Call {
       void this.end(`nobody said anything for ${Math.round(IDLE_MS / 60_000)} minutes`);
       return;
     }
-    if ((files.readJson(callFile()) as { pid?: unknown } | null)?.pid !== process.pid) {
+    const mark = files.readJson(callFile()) as { pid?: unknown; session?: unknown } | null;
+    if (mark?.pid !== process.pid) {
       void this.end("the session ended");
       return;
     }
+    setOwnSession(mark.session); // the hook added it: this window's session, so another window's typing can't stop us
     if (existsSync(permissionFile())) {
       rmSync(permissionFile(), { force: true });
       void this.say(PERMISSION_NOTICE).then(
