@@ -21,6 +21,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import * as files from "../hooks/voice-files.mjs";
+import { flightEvent } from "./flight.js";
 import { listenContinuously, speak, thinkingTick } from "./audio.js";
 import { BargeIn, type Interruption } from "./barge-in.js";
 import { bubbleWanted, startBubble, stopBubble } from "./bubble.js";
@@ -37,6 +38,12 @@ import { trackSpeaking } from "./voice.js";
 
 /** Shared with the plugin hook and Voice Buddy: who is on a call, and which session it belongs to. */
 export const callFile = () => files.callFile(voiceModeDir());
+
+/** Talking over Claude pauses or resumes the reply: the recorder notes when. */
+const pauseForBargeIn = (paused: boolean): void => {
+  flightEvent("bargein", { action: paused ? "pause" : "resume" }, null);
+  pauseSpeech(paused);
+};
 
 export const muteFile = () => files.muteFile(voiceModeDir());
 
@@ -94,7 +101,7 @@ export class Call {
   /** `say` calls play one after another. */
   private speaking: Promise<void> = Promise.resolve();
   /** The user talking over `say` (full duplex). A fresh one each call. */
-  private bargeIn = new BargeIn(pauseSpeech);
+  private bargeIn = new BargeIn(pauseForBargeIn);
   /** Utterances are transcribed in the order they were said. */
   private transcribing: Promise<void> = Promise.resolve();
   /** Problems with earlier speech, reported in the next result. */
@@ -135,7 +142,7 @@ export class Call {
     this.thinkingSince = 0;
     rmSync(muteFile(), { force: true });
     rmSync(permissionFile(), { force: true });
-    this.bargeIn = new BargeIn(pauseSpeech);
+    this.bargeIn = new BargeIn(pauseForBargeIn);
     this.duplex = duplex;
     this.lastActivity = Date.now();
     mkdirSync(voiceModeDir(), { recursive: true });
@@ -316,7 +323,9 @@ export class Call {
   private tick(): void {
     if (!this.on) return;
     this.bargeIn.settle(); // backs up its timer, which may fire a moment early
-    this.userMuted = existsSync(muteFile());
+    const muted = existsSync(muteFile());
+    if (muted !== this.userMuted) flightEvent("call.mute", { muted, why: "user" }, null);
+    this.userMuted = muted;
     if (Date.now() - this.lastActivity > IDLE_MS) {
       void this.end(`nobody said anything for ${Math.round(IDLE_MS / 60_000)} minutes`);
       return;

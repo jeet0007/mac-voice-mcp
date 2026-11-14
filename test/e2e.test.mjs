@@ -83,7 +83,7 @@ test("lists the tools, the prompts, and compact server instructions", async () =
   const { client } = await connect(sb.env());
   try {
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-    assert.deepEqual(tools, ["call", "listen", "say", "speak_and_listen", "voice_setup"]);
+    assert.deepEqual(tools, ["call", "flag", "listen", "say", "speak_and_listen", "voice_setup"]);
     const prompts = (await client.listPrompts()).prompts.map((p) => p.name).sort();
     assert.deepEqual(prompts, ["call", "setup", "voice_mode"]);
     assert.ok(Buffer.byteLength(client.getInstructions() ?? "") < 2048, "Claude Code truncates instructions at 2 KB");
