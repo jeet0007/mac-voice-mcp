@@ -14,7 +14,6 @@ import { stopWhisperServer } from "./stt.js";
 import {
   CALL_ALREADY_ON,
   CALL_ENDED_BY_CLAUDE,
-  CALL_GREETING,
   CALL_PROMPT,
   CALL_RULES,
   CALL_TOOL_DESCRIPTION,
@@ -104,7 +103,7 @@ export function createServer(): StdioMcpServer {
     {
       title: "Call",
       description: CALL_TOOL_DESCRIPTION,
-      inputSchema: { action: z.enum(["start", "end"]).describe("start: take the mic and greet the user. end: hang up.") },
+      inputSchema: { action: z.enum(["start", "end"]).describe("start: take the mic (nothing is spoken); greet the user yourself, once, with say, then listen. end: hang up.") },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ action }, { signal }): Promise<CallToolResult> => {
@@ -123,8 +122,8 @@ export function createServer(): StdioMcpServer {
           await workListener.stop();
           if (ended.signal.aborted) throw new CancelledError();
           if ((await call.start(AbortSignal.any([signal, ended.signal]))) === "already") return reply(CALL_ALREADY_ON);
-          const notes = await call.say(CALL_GREETING);
-          return reply(CALL_RULES, notes);
+          // Nothing is spoken here: Claude greets once, with say, so the user doesn't hear two greetings.
+          return reply(CALL_RULES);
         });
       } catch (err) {
         if (err instanceof CancelledError && ended.signal.aborted && !signal.aborted) return reply(CALL_ENDED_BY_CLAUDE);

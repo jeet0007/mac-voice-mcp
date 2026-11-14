@@ -11,6 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **Optional audio.** `VOICE_MCP_FLIGHT_RECORDER=audio` also holds the last 30 seconds of mic audio in memory (`VOICE_MCP_FLIGHT_AUDIO_SECONDS`). It reaches the disk only when you flag a moment, and is gone when voice-mcp stops. `doctor` says when the recorder is on.
 
 ### Changed
+- **One greeting when a call starts, not two.** Starting a call no longer says "I'm here." itself; Claude greets you once, in a few words. The plugin's hooks and Voice Buddy never spoke a greeting.
 - **Replies are transcribed as soon as you stop talking.** voice-mcp no longer waits for the mic to close before it starts transcribing. The audio stays in memory instead of a temporary file.
 - **The Kokoro voice is loaded when a call starts and while you talk,** so a reply doesn't start with a cold voice.
 

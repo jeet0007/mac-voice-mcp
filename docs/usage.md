@@ -21,7 +21,7 @@ In Claude Code, the plugin enforces this with a hook. If Claude tries to answer 
 
 A call keeps the line open, like a phone call: the mic stays on until you hang up, so you can talk whenever you like instead of waiting for Claude to ask.
 
-- **Start:** `/mac-voice-mcp:call` (Claude Code), or the **call** prompt in Claude Desktop and Cursor. Claude says "I'm here."
+- **Start:** `/mac-voice-mcp:call` (Claude Code), or the **call** prompt in Claude Desktop and Cursor. The call says nothing itself; Claude greets you once, in a few words.
 - **Talk anytime.** While Claude works, what you say reaches it at its next step. While it waits, Voice Buddy hands it over as your next message, within a fraction of a second. Without Voice Buddy (and in Claude Desktop and Cursor), Claude keeps listening between replies instead.
 - **Silence is fine.** A call never ends because you're quiet. It ends after 30 minutes with nothing said either way (`VOICE_MCP_CALL_IDLE_MINUTES`).
 - **Hang up:** say "hang up" or "bye Claude", or run `/mac-voice-mcp:hangup`. Closing the session ends the call too.
