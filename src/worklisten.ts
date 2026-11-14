@@ -34,10 +34,29 @@ export const inboxDir = () => files.inboxDir(voiceModeDir());
  */
 export const stopFile = () => path.join(voiceModeDir(), "stop");
 
-/** Was a stop asked for at or after `since` (ms)? */
-export function stopRequestedSince(since: number): boolean {
-  const at = (files.readJson(stopFile()) as { at?: unknown } | null)?.at;
-  return typeof at === "number" && at >= since;
+/**
+ * The Claude Code session this server belongs to, once the plugin hook has told us (it marks
+ * listening.state / call.json with the session id). Unknown until then.
+ */
+let ownSession: string | null = null;
+export const setOwnSession = (session: unknown): void => {
+  if (typeof session === "string" && session) ownSession = session;
+};
+/** For tests. */
+export const resetOwnSession = (): void => {
+  ownSession = null;
+};
+
+/**
+ * Was a stop asked for at or after `since` (ms)? A stop carries the session that typed ({"at", "session"});
+ * another session's stop is ignored once we know our own. A stop without a session id (an older
+ * plugin), or before we know ours, counts as before.
+ */
+export function stopRequestedSince(since: number, mine: string | null = ownSession): boolean {
+  const stop = files.readJson(stopFile()) as { at?: unknown; session?: unknown } | null;
+  if (typeof stop?.at !== "number" || stop.at < since) return false;
+  if (typeof stop.session !== "string" || !stop.session || !mine) return true;
+  return stop.session === mine;
 }
 
 /**
@@ -104,9 +123,10 @@ export function interjectionNote(entries: InboxEntry[]): string | null {
   return `voice-mcp note: while you were working, the user said by voice: ${said}. Take it into account in this reply.`;
 }
 
-function readListening(): { at: number } | null {
-  const at = (files.readJson(files.listeningFile(voiceModeDir())) as { at?: unknown } | null)?.at;
-  return typeof at === "number" ? { at } : null;
+function readListening(): { at: number; session?: unknown } | null {
+  const mark = files.readJson(files.listeningFile(voiceModeDir())) as { at?: unknown; session?: unknown } | null;
+  const at = mark?.at;
+  return typeof at === "number" ? { at, session: mark?.session } : null;
 }
 
 /** Another process is in a voice turn (it holds the mic lock): don't compete with it. */
@@ -159,6 +179,7 @@ class WorkListener {
       if (signal.aborted) return;
     }
 
+    setOwnSession(readListening()?.session); // the hook's mark names this window's session
     const model = await ensureModel({ download: false });
     {
       while (!signal.aborted) {

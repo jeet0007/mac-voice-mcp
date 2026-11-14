@@ -262,7 +262,13 @@ async function turn(
     if (heard.reason === "no-speech") return { ok: true, text: noSpeech, notes: [...notes, timing()] };
 
     onPhase?.("transcribing");
-    const transcript = await transcribeBuffer(heard.wav, model, signal);
+    const dropped: string[] = [];
+    const transcript = await transcribeBuffer(heard.wav, model, signal, dropped);
+    if (dropped.length) {
+      notes.push(
+        `voice-mcp note: left out of the transcript as probably not said by the user (speech-to-text invents such lines from noise): ${dropped.map((d) => JSON.stringify(d)).join(", ")}.`,
+      );
+    }
     const transcribed = Date.now() - t1;
     if (!transcript) {
       // Something was loud enough to sound like speech (a cough, typing, a door), but whisper found no words in it.

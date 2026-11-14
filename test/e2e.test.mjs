@@ -516,6 +516,21 @@ test("if Kokoro fails partway, the built-in voice says only what wasn't said yet
   }
 });
 
+test("a stuck Kokoro worker is reset after a timeout and the built-in voice finishes the text", async () => {
+  const sb = sandbox();
+  fakeKokoro(sb);
+  const { client } = await connect(sb.env({ FAKE_KOKORO: "hang-generate", VOICE_MCP_KOKORO_STALL_SECONDS: "0.5" }));
+  try {
+    const { result, notes, log } = await spokenUpdate(sb, client, "The first sentence is spoken by Kokoro. The second one hangs.");
+    assert.equal(result.isError, false);
+    assert.match(notes, /stopped answering/);
+    assert.equal(lines(log, "kokoro-generate").length, 2);
+    assert.deepEqual(lines(log, "speak ").map((l) => l.replace(/ voice=.*/, "")), ['speak "The second one hangs."']);
+  } finally {
+    await client.close();
+  }
+});
+
 test("VOICE_MCP_TTS=say keeps the built-in voice even with Kokoro installed; an unknown Kokoro voice falls back to af_heart", async () => {
   const sb = sandbox();
   fakeKokoro(sb);

@@ -9,6 +9,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **Replies are transcribed as soon as you stop talking.** voice-mcp no longer waits for the mic to close before it starts transcribing. The audio stays in memory instead of a temporary file.
 - **The Kokoro voice is loaded when a call starts and while you talk,** so a reply doesn't start with a cold voice.
 
+### Fixed
+- **Typing in another Claude window no longer stops this window's speech.** Voice Buddy's stop request now says which session typed, and each voice-mcp only listens to its own once it knows which window it belongs to: after its first voice turn, with listening while Claude works on (the default), or once a call starts. Before that, or with `VOICE_MCP_LISTEN_WHILE_WORKING=0`, any window's typing still stops it, as before. An older Voice Buddy still works as before. Already have it? Run `/plugin marketplace update mac-voice-mcp`, then `/reload-plugins`.
+- **A stuck Kokoro voice no longer means silence.** If the Kokoro voice makes no sound for 30 seconds (`VOICE_MCP_KOKORO_STALL_SECONDS`), voice-mcp resets it and the built-in voice finishes the reply.
+- **Claude is told when a long reply was shortened.** If the text to speak runs over 120 words, Claude is told how much was spoken and to make sure the rest is on screen.
+- **Claude is told when lines were left out of what you said** (in `speak_and_listen` turns). Speech-to-text sometimes invents lines such as "Thanks for watching". They are still left out, and Claude is now told which, so it can ask you if something looks missing.
+- **Real sentences that start with "Translated" or "Transcription" are no longer dropped.** Only a credit line such as "Transcription by …", or one that is your whole reply, is left out.
+
 ## [0.9.0] - 2026-11-03
 
 ### Added
