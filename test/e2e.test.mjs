@@ -1539,3 +1539,95 @@ test("setup offers the call bubble on a Mac with swiftc, and builds it only with
     await client.close();
   }
 });
+
+// --- The live transcript on the call bubble (docs/specs/live-transcript.md) ----------------------------
+
+const bubbleStdin = (sb) => {
+  try {
+    return readFileSync(`${sb.log}.bubble-stdin`, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  } catch {
+    return [];
+  }
+};
+const inferences = (sb) => (sb.readLog().match(/whisper-server inference/g) ?? []).length;
+/** Every file under the cache folder, and this server's temp folders, so a run can be compared with another. */
+function filesOnDisk(sb) {
+  const out = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else out.push(p.replace(sb.home, "~"));
+    }
+  };
+  walk(path.join(sb.home, ".cache"));
+  for (const n of readdirSync(os.tmpdir()).filter((n) => /^voice-mcp-(call|stt)-/.test(n))) out.push(`tmp/${n.replace(/-[A-Za-z0-9]{6}$/, "")}`);
+  return out.filter((f) => !/\/levels$/.test(f)).sort();
+}
+
+/** One call with the stub bubble: the user talks once; returns what the bubble got and what Claude heard. */
+async function talkOnce(env = {}, { built = true } = {}) {
+  const sb = sandbox();
+  if (built) builtBubble(sb);
+  fakeModel(path.join(cacheDir(sb), "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "talk", STUB_TRANSCRIPT: "Move the retry into the upload function.", ...env }));
+  try {
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    if (built) assert.ok(await waitFor(() => bubbleLog(sb).length === 1, 2000), "bubble started");
+    await new Promise((r) => setTimeout(r, 600));
+    writeFileSync(`${sb.log}.talk`, "");
+    assert.ok(await waitFor(() => !existsSync(`${sb.log}.talk`)), "the stub started talking");
+    const heard = await client.callTool({ name: "listen", arguments: { wait_seconds: 6 } });
+    await new Promise((r) => setTimeout(r, 300));
+    return { sb, heard: heard.content[0].text, lines: bubbleStdin(sb), files: filesOnDisk(sb), inferences: inferences(sb) };
+  } finally {
+    await client.close();
+  }
+}
+
+test("live transcript: partials, then one final, reach the bubble's stdin in order; Claude only gets the final", { skip: process.platform === "win32" }, async () => {
+  const r = await talkOnce({ VOICE_MCP_LIVE_TRANSCRIPT_MS: "400" });
+  assert.equal(r.heard, "Move the retry into the upload function.");
+  const types = r.lines.map((l) => l.type).filter((t) => t !== "clear");
+  assert.ok(types.length >= 2, `a partial and a final: ${types}`);
+  assert.ok(types.slice(0, -1).every((t) => t === "partial") && types.at(-1) === "final", `partials first, then the final: ${types}`);
+  assert.equal(types.filter((t) => t === "final").length, 1);
+  assert.equal(r.lines.find((l) => l.type === "final").text, "Move the retry into the upload function.");
+  assert.doesNotMatch(r.sb.readLog(), /Move the retry/, "no words in the log");
+});
+
+test("live transcript: nothing new on disk, and a cough shows nothing", { skip: process.platform === "win32" }, async () => {
+  const off = await talkOnce({ VOICE_MCP_LIVE_TRANSCRIPT: "0" });
+  const on = await talkOnce({ VOICE_MCP_LIVE_TRANSCRIPT_MS: "400" });
+  assert.deepEqual(on.files, off.files, "the same files with the transcript on or off");
+  assert.ok(on.files.every((f) => !/transcript|partial/i.test(f)));
+
+  const sb = sandbox();
+  builtBubble(sb);
+  fakeModel(path.join(cacheDir(sb), "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "cough-only", VOICE_MCP_LIVE_TRANSCRIPT_MS: "400" }));
+  try {
+    await client.callTool({ name: "call", arguments: { action: "start" } });
+    await client.callTool({ name: "listen", arguments: { wait_seconds: 3 } });
+    assert.deepEqual(bubbleStdin(sb).filter((l) => l.type !== "clear"), [], "a cough produces no partial and no final");
+  } finally {
+    await client.close();
+  }
+});
+
+test("live transcript: off, no bubble, or no whisper-server means no partial requests", { skip: process.platform === "win32" }, async () => {
+  const off = await talkOnce({ VOICE_MCP_LIVE_TRANSCRIPT: "0" });
+  assert.equal(off.inferences, 1, "only the final was transcribed");
+  assert.deepEqual(off.lines, []);
+
+  const noBubble = await talkOnce({ VOICE_MCP_LIVE_TRANSCRIPT_MS: "400" }, { built: false });
+  assert.equal(noBubble.inferences, 1, "no bubble, no partials");
+
+  const noServer = await talkOnce({ VOICE_MCP_LIVE_TRANSCRIPT_MS: "400", VOICE_MCP_WHISPER_SERVER: "0" });
+  assert.doesNotMatch(noServer.sb.readLog(), /whisper-server/, "the CLI fallback is never used for partials");
+  assert.deepEqual(noServer.lines.filter((l) => l.type === "partial"), []);
+  assert.equal(noServer.lines.filter((l) => l.type === "final").length, 1, "the final still shows");
+
+  const on = await talkOnce({ VOICE_MCP_LIVE_TRANSCRIPT_MS: "400" });
+  assert.ok(on.inferences > 1, "with it on there are partial requests");
+});

@@ -122,6 +122,10 @@ export const CONFIG = {
   callThinkingSound: envBool("VOICE_MCP_CALL_THINKING_SOUND", false),
   /** Show the floating call bubble during a call, once setup has built it (macOS). Off: VOICE_MCP_CALL_BUBBLE=0. */
   callBubble: envBool("VOICE_MCP_CALL_BUBBLE", true),
+  /** Show what you're saying, live, next to the call bubble (docs/specs/live-transcript.md). Off: VOICE_MCP_LIVE_TRANSCRIPT=0. */
+  liveTranscript: envBool("VOICE_MCP_LIVE_TRANSCRIPT", true),
+  /** How often a partial transcript is requested while you talk (ms, 400-2000). */
+  liveTranscriptMs: Math.min(2000, Math.max(400, envNum("VOICE_MCP_LIVE_TRANSCRIPT_MS", 700))),
 
   // --- Speech-to-text
   /** whisper.cpp model name (tiny.en, base.en, small.en, large-v3-turbo-q5_0, ...). */

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Stub SoX `rec`: streams synthetic 16 kHz mono s16le audio to stdout at 10x real time.
-// STUB_SCENARIO: answer | cough | silent | zero | long | call | dies (the recorder fails after a second)
+// STUB_SCENARIO: answer | cough | cough-only (no words at all) | silent | zero | long | call | dies (the recorder fails after a second)
 //   | talk (noise; 1.5 s of speech each time the file $STUB_LOG.talk appears, which it removes)
 //   | bargein (noise until a second text is spoken, then 1.5 s of speech over it, logged as "rec speech-onset <ms>")
 // STUB_SCENARIO_LATER: another scenario for every recording after the first (e.g. silence while Claude works).
@@ -34,6 +34,7 @@ const scenario = (runs > 1 && process.env.STUB_SCENARIO_LATER) || process.env.ST
 const script = {
   answer: () => [noise(1), speech(1.5), noise(0.6), speech(1.2)], // a mid-answer pause shorter than 1.2 s
   cough: () => [noise(1), burst(0.15), noise(2), speech(1.5)],
+  "cough-only": () => [noise(1), burst(0.15), noise(3)],
   silent: () => [],
   zero: () => [],
   long: () => [noise(0.5), speech(60)],

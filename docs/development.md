@@ -59,6 +59,18 @@ The package installs two commands: `mac-voice-mcp` (the one `npx -y mac-voice-mc
 2. **The "Speech round trip" workflow** (`.github/workflows/speech.yml`) runs on a real Mac: on pull requests that change speech or transcription code, on every push to `main`, weekly, and by hand. The everyday "Tests" workflow runs the suite on macOS with Node 22 and Linux with Node 26. Our own `setup --install` puts in SoX, whisper.cpp and the model. Then `doctor --no-loopback` runs, and `test/roundtrip.test.mjs` speaks known sentences with the real voice and transcribes them with the real whisper.cpp. The build fails if too many words come back wrong or transcription is too slow. The same job then installs the Kokoro voice with `setup --kokoro` and repeats the round trip with it, which also checks how soon Kokoro starts talking. GitHub's Macs have only basic voices and no GPU for whisper.cpp, so the limits there are looser: it guards against breakage, and doctor on a real Mac is the quality bar. The numbers are kept as a build artifact.
 3. **`npm run doctor`** on your own Mac adds the one thing CI can't test, your speakers and microphone. It plays a sentence through the speakers, records it and transcribes it. Each stage gets PASS, WARN or FAIL against fixed limits, and the report is saved under `~/.cache/mac-voice-mcp/doctor/`.
 
+## Reviewing the call bubble without a mic
+
+`native/call-bubble.swift` runs without a call or a server. `scripts/bubble-demo.sh [out-dir]` builds it with your own `swiftc` into a temp folder, starts `call-bubble --demo` (a pill that needs no `call.json`, plus a scripted talk: short partials, a final, a long three-line tail-fit, a clear), and takes a screenshot every 2 s of just the screen corner where the bubble sits (not the whole screen), into `out-dir` (default: a new temp folder, printed when it starts, so nothing lands in the repo). macOS asks to let your terminal record the screen the first time; the shots can show the on-screen words, so delete them when you're done. The script also repeats one partial after the idle fade, to show the panel stays hidden instead of blinking. It never touches your real cache or a real call. To drive it yourself:
+
+```bash
+swiftc -O native/call-bubble.swift -o /tmp/call-bubble
+printf '%s\n' '{"type":"partial","text":"so I think we"}' '{"type":"final","text":"So I think we should ship it."}' \
+  | VOICE_MCP_CACHE_DIR=$(mktemp -d) /tmp/call-bubble --demo --no-script   # one JSON object per line: partial, final, clear
+```
+
+Stdin lines are `{"type":"partial"|"final","text":"…"}` and `{"type":"clear"}`. Check Reduce Motion, Increase Contrast and Reduce Transparency in System Settings → Accessibility → Display while it runs: the panel re-reads them live. `npm test` covers the server side (partial scheduling, the bubble's stdin, no new files) with a stub bubble that records its stdin; the Swift panel itself is only compile-checked there.
+
 ## Trying the plugin from a checkout
 
  run `npm run dev:plugin`, then the `claude --plugin-dir …` command it prints. This loads a throwaway plugin, "mac-voice-mcp-dev", that runs this checkout's build with `node`. Its own name means it doesn't clash with an installed mac-voice-mcp. It also works inside this repo, where `npx mac-voice-mcp@<this version>` would find the checkout instead of the package and fail with `CONNECTION_CLOSED`.

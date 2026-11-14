@@ -69,6 +69,8 @@ Commands: `mac-voice-mcp flag ["note"]` saves the last minute to `flight/flags/`
 | `VOICE_MCP_CALL_DUPLEX` | `auto` | Whether the mic stays open while Claude speaks on a call. `full`: yes, so you can talk over Claude; it pauses, drops the rest of its reply when you say something real, and carries on after a filler such as "mm-hmm". Use it only with headphones: on speakers the mic hears Claude. `half`: the mic is muted while Claude speaks. `auto`: `full` when the Mac's sound goes to headphones (the headphone jack, or Bluetooth that isn't a speaker), else `half`; checked once when the call starts. Windows calls are always `half`: speech can't be paused there. |
 | `VOICE_MCP_CALL_THINKING_SOUND` | `0` | `1`: after your words reach Claude on a call, a soft tick every 1.5 s until Claude speaks, for at most 10 s, so the call never goes silent. Off by default. macOS only. |
 | `VOICE_MCP_CALL_BUBBLE` | `1` | `0`: never show the floating call bubble, even once it's built (see [Calls](usage.md#the-call-bubble-macos)). |
+| `VOICE_MCP_LIVE_TRANSCRIPT` | `1` | `0`: don't show your words next to the call bubble while you speak (see [the call bubble](usage.md#the-call-bubble-macos)). Nothing runs with it off, with no bubble, or with `VOICE_MCP_WHISPER_SERVER=0`. |
+| `VOICE_MCP_LIVE_TRANSCRIPT_MS` | `700` | How often the live transcript updates while you talk (400-2000 ms). Lower is snappier and uses more CPU. |
 
 ## Claude Code plugin hook
 

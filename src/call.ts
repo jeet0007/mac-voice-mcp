@@ -24,14 +24,15 @@ import * as files from "../hooks/voice-files.mjs";
 import { flightEvent } from "./flight.js";
 import { listenContinuously, speak, thinkingTick } from "./audio.js";
 import { BargeIn, type Interruption } from "./barge-in.js";
-import { bubbleWanted, startBubble, stopBubble } from "./bubble.js";
+import { bubbleTakesText, bubbleWanted, sendToBubble, startBubble, stopBubble } from "./bubble.js";
 import { CONFIG, debug, envNum, log, PKG } from "./config.js";
 import { acquireMicLock } from "./lock.js";
 import { ensureModel } from "./model.js";
 import { CancelledError, sleep } from "./proc.js";
 import { detectDuplex, pauseSpeech } from "./speakers.js";
 import { prewarmKokoro } from "./kokoro.js";
-import { prewarm, transcribe } from "./stt.js";
+import { LiveTranscript } from "./live-transcript.js";
+import { partialsAvailable, prewarm, transcribe, transcribePartial } from "./stt.js";
 import { PERMISSION_NOTICE } from "./texts.js";
 import { addToInbox, inboxDir, setOwnSession, showPhase, takeInbox, voiceModeDir, type InboxEntry } from "./worklisten.js";
 import { trackSpeaking } from "./voice.js";
@@ -257,6 +258,13 @@ export class Call {
     prewarmKokoro(); // the first words of the call shouldn't wait for the voice to load
     const dir = await mkdtemp(path.join(os.tmpdir(), "voice-mcp-call-"));
     let levelFrames = 0;
+    // Rough words while the user talks, for the bubble's panel only (docs/specs/live-transcript.md).
+    const live = new LiveTranscript({
+      everyMs: CONFIG.liveTranscriptMs,
+      enabled: () => bubbleTakesText() && partialsAvailable(),
+      request: (wav, sig) => transcribePartial(wav, sig),
+      emit: (text) => void sendToBubble({ type: "partial", text }),
+    });
     try {
       await listenContinuously(signal, {
         dir,
@@ -274,6 +282,7 @@ export class Call {
             writeFileSync(levelsFile(), `${db.toFixed(1)} ${thresholdDb.toFixed(1)}`);
           }
         },
+        live,
         onSpeech: (talking) => {
           this.userTalking = talking;
           if (this.duplex === "full") this.bargeIn.speech(talking);
@@ -297,6 +306,7 @@ export class Call {
     }
     const text = this.bargeIn.heard(from, transcript);
     if (!text) return; // a cough, or a filler said over Claude (its reply resumes)
+    if (transcript) sendToBubble({ type: "final", text: transcript }); // display only; `text` may carry a note for Claude
     this.lastActivity = Date.now();
     addToInbox(this.missed ? `${missedNote(this.missed)} ${text}` : text);
     this.missed = null;
