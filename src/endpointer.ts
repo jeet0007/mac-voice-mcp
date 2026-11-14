@@ -53,6 +53,9 @@ const BELOW_VOICE_DB = 18;
 // the loud part was the odd one out (a cough, a mic bump, a loud first word) and the quieter sound is the
 // voice. It becomes the voice level, so speech after a loud start isn't lost.
 const REBASE_MIN_FRAMES = 17;
+// The quieter sound must be nearly continuous, like speech: a gap of more than 180 ms below the threshold
+// starts the count again. Sparse room sounds after a short "yes" never add up to a rebase.
+const REBASE_MAX_GAP_FRAMES = 6;
 const STEADY_SPREAD_DB = 2.5; // sound this steady for a whole end-silence window is noise, not speech
 const STEADY_BELOW_SPEECH_DB = 6; // …as long as it's also clearly quieter than the user's voice
 
@@ -93,6 +96,8 @@ export class Endpointer {
   /** Frames above the threshold but far below the voice since the last voiced frame, and their summed level. */
   private belowVoiceFrames = 0;
   private belowVoiceSumDb = 0;
+  /** Frames below the threshold since the last frame above it. */
+  private belowThresholdRun = 0;
 
   /** Frame index where the current utterance began (-1 = none yet). */
   speechStartFrame = -1;
@@ -185,6 +190,12 @@ export class Endpointer {
       } else {
         loud = false;
       }
+    }
+    if (aboveThreshold) {
+      this.belowThresholdRun = 0;
+    } else if (++this.belowThresholdRun > REBASE_MAX_GAP_FRAMES) {
+      this.belowVoiceFrames = 0;
+      this.belowVoiceSumDb = 0;
     }
     if (loud) {
       this.belowVoiceFrames = 0;

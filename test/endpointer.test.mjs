@@ -334,3 +334,24 @@ test("a loud cough or first word, a pause, then speech 20-30 dB softer: the soft
     assert.ok(ep.lastVoicedFrame * FRAME_MS >= speechEndMs - 300, `${loudDb}/${voiceDb}: last voiced at ${ep.lastVoicedFrame * FRAME_MS} ms, so the speech would be trimmed off`);
   }
 });
+
+test("a short \"yes\", then quiet room sounds on and off: they don't add up to a voice and hold the turn open", () => {
+  // Review finding on the loud-start fix: gated sounds were counted across the gaps between them, so after a
+  // 0.3-0.6 s answer, sparse room sounds reached the 0.5 s needed to become "the voice" and the turn ran on.
+  const patterns = [
+    ["bursts 150 ms on / 450 ms off", [[-46, 150], [-62, 450]]],
+    ["bursts 360 ms on / 300 ms off", [[-46, 360], [-62, 300]]],
+    ["noise -46 / -52, 240 ms each", [[-46, 240], [-52, 240]]],
+  ];
+  for (const yesMs of [300, 600]) {
+    for (const [name, unit] of patterns) {
+      const script = [[-60, 1000], [-22, yesMs]];
+      for (let i = 0; i < 20; i++) script.push(...unit);
+      const [reason, ep] = runLevels(script, JEET);
+      assert.equal(reason, "end-of-turn", `${yesMs} ms yes, ${name}`);
+      const after = (ep.lastVoicedFrame + 1) * FRAME_MS - (1000 + yesMs);
+      assert.ok(after <= 300, `${yesMs} ms yes, ${name}: room sounds counted as voice until ${after} ms after the answer`);
+      assert.ok(ep.speechDb > -30, `${yesMs} ms yes, ${name}: voice level dragged to ${ep.speechDb.toFixed(1)} dB`);
+    }
+  }
+});
