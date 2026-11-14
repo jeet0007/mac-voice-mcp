@@ -263,6 +263,16 @@ export class Endpointer {
     return { floorDb: this.floorDb, speechDb: this.speechDb, recentDb, recentSpreadDb };
   }
 
+  /** How long the sound has been below the speech threshold, in ms (0 while the last frame was speech). */
+  get quietMs(): number {
+    return this.quietRun * FRAME_MS;
+  }
+
+  /** The user is mid-utterance: speech has begun and the turn isn't over. */
+  get speaking(): boolean {
+    return this.started;
+  }
+
   get speechSeconds(): number {
     return (this.voicedFrames * FRAME_MS) / 1000;
   }

@@ -18,7 +18,8 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 | `VOICE_MCP_KOKORO_DIR` | `~/.cache/mac-voice-mcp/kokoro` | Where the Kokoro voice is installed. |
 | `VOICE_MCP_MAX_SPEAK_WORDS` | `120` | Longer text is cut at a sentence boundary ("the rest is on screen"), and Claude is told how much was spoken. |
 | `VOICE_MCP_VOICE_STANDBY` | `1` | The built-in voice is started ahead of each reply and waits for the text, so the reply starts sooner (about 0.8 s sooner with Siri voices). It's started after your first voice turn and stopped after 15 idle minutes. `0` starts it only when there's something to say. |
-| `VOICE_MCP_CHIME` | `1` | Set to `0` to turn off the mic open/close sounds. |
+| `VOICE_MCP_CHIME` | `1` | Set to `0` to turn off all the sounds: mic open (tick), closed after words (pop), closed after nothing was heard (purr) and errors (thud). Spoken errors still play. |
+| `VOICE_MCP_SPOKEN_ERRORS` | `1` | When a voice turn can't work (no microphone access, no recorder, no speech model), voice-mcp says one short fixed line out loud with the built-in voice, after the error sound. Each kind is spoken at most once per 10 minutes per server. `0` turns the lines off; the sounds still play (see `VOICE_MCP_CHIME`). A microphone busy in another window is never spoken. |
 | `VOICE_MCP_PHASE_FILE` | `1` | Writes what a voice turn is doing (`speaking`, `listening`, `transcribing`, `waiting`) to `voice-mode/phase.json` in the cache folder, for Voice Buddy's status line, the call bubble, or a display of your own. One file for the whole Mac; removed when the turn ends. `0` turns it off. |
 | `VOICE_MCP_LISTEN_WHILE_WORKING` | `1` | Claude Code plugin: after you answer out loud, listen while Claude works for things you say to it ("Claude, …"). See [Talk to Claude while it works](usage.md#talk-to-claude-while-it-works). `0` turns it off. |
 | `VOICE_MCP_WORK_LISTEN_MINUTES` | `10` | Stop listening while Claude works after this long without a voice turn. |
@@ -68,6 +69,8 @@ Commands: `mac-voice-mcp flag ["note"]` saves the last minute to `flight/flags/`
 | `VOICE_MCP_CALL_DUPLEX` | `auto` | Whether the mic stays open while Claude speaks on a call. `full`: yes, so you can talk over Claude; it pauses, drops the rest of its reply when you say something real, and carries on after a filler such as "mm-hmm". Use it only with headphones: on speakers the mic hears Claude. `half`: the mic is muted while Claude speaks. `auto`: `full` when the Mac's sound goes to headphones (the headphone jack, or Bluetooth that isn't a speaker), else `half`; checked once when the call starts. Windows calls are always `half`: speech can't be paused there. |
 | `VOICE_MCP_CALL_THINKING_SOUND` | `0` | `1`: after your words reach Claude on a call, a soft tick every 1.5 s until Claude speaks, for at most 10 s, so the call never goes silent. Off by default. macOS only. |
 | `VOICE_MCP_CALL_BUBBLE` | `1` | `0`: never show the floating call bubble, even once it's built (see [Calls](usage.md#the-call-bubble-macos)). |
+| `VOICE_MCP_LIVE_TRANSCRIPT` | `1` | `0`: don't show your words next to the call bubble while you speak (see [the call bubble](usage.md#the-call-bubble-macos)). Nothing runs with it off, with no bubble, or with `VOICE_MCP_WHISPER_SERVER=0`. |
+| `VOICE_MCP_LIVE_TRANSCRIPT_MS` | `700` | How often the live transcript updates while you talk (400-2000 ms). Lower is snappier and uses more CPU. |
 
 ## Claude Code plugin hook
 

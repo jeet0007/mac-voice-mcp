@@ -46,7 +46,14 @@ export interface SetupOutcome {
   ready: boolean;
   installing: boolean;
   report: string;
+  /** The first READY after an install=true run: the server says the ready line once (see cues.ts). */
+  announceReady?: boolean;
 }
+
+/** An install=true run happened in this server process and its READY hasn't been announced yet. */
+let installRequested = false;
+/** The ready line is said once per server process. */
+let readyAnnounced = false;
 
 /** How long one voice_setup call waits for installs before reporting "still installing". */
 const INSTALL_WAIT_MS = 40_000;
@@ -256,6 +263,7 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
   const { install = false, onProgress } = opts;
   resetWhichCache(); // see anything installed since the last check (e.g. `brew install sox` in a terminal)
   let checks = await checkRequirements();
+  if (install) installRequested = true;
 
   if (install) {
     // Missing pieces, plus recommended ones (SoX when only ffmpeg is there): the user agreed to install.
@@ -293,7 +301,12 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
     `voice-mcp setup — ${ready ? "READY" : installing ? "INSTALLING" : "NOT READY"}`,
     "",
     ...checks.map((c) => `${icon[c.status]} ${c.label}: ${c.detail}${c.brew && c.status !== "ok" && c.status !== "installing" ? ` → brew install ${c.brew}` : ""}`),
-    IS_MAC ? "• Microphone: macOS asks for permission the first time speak_and_listen listens — click Allow." : "",
+    IS_MAC
+      ? "• Microphone: the first time it listens, macOS asks to allow microphone access for this app (Terminal, Claude, Cursor …). Click Allow."
+      : "",
+    IS_MAC
+      ? "• Sounds: a soft tick means the mic is open, a pop means it heard you, a low purr means it heard nothing, a low thud means something is wrong (it also says what)."
+      : "",
   ];
   if (done.length) lines.push("", "What was done:", ...done.map((d) => `- ${d}`));
   if ((install || opts.kokoro || opts.bubble) && !done.length && !installing && ready) lines.push("", "Nothing to install — everything was already present.");
@@ -302,7 +315,7 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
   const needsModel = checks.some((c) => c.model && c.status === "missing");
   lines.push("");
   if (ready) {
-    lines.push("Next: everything is in place — speak_and_listen is ready to use.");
+    lines.push("Next: everything is in place — speak_and_listen is ready to use. Tell the user once, in one sentence, what the tick means.");
     const recommended = [...new Set(checks.filter((c) => c.status === "optional" && c.brew).map((c) => c.brew!))];
     if (recommended.length && !install && findBrew()) {
       lines.push(
@@ -339,9 +352,13 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
     lines.push("Next: the items marked ✘ need the user's attention (see details above); then call voice_setup again.");
   }
 
+  const announceReady = ready && installRequested && !readyAnnounced && IS_MAC && CONFIG.spokenErrors;
+  if (ready) installRequested = false;
+  if (announceReady) readyAnnounced = true;
   return {
     ready,
     installing,
+    announceReady,
     report: lines.filter((l, i, a) => !(l === "" && (i === 0 || a[i - 1] === ""))).join("\n").trim(),
   };
 }

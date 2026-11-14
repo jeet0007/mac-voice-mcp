@@ -1,3 +1,11 @@
 #!/usr/bin/env node
 // Stub afplay: logs the sound instead of playing it.
-require("fs").appendFileSync(process.env.STUB_LOG, `afplay ${process.argv.slice(2).join(" ")}\n`);
+// STUB_AFPLAY_SLOW=Pop:1500: that sound "plays" that long (stopped early by SIGTERM); its start times go to $STUB_LOG.afplay-times.
+const fs = require("fs");
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.STUB_LOG, `afplay ${args.join(" ")}\n`);
+const name = (args[args.length - 1].match(/(\w+)\.aiff$/) || [])[1];
+fs.appendFileSync(`${process.env.STUB_LOG}.afplay-times`, `${name} ${Date.now()}\n`);
+const slow = Object.fromEntries((process.env.STUB_AFPLAY_SLOW || "").split(",").filter(Boolean).map((x) => x.split(":")));
+const ms = Number(slow[name] || 0);
+if (ms > 0) setTimeout(() => process.exit(0), ms);

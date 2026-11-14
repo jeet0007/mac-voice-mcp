@@ -16,7 +16,11 @@ http.createServer((req, res) => {
     req.on("end", () => {
       log(`whisper-server inference bytes=${n}`);
       if (process.env.STUB_STT_FAIL && fs.existsSync(process.env.STUB_STT_FAIL)) return res.writeHead(500).end("stub: model failed to load");
-      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ text: ` ${process.env.STUB_TRANSCRIPT ?? "Stub transcript from the server."}\n` }));
+      // STUB_STT_DELAY_MS: a transcription that takes a while (so the Pop is already playing when the words are known).
+      setTimeout(
+        () => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ text: ` ${process.env.STUB_TRANSCRIPT ?? "Stub transcript from the server."}\n` })),
+        Number(process.env.STUB_STT_DELAY_MS || 0),
+      );
     });
   } else res.writeHead(404).end();
 }).listen(port, "127.0.0.1");

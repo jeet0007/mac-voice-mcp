@@ -21,7 +21,7 @@ In Claude Code, the plugin enforces this with a hook. If Claude tries to answer 
 
 A call keeps the line open, like a phone call: the mic stays on until you hang up, so you can talk whenever you like instead of waiting for Claude to ask.
 
-- **Start:** `/mac-voice-mcp:call` (Claude Code), or the **call** prompt in Claude Desktop and Cursor. Claude says "I'm here."
+- **Start:** `/mac-voice-mcp:call` (Claude Code), or the **call** prompt in Claude Desktop and Cursor. The call says nothing itself; Claude greets you once, in a few words.
 - **Talk anytime.** While Claude works, what you say reaches it at its next step. While it waits, Voice Buddy hands it over as your next message, within a fraction of a second. Without Voice Buddy (and in Claude Desktop and Cursor), Claude keeps listening between replies instead.
 - **Silence is fine.** A call never ends because you're quiet. It ends after 30 minutes with nothing said either way (`VOICE_MCP_CALL_IDLE_MINUTES`).
 - **Hang up:** say "hang up" or "bye Claude", or run `/mac-voice-mcp:hangup`. Closing the session ends the call too.
@@ -35,6 +35,8 @@ A call keeps the line open, like a phone call: the mic stays on until you hang u
 A small floating window shows while a call is on, above every app and on every desktop, like FaceTime's call pill. It shows Claude's blob (orange while Claude speaks, blue while it listens, grey while you're muted), how long the call has lasted, a mute button and a hang-up button. A soft glow around it follows your mic: it grows as you speak louder, blue when voice-mcp counts it as speech and grey when it's too quiet (or only background noise), so you can tell if you need to speak up or if noise is getting in. Click the blob to bring the call's terminal or editor to the front. Drag it anywhere; it stays where you left it, and it never takes focus from what you're typing.
 
 It's optional and built on your Mac from source, never downloaded: setup offers it when Xcode's Command Line Tools are installed (`xcode-select --install`; Homebrew users have them), and builds it in a few seconds once you agree. Run `npx -y mac-voice-mcp setup --bubble`, or ask Claude to set it up. After an upgrade it rebuilds by itself. To turn it off, set `VOICE_MCP_CALL_BUBBLE=0`. Muting from the bubble also shows in Voice Buddy.
+
+**Live transcript.** While you talk, a small panel under the bubble (or above it, near the bottom of the screen) shows what voice-mcp has heard so far, so you know it got your words before Claude answers. It's hidden until there are words, dimmer while you're still speaking, settles when you finish, and fades about two seconds after the last new word, when you mute or hang up, or when Claude starts to answer. It never takes focus or clicks, follows the bubble when you drag it, and respects Reduce Motion, Increase Contrast and Reduce Transparency; it never makes VoiceOver speak, and it is hidden from screen sharing and recording, so a call you share doesn't show what you say. The rough words come from the same on-device whisper-server and exist only in memory: they're never saved, logged or sent to Claude (Claude gets the final transcript, as always). It needs the bubble and the warm whisper-server; turn it off with `VOICE_MCP_LIVE_TRANSCRIPT=0`. After upgrading, setup rebuilds the bubble once to include it.
 
 **One call at a time.** While you're on a call, voice in other windows (other Claude Code sessions, Claude Desktop, Cursor) says you're on a call elsewhere instead of opening the mic.
 

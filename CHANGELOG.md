@@ -6,13 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [Unreleased]
 
 ### Added
+- **Distinct sounds for each moment of a turn.** A soft tick means the mic is open, a pop means it heard you, a low purr means it heard nothing, and a low thud means something is wrong. `VOICE_MCP_CHIME=0` turns the tones off.
+- **When voice can't work, you hear why.** If the mic is blocked, there's no recorder or speech engine, or the model is missing or still downloading, voice-mcp says one short line out loud, once, and Claude explains the fix on screen. `VOICE_MCP_SPOKEN_ERRORS=0` turns the spoken lines off.
+- **A live transcript panel on calls.** While you speak, the call bubble shows what voice-mcp has heard so far in a small panel, so you know your words arrived before Claude answers. The panel never takes focus, fades about 1.5 to 2 seconds after your last words, and is hidden from screen sharing and recording. It lives in memory on your Mac: nothing is written to disk and nothing is sent anywhere. It works in calls only, with the call bubble and the warm whisper server. The `base.en` model is recommended: words reach the panel in about 230 to 310 ms, against about 480 to 530 ms with `small.en`, and your final transcript isn't slowed. `VOICE_MCP_LIVE_TRANSCRIPT=0` turns it off.
 - **A flight recorder, off by default, to find out why a turn went wrong.** Set `VOICE_MCP_FLIGHT_RECORDER=on` and voice-mcp keeps a log on your Mac of what each turn decided: timings, audio levels and why a turn ended. It holds numbers and reasons, never what you or Claude said, only how long it was. It is kept for 7 days (`VOICE_MCP_FLIGHT_DAYS`) and is never sent anywhere. Details in [Privacy and security](docs/privacy-security.md).
 - **Flag a moment.** Say a turn went wrong and Claude can save the last minute to a file on your Mac with the new `flag` tool; or run `mac-voice-mcp flag "what happened"` yourself. `mac-voice-mcp flight status` shows what is kept and `mac-voice-mcp flight purge` deletes all of it.
 - **Optional audio.** `VOICE_MCP_FLIGHT_RECORDER=audio` also holds the last 30 seconds of mic audio in memory (`VOICE_MCP_FLIGHT_AUDIO_SECONDS`). It reaches the disk only when you flag a moment, and is gone when voice-mcp stops. `doctor` says when the recorder is on.
 
 ### Changed
+- **One greeting when a call starts, not two.** Starting a call no longer says "I'm here." itself; Claude greets you once, in a few words. The plugin's hooks and Voice Buddy never spoke a greeting.
 - **Replies are transcribed as soon as you stop talking.** voice-mcp no longer waits for the mic to close before it starts transcribing. The audio stays in memory instead of a temporary file.
 - **The Kokoro voice is loaded when a call starts and while you talk,** so a reply doesn't start with a cold voice.
+- **A mic that's busy in another window stays silent.** voice-mcp no longer speaks over it.
+- **`voice_setup` gives a friendlier report.** It explains the mic permission prompt and what each sound means, and after an install it says once, out loud, that voice is ready.
 
 ### Fixed
 - **Typing in another Claude window no longer stops this window's speech.** Voice Buddy's stop request now says which session typed, and each voice-mcp only listens to its own once it knows which window it belongs to: after its first voice turn, with listening while Claude works on (the default), or once a call starts. Before that, or with `VOICE_MCP_LISTEN_WHILE_WORKING=0`, any window's typing still stops it, as before. An older Voice Buddy still works as before. Already have it? Run `/plugin marketplace update mac-voice-mcp`, then `/reload-plugins`.

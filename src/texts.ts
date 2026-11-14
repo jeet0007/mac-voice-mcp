@@ -20,25 +20,26 @@ export const SPEECH_RULES = [
 /** Claude Code reads these (truncated at 2 KB) — keep under that. */
 export const SERVER_INSTRUCTIONS = [
   "voice-mcp speaks to the user through their computer's speakers and returns a local transcript of",
-  "their spoken reply (tool: speak_and_listen). Use it when the user asked to be kept in the loop by",
-  "voice, is in a hands-free session, or you need a quick decision while they may be away from the",
-  "keyboard. Not for routine output the user can read on screen.",
+  "their spoken reply (tool: speak_and_listen). Use it when the user wants voice updates, is hands-free,",
+  "or you need a quick decision while they may be away from the keyboard. Not for routine output the",
+  "user can read on screen.",
   "",
   SPEECH_RULES,
   "",
   "Handling replies:",
   "- The result is a speech-to-text transcript: expect homophones and mangled jargon; interpret",
   "  generously, and confirm by voice before anything destructive or irreversible.",
-  '- "(No speech detected …)" means no answer: never treat silence as consent. Ask once more or',
-  "  continue with safe work and report on screen.",
+  '- "(No speech detected …)" means no answer: never treat silence as consent. Ask once more, or',
+  "  carry on safely and report on screen.",
   "- Once the user is talking with you by voice, stay in voice: answer every turn with speak_and_listen,",
   "  not a text reply, until they say stop (say goodbye with listen: false) or start typing.",
-  '- If the result includes a "voice-mcp note", follow it.',
+  '- Follow any "voice-mcp note". One saying the user already heard an error means: explain on screen,',
+  "  don't retry by voice.",
   "",
-  "A call (mic open until the user hangs up): the call tool starts and ends it; then speak with say",
-  "and hear the user with listen, not speak_and_listen.",
-  "Setup: if a tool says voice-mcp is not set up, call voice_setup (check only); install=true only",
-  "after the user agrees.",
+  "A call (mic open until hang-up): the call tool starts and ends it; speak with say, hear the user",
+  "with listen, not speak_and_listen.",
+  "Setup: if a tool says voice-mcp isn't set up, call voice_setup (check only); install=true only after",
+  "the user agrees.",
 ].join("\n");
 
 export const SPEAK_TOOL_DESCRIPTION = [
@@ -111,9 +112,10 @@ export const VOICE_MODE_PROMPT = (task?: string) =>
 
 export const CALL_TOOL_DESCRIPTION = [
   "Start or end a call: a hands-free session where the microphone stays open and the user talks whenever they",
-  "like, like a phone call, until they hang up. action start takes the speaker and microphone, says a short",
-  "greeting and returns the rules of the call; action end hangs up (also happens when the user says",
-  '"hang up" or "bye Claude", or after a long silence). During the call, speak with say and hear the user with listen.',
+  "like, like a phone call, until they hang up. action start takes the speaker and microphone and returns the",
+  "rules of the call; it says nothing aloud, so greet the user yourself, once, in a few words, with say, then call",
+  'listen. action end hangs up (also happens when the user says "hang up" or "bye Claude", or after a long',
+  "silence). During the call, speak with say and hear the user with listen.",
 ].join("\n");
 
 export const SAY_TOOL_DESCRIPTION = [
@@ -133,6 +135,7 @@ export const LISTEN_TOOL_DESCRIPTION = [
 /** What `call start` returns. */
 export const CALL_RULES = [
   "The call is on: the microphone stays open until the user hangs up.",
+  "- Nothing has been said yet. Greet the user once, in a few words, with say (for example \"Hi, I'm here.\"), then call listen.",
   "- Reply to the user only through say (the same speaking rules as speak_and_listen). Keep the full details",
   "  (code, diffs, links) on screen as usual; the spoken line is the headline.",
   "- What the user says reaches you as tool results and voice-mcp notes: say returns what they said while",
@@ -151,7 +154,6 @@ export const ON_CALL_USE_SAY = "(You're on a call with the user: speak with say 
 export const STILL_ON_CALL = "(still on the call, nothing said) Call listen again to keep waiting, or say something.";
 export const callEnded = (reason: string) => `(The call ended: ${reason}. Don't call listen or say again; the user can type, or start a new call.)`;
 export const SAID = "(Said. The microphone stays open, so carry on; what the user says next comes with your next say or listen.)";
-export const CALL_GREETING = "I'm here.";
 /** Said on a call when Claude Code shows a permission prompt (the plugin hook asks for it). */
 export const PERMISSION_NOTICE = "Claude needs your OK on screen.";
 

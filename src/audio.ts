@@ -4,9 +4,11 @@ import { existsSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { CONFIG, debug, IS_MAC, IS_WIN, log } from "./config.js";
+import { cue, playSound } from "./cues.js";
 import { Endpointer, FRAME_BYTES, FRAME_MS, wavHeader, type EndReason, type EndpointerDiagnostics } from "./endpointer.js";
 import { flightAudio, flightEvent } from "./flight.js";
 import { KokoroError, kokoroEnabled, speakKokoro, synthesizeKokoroToFile } from "./kokoro.js";
+import { utteranceFrames, type LiveTranscript } from "./live-transcript.js";
 import { wavSeconds } from "./pcm.js";
 import { trackSpeaker } from "./speakers.js";
 import { activeChildren, CancelledError, run, SetupError, startWaiting, tail, which, type RunResult, type Waiting } from "./proc.js";
@@ -205,7 +207,7 @@ export function stopBuiltInVoice(): void {
 }
 
 /** macOS `say`, espeak-ng, or Windows SAPI. */
-async function speakBuiltIn(text: string, signal?: AbortSignal): Promise<void> {
+export async function speakBuiltIn(text: string, signal?: AbortSignal): Promise<void> {
   const bin = findTts();
   if (!bin) throw new SetupError("No text-to-speech engine found. Install espeak-ng (e.g. `sudo apt install espeak-ng`).");
 
@@ -262,23 +264,17 @@ export async function synthesizeToFile(text: string, outFile: string): Promise<S
   return { engine: "built-in" };
 }
 
-/** A short, quiet cue that the mic just opened ("start") or closed ("stop"). macOS only. */
+/**
+ * A short, quiet cue that the mic just opened ("start") or the work listener heard something ("stop",
+ * a soft "got it"). macOS only. A voice turn's own cues are in cues.ts.
+ */
 export async function chime(kind: "start" | "stop"): Promise<void> {
-  if (CONFIG.chime) await playSound(kind === "start" ? "Tink" : "Pop", 0.6);
+  if (kind === "start") await cue("open");
+  else if (CONFIG.chime) await playSound("Pop", 0.6);
 }
 
 /** The soft tick of a call while Claude thinks: 60 ms of sound, too short for the endpointer to take as speech. macOS only. */
 export const thinkingTick = () => playSound("Tink", 0.2);
-
-async function playSound(name: string, volume: number): Promise<void> {
-  const sound = `/System/Library/Sounds/${name}.aiff`;
-  if (!IS_MAC || !existsSync(sound)) return;
-  try {
-    await run(which("afplay") ?? "/usr/bin/afplay", ["-v", String(volume), sound], { timeoutMs: 3000 });
-  } catch {
-    /* a missing sound is never fatal */
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Listening
@@ -575,6 +571,8 @@ export interface ContinuousOptions {
   onLevel?: (db: number, thresholdDb: number) => void;
   /** true once the user has talked for BARGE_IN_MS, false when that utterance ends or turns out to be a blip. */
   onSpeech?: (talking: boolean) => void;
+  /** Gets every heard frame, to ask for rough transcripts while the user talks (src/live-transcript.ts). */
+  live?: LiveTranscript;
   dir: string;
 }
 
@@ -625,14 +623,22 @@ export async function listenContinuously(signal: AbortSignal, opts: ContinuousOp
         if (frames.length) {
           endpointer = fresh();
           frames = [];
+          opts.live?.end();
         }
       } else {
         frames.push(frame);
         flightAudio(frame);
         const reason = endpointer.push(frame);
         opts.onLevel?.(endpointer.lastDb, endpointer.lastThresholdDb);
+        if (!reason && opts.live && endpointer.speaking) {
+          opts.live.frame(endpointer.speechSeconds, endpointer.quietMs, () => {
+            const pcm = Buffer.concat(utteranceFrames(frames, endpointer.speechStartFrame));
+            return Buffer.concat([wavHeader(pcm.length), pcm]);
+          });
+        }
         if (reason) {
           flightEvent("listen.end", { mode: "call", reason, totalMs: frames.length * FRAME_MS, speechMs: Math.round(endpointer.speechSeconds * 1000), ...endpointer.diagnostics() }, null);
+          opts.live?.end(); // before onUtterance: a partial still out is dropped, the final goes alone
           if (reason !== "no-speech") {
             const [first, last] = endpointer.trimRange(frames.length);
             const pcm = Buffer.concat(frames.slice(first, last));
