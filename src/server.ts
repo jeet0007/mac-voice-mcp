@@ -2,6 +2,7 @@
 import { z } from "zod";
 import { call } from "./call.js";
 import { CONFIG, DEFAULT_LISTEN_SECONDS, log, MAX_LISTEN_SECONDS, MAX_SPEAK_CHARS, PKG } from "./config.js";
+import { flightEnabled, flightFlag, flightMode, startFlight } from "./flight.js";
 import { stopKokoro } from "./kokoro.js";
 import { interjectionNote, takeInbox, workListener } from "./worklisten.js";
 import { type CallToolResult, StdioMcpServer } from "./mcp.js";
@@ -181,6 +182,32 @@ export function createServer(): StdioMcpServer {
   );
 
   server.registerTool(
+    "flag",
+    {
+      title: "Flag a moment",
+      description:
+        "Call only when the user explicitly asks to flag or report a bad voice turn; never on your own. " +
+        "Saves the last minute of what voice-mcp did (levels, why turns ended, whether speech finished: no transcripts) to a local file. " +
+        "Only works when the user turned the flight recorder on. Returns the file's path.",
+      inputSchema: { note: z.string().max(500).optional().describe("Optional: what went wrong, in the user's words.") },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    async ({ note }): Promise<CallToolResult> => {
+      if (!flightEnabled()) {
+        return reply("The flight recorder is off, so there is nothing to flag. The user can turn it on with VOICE_MCP_FLIGHT_RECORDER=on (or audio) and restart.", [], true);
+      }
+      try {
+        const flag = flightFlag(note, { withAudio: flightMode() === "audio" });
+        if (!flag) return reply("Nothing to flag yet.", [], true);
+        if (flag.tooSoon) return reply("Already flagged just now.");
+        return reply(`Flagged. Saved on this Mac: ${flag.file}${flag.wav ? ` (audio: ${flag.wav})` : ""}\n${flag.summary}`);
+      } catch (err) {
+        return failed("flag", err);
+      }
+    },
+  );
+
+  server.registerTool(
     "voice_setup",
     {
       title: "Voice setup",
@@ -278,6 +305,8 @@ export async function startServer(): Promise<void> {
   if (process.stdin.isTTY) {
     log("This is an MCP server and expects an MCP client on stdin. Try `setup` or `test` instead, or see --help.");
   }
+
+  startFlight(); // does nothing unless VOICE_MCP_FLIGHT_RECORDER is on
 
   // Cheap, install-free: link an existing model into the cache if there is one.
   void locateModel().catch(() => null);

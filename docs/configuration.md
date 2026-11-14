@@ -14,8 +14,9 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 | `VOICE_MCP_KOKORO_VOICE` | `af_heart` | Kokoro voice. American English starts with `a`, British with `b`, e.g. `af_bella`, `am_michael`, `bf_emma`, `bm_george`. |
 | `VOICE_MCP_KOKORO_SPEED` | `1` | Kokoro speaking speed, `0.5` to `2`. |
 | `VOICE_MCP_KOKORO_DTYPE` | `fp32` | `q8`: a smaller model (~90 MB instead of ~330 MB) that's about half as fast. |
+| `VOICE_MCP_KOKORO_STALL_SECONDS` | `30` | If the Kokoro voice makes no sound for this long, voice-mcp resets it and the built-in voice finishes the reply. |
 | `VOICE_MCP_KOKORO_DIR` | `~/.cache/mac-voice-mcp/kokoro` | Where the Kokoro voice is installed. |
-| `VOICE_MCP_MAX_SPEAK_WORDS` | `120` | Longer text is cut at a sentence boundary ("the rest is on screen"). |
+| `VOICE_MCP_MAX_SPEAK_WORDS` | `120` | Longer text is cut at a sentence boundary ("the rest is on screen"), and Claude is told how much was spoken. |
 | `VOICE_MCP_VOICE_STANDBY` | `1` | The built-in voice is started ahead of each reply and waits for the text, so the reply starts sooner (about 0.8 s sooner with Siri voices). It's started after your first voice turn and stopped after 15 idle minutes. `0` starts it only when there's something to say. |
 | `VOICE_MCP_CHIME` | `1` | Set to `0` to turn off all the sounds: mic open (tick), closed after words (pop), closed after nothing was heard (purr) and errors (thud). Spoken errors still play. |
 | `VOICE_MCP_SPOKEN_ERRORS` | `1` | When a voice turn can't work (no microphone access, no recorder, no speech model), voice-mcp says one short fixed line out loud with the built-in voice, after the error sound. Each kind is spoken at most once per 10 minutes per server. `0` turns the lines off; the sounds still play (see `VOICE_MCP_CHIME`). A microphone busy in another window is never spoken. |
@@ -49,6 +50,16 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 | `VOICE_MCP_THREADS` | min(8, cores) | Number of whisper.cpp threads. |
 | `VOICE_MCP_CACHE_DIR` | `~/.cache/mac-voice-mcp` | Where models are downloaded or symlinked. |
 | `VOICE_MCP_DEBUG` | `0` | Verbose logs with per-turn timings, written to stderr. |
+
+## Flight recorder
+Off by default. An opt-in, on-device log for "why was that turn cut off?": numbers and reasons only, never transcripts or spoken text. See [Privacy and security](privacy-security.md).
+| Variable | Default | |
+|---|---|---|
+| `VOICE_MCP_FLIGHT_RECORDER` | `off` | `on`: log events to `~/.cache/mac-voice-mcp/flight/`. `audio`: also keep the last seconds of mic audio in memory, written as a WAV only when you flag a moment. |
+| `VOICE_MCP_FLIGHT_DAYS` | `7` | Days to keep logs and flags, `1` to `30`. |
+| `VOICE_MCP_FLIGHT_AUDIO_SECONDS` | `30` | Length of the in-memory audio ring, `5` to `60`. |
+
+Commands: `mac-voice-mcp flag ["note"]` saves the last minute to `flight/flags/`; `mac-voice-mcp flight status` shows what is kept; `mac-voice-mcp flight purge` deletes it all. Claude can also call the `flag` tool, only when you ask it to; the note it writes is free text and can contain words you said. A running server's in-memory audio is not cleared by `flight purge`: restart voice-mcp to drop it. Flags: one per 10 seconds, 50 kept. `doctor` mentions it when it's on. (`VOICE_MCP_RECORDER` is the SoX/ffmpeg choice, unrelated.)
 
 ## Calls
 

@@ -2,6 +2,7 @@
 import { chime, findRecorder, listenForTurn, MIC_PERMISSION_HINT, RECORDER_MISSING, speak, type Spoken } from "./audio.js";
 import { CONFIG, debug, DEFAULT_LISTEN_SECONDS, log, MAX_LISTEN_SECONDS, MAX_SPEAK_CHARS } from "./config.js";
 import { announceError, announceErrorIfMicFree, cue, errorNote, type SpokenError } from "./cues.js";
+import { flightStopSeen, flightTurn } from "./flight.js";
 import { prewarmKokoro } from "./kokoro.js";
 import { acquireMicLock, MicBusyError } from "./lock.js";
 import { ensureModel, isModelDownloading } from "./model.js";
@@ -83,6 +84,7 @@ export function watchForTyping(since: number, signal?: AbortSignal) {
   const check = () => {
     if (!typed && stopRequestedSince(since)) {
       typed = true;
+      flightStopSeen(since);
       ctl.abort();
     }
   };
@@ -252,6 +254,7 @@ async function turn(
 ): Promise<VoiceResult> {
   const speech = prepareSpeech(textToSpeak, { maxWords: CONFIG.maxSpeakWords, maxChars: MAX_SPEAK_CHARS });
   const notes = [...speech.notes];
+  flightTurn();
   {
     const t0 = Date.now();
     onPhase?.("speaking");
@@ -301,7 +304,13 @@ async function turn(
     void cue("close", pop.signal); // a pop: the mic is closed
 
     onPhase?.("transcribing");
-    const transcript = await transcribeBuffer(heard.wav, model, signal);
+    const dropped: string[] = [];
+    const transcript = await transcribeBuffer(heard.wav, model, signal, dropped);
+    if (dropped.length) {
+      notes.push(
+        `voice-mcp note: left out of the transcript as probably not said by the user (speech-to-text invents such lines from noise): ${dropped.map((d) => JSON.stringify(d)).join(", ")}.`,
+      );
+    }
     const transcribed = Date.now() - t1;
     if (!transcript) {
       pop.abort(); // the pop may still be playing: the purr says it didn't count, and it starts right away
