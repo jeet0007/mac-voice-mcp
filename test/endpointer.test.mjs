@@ -296,7 +296,7 @@ function replayTurn({ roomDb, roomSd, tailDb, tailDuty, tailMs }) {
   return { reason: null, afterSpeechMs: Infinity, ep };
 }
 
-test("replay of Jeet's slow turns: quiet room sounds 20+ dB below the voice don't hold the turn open", () => {
+test("replay of Jeet's slow turns: quiet room sounds far below the voice don't hold the turn open", () => {
   const turns = {
     "turn 1 (10.02 s live)": { roomDb: -59.78, roomSd: 2.63, tailDb: -44, tailDuty: 0.35, tailMs: 7000 },
     "turn 2 (13.40 s live)": { roomDb: -54.07, roomSd: 1.98, tailDb: -46, tailDuty: 0.16, tailMs: 10300 },
@@ -319,4 +319,18 @@ test("speech that suddenly drops 18 dB is still the user and is kept (as before 
   const [reason, , fed] = runLevels(script, JEET);
   assert.equal(reason, "end-of-turn");
   assert.ok(fed * FRAME_MS - softEndMs >= 1900, `ended ${fed * FRAME_MS - softEndMs} ms after the soft speech, i.e. during it`);
+});
+
+test("a loud cough or first word, a pause, then speech 20-30 dB softer: the softer speech is kept", () => {
+  // Review finding on the voice gate: the loud start set the voice level, and everything after it was gated out.
+  for (const [loudDb, loudMs, voiceDb] of [[-10, 400, -30], [-8, 500, -38]]) {
+    const script = [[-60, 1000], [loudDb, loudMs], [-60, 300]];
+    for (let i = 0; i < 10; i++) script.push([voiceDb, 210], [voiceDb - 6, 210]); // ~4.2 s of speech
+    const speechEndMs = 1000 + loudMs + 300 + 20 * 210;
+    const [reason, ep, fed] = runLevels(script, JEET);
+    assert.equal(reason, "end-of-turn");
+    const after = fed * FRAME_MS - speechEndMs;
+    assert.ok(after >= 1900, `${loudDb} dB start, ${voiceDb} dB speech: ended ${after} ms after the speech, i.e. during it`);
+    assert.ok(ep.lastVoicedFrame * FRAME_MS >= speechEndMs - 300, `${loudDb}/${voiceDb}: last voiced at ${ep.lastVoicedFrame * FRAME_MS} ms, so the speech would be trimmed off`);
+  }
 });

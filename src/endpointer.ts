@@ -49,6 +49,10 @@ const OVER_CHIME_GAP_FRAMES = 10; // 300 ms of quiet under the chime: what came 
 // that slowly gets softer) isn't them. Without this, quiet room sounds just over minSpeechDb kept resetting
 // the end-silence timer and pulled the voice level down to the room's, so turns ran on for 8-13 s.
 const BELOW_VOICE_DB = 18;
+// …unless that quieter sound has gone on for longer than the voice before it (and at least 0.5 s): then
+// the loud part was the odd one out (a cough, a mic bump, a loud first word) and the quieter sound is the
+// voice. It becomes the voice level, so speech after a loud start isn't lost.
+const REBASE_MIN_FRAMES = 17;
 const STEADY_SPREAD_DB = 2.5; // sound this steady for a whole end-silence window is noise, not speech
 const STEADY_BELOW_SPEECH_DB = 6; // …as long as it's also clearly quieter than the user's voice
 
@@ -86,6 +90,9 @@ export class Endpointer {
   private voicedFrames = 0;
   private started = false;
   private everStarted = false;
+  /** Frames above the threshold but far below the voice since the last voiced frame, and their summed level. */
+  private belowVoiceFrames = 0;
+  private belowVoiceSumDb = 0;
 
   /** Frame index where the current utterance began (-1 = none yet). */
   speechStartFrame = -1;
@@ -167,8 +174,22 @@ export class Endpointer {
     }
     const threshold = Math.max(this.floorDb + this.opts.marginDb, this.opts.minSpeechDb);
     this.lastThresholdDb = threshold;
-    const loud =
-      db > threshold && idx >= SETTLE_FRAMES && !(this.started && db < this.speechDb - BELOW_VOICE_DB);
+    const aboveThreshold = db > threshold && idx >= SETTLE_FRAMES;
+    let loud = aboveThreshold;
+    if (aboveThreshold && this.started && db < this.speechDb - BELOW_VOICE_DB) {
+      this.belowVoiceFrames++;
+      this.belowVoiceSumDb += db;
+      if (this.belowVoiceFrames >= Math.max(REBASE_MIN_FRAMES, this.voicedFrames)) {
+        this.speechDb = this.belowVoiceSumDb / this.belowVoiceFrames; // the quieter sound is the voice
+        this.voicedFrames += this.belowVoiceFrames - 1; // counted as voiced from here (this frame is added below)
+      } else {
+        loud = false;
+      }
+    }
+    if (loud) {
+      this.belowVoiceFrames = 0;
+      this.belowVoiceSumDb = 0;
+    }
 
     if (loud) {
       this.loudRun++;
@@ -214,6 +235,8 @@ export class Endpointer {
           this.speechStartFrame = -1;
           this.lastVoicedFrame = -1;
           this.speechDb = Number.NaN;
+          this.belowVoiceFrames = 0;
+          this.belowVoiceSumDb = 0;
         } else {
           return "end-of-turn";
         }
