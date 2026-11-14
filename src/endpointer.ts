@@ -8,7 +8,11 @@
  *     a real short answer like "yes" (~200 ms) still counts
  *   - `maxMs` is how long the user may talk, counted from when they start; a hard overall
  *     cap of `startTimeoutMs + maxMs` keeps a stuck mic from listening forever
- *   - while `ignoring` (our own "mic open" chime is playing), frames are neither speech nor background
+ *   - while `ignoring` (our own "mic open" chime is playing), frames are neither speech nor background;
+ *     speech already going when the chime ends is taken to have started where that sound began
+ *     under the chime (at most the chime's start), so words said over the tick are kept
+ *   - while the user talks, the background estimate stays well below their voice, until 0.6 s after
+ *     their last clear syllable (then it follows the room again, so a room that gets louder still ends the turn)
  */
 
 export const SAMPLE_RATE = 16000;
@@ -36,6 +40,17 @@ const FLOOR_WINDOW_FRAMES = 50; // background level = quietest frame of the last
 // While the user is talking, the background estimate may not rise above this far below their voice,
 // so speech that only varies a few dB from syllable to syllable is not mistaken for background.
 const FLOOR_CEILING_BELOW_SPEECH_DB = 24;
+// The cap holds only while the voice is still coming: it lets go CAP_HOLD_MS after the last strong
+// syllable (within STRONG_BELOW_PEAK_DB of the voice's level). Otherwise a room that gets louder after
+// the user stops (a laptop mic's auto-gain) stays above a threshold pinned to their voice, and the turn
+// doesn't end until the time limit.
+const STRONG_BELOW_PEAK_DB = 4;
+const CAP_HOLD_MS = 600;
+// Speech that is already going the moment the chime stops being ignored began under the chime: the
+// utterance then starts where that unbroken sound began (at most where the chime did), so words said
+// over the tick still reach whisper, and quiet before them doesn't.
+const OVER_CHIME_SLACK_FRAMES = 5;
+const OVER_CHIME_GAP_FRAMES = 10; // 300 ms of quiet under the chime: what came before wasn't the same utterance
 const STEADY_SPREAD_DB = 2.5; // sound this steady for a whole end-silence window is noise, not speech
 const STEADY_BELOW_SPEECH_DB = 6; // …as long as it's also clearly quieter than the user's voice
 
@@ -67,6 +82,10 @@ export class Endpointer {
   private history: number[] = [];
   private floorDb = -90;
   private speechDb = Number.NaN;
+  /** Highest smoothed voice level of this utterance: noise taken for voice can drag speechDb down, never this. */
+  private speechPeakDb = Number.NaN;
+  /** Frame index of the last strong syllable of this utterance. */
+  private lastStrongFrame = -1;
   private frames = 0;
   private loudRun = 0;
   private quietRun = 0;
@@ -85,6 +104,10 @@ export class Endpointer {
   lastThresholdDb = Number.NaN;
   /** True while our own chime plays: its sound reaches the mic, but it isn't the user. */
   private ignoring = false;
+  /** Frame where the last ignored stretch ended, and where the sound still going at its end began (-1 = none). */
+  private ignoredUntil = -1;
+  private ignoredLoudFrom = -1;
+  private ignoredQuietRun = 0;
 
   constructor(private readonly opts: EndpointerOptions) {
     this.maxFrames = Math.ceil(opts.maxMs / FRAME_MS);
@@ -96,6 +119,11 @@ export class Endpointer {
 
   /** Stop (true) or resume (false) judging frames, e.g. while the "mic open" chime plays. Time still counts. */
   setIgnoring(on: boolean): void {
+    if (on && !this.ignoring) {
+      this.ignoredLoudFrom = -1;
+      this.ignoredQuietRun = 0;
+    }
+    if (!on && this.ignoring) this.ignoredUntil = this.frames;
     this.ignoring = on;
     if (on && !this.started) this.loudRun = 0;
   }
@@ -114,7 +142,17 @@ export class Endpointer {
     const db = Math.max(-100, 20 * Math.log10(rms + 1e-9));
     this.lastDb = db;
     const idx = this.frames++;
-    if (this.ignoring) return this.timeLimit();
+    if (this.ignoring) {
+      // Not judged, but remember where the sound that's still going began (gaps between words don't
+      // break it): if it carries on past the chime, the user started talking under it. The chime is
+      // loud too, so this is at most the chime's start.
+      const loud = db > Math.max(this.floorDb + this.opts.marginDb, this.opts.minSpeechDb) && idx >= SETTLE_FRAMES;
+      if (loud) {
+        this.ignoredQuietRun = 0;
+        if (this.ignoredLoudFrom < 0) this.ignoredLoudFrom = idx;
+      } else if (++this.ignoredQuietRun >= OVER_CHIME_GAP_FRAMES) this.ignoredLoudFrom = -1;
+      return this.timeLimit();
+    }
 
     if (idx >= SETTLE_FRAMES) {
       this.history.push(db);
@@ -129,7 +167,7 @@ export class Endpointer {
       this.floorDb = Math.min(-30, Math.max(-90, Math.min(...this.history.slice(-FLOOR_WINDOW_FRAMES))));
       // Once the user is talking, the quietest recent frame can be just a soft syllable. Don't let
       // that lift the floor close to the voice, or the next soft syllable counts as silence.
-      if (this.started && !Number.isNaN(this.speechDb)) {
+      if (this.started && !Number.isNaN(this.speechDb) && (idx - this.lastStrongFrame) * FRAME_MS <= CAP_HOLD_MS) {
         this.floorDb = Math.min(this.floorDb, this.speechDb - FLOOR_CEILING_BELOW_SPEECH_DB);
       }
     }
@@ -143,14 +181,21 @@ export class Endpointer {
       if (this.started) {
         this.voicedFrames++;
         this.lastVoicedFrame = idx;
+        if (db >= this.speechPeakDb - STRONG_BELOW_PEAK_DB) this.lastStrongFrame = idx;
         this.speechDb = 0.9 * this.speechDb + 0.1 * db;
+        this.speechPeakDb = Math.max(this.speechPeakDb, this.speechDb);
       } else if (this.loudRun >= ONSET_FRAMES) {
         this.started = true;
         this.everStarted = true;
         this.speechStartFrame = idx - this.loudRun + 1;
+        if (this.ignoredUntil >= 0 && this.ignoredLoudFrom >= 0 && this.speechStartFrame - this.ignoredUntil <= OVER_CHIME_SLACK_FRAMES) {
+          this.speechStartFrame = this.ignoredLoudFrom; // the user talked over the chime
+        }
         this.voicedFrames = this.loudRun;
         this.lastVoicedFrame = idx;
         this.speechDb = Number.isNaN(this.speechDb) ? db : this.speechDb;
+        this.speechPeakDb = this.speechDb;
+        this.lastStrongFrame = idx;
       }
     } else {
       this.loudRun = 0;
@@ -178,6 +223,7 @@ export class Endpointer {
           this.speechStartFrame = -1;
           this.lastVoicedFrame = -1;
           this.speechDb = Number.NaN;
+          this.speechPeakDb = Number.NaN;
         } else {
           return "end-of-turn";
         }

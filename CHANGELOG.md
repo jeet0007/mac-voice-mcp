@@ -9,6 +9,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **Short answers like "yes" are no longer thrown away.** A one-word reply is only about 0.2 s of speech, and voice-mcp used to treat anything under 0.3 s as noise. It now keeps sounds of 0.18 s or more; a click or a cough shorter than that is still ignored.
 - **The 30-second talking limit counts from your first word.** It used to start when the mic opened, so a slow start left you less time. `listen_seconds` is now how long you may talk. A stuck mic is still cut off after the wait for speech plus that limit.
 - **Quiet, even speech is no longer cut off mid-sentence.** While you talk, voice-mcp now keeps its idea of the background noise well below your voice, so a soft, steady voice isn't mistaken for silence.
+- **A turn no longer runs on after you stop in a room that gets louder.** The fix above held voice-mcp's idea of the background below your voice even after you'd finished, so when the room got louder (a laptop mic turning up its gain) the turn kept going, up to the time limit. It now lets go 0.6 s after your last clear syllable.
+- **Words said over the "mic open" tick are kept.** If you start talking while the tick is still playing, the turn now starts where you did instead of after the tick, so your first words still reach the speech-to-text.
 
 ## [0.9.0] - 2026-11-03
 

@@ -206,3 +206,48 @@ test("speech that varies only 8 or 10 dB between syllables does not end the turn
     assert.ok(afterSpeechMs >= 1400 && afterSpeechMs <= 2100, `-25/${low}: ended ${afterSpeechMs} ms after speech stopped`);
   }
 });
+
+test("a room that gets louder after the user stops (mic auto-gain, uneven noise) still ends the turn promptly", () => {
+  // Jeet's local test: one turn ran 8.5 s past the end of speech. The floor cap pinned the threshold
+  // under the voice, so noise that rose after the speech kept counting as voice.
+  const opts = { ...LONG, endSilenceMs: 2_000, marginDb: 10 };
+  const script = [[-60, 1000]];
+  for (let i = 0; i < 8; i++) script.push([-30, 210], [-38, 210]); // ~3.4 s of syllables
+  const speechEndMs = 1000 + 16 * 210;
+  for (let i = 0; i < 80; i++) script.push([-49, 60], [-43, 60]); // ~10 s of uneven noise, 13-19 dB under the voice
+  const [reason, , fed] = runLevels(script, opts);
+  assert.equal(reason, "end-of-turn");
+  const afterSpeechMs = fed * FRAME_MS - speechEndMs;
+  assert.ok(afterSpeechMs <= 3200, `ended ${afterSpeechMs} ms after speech stopped`);
+});
+
+test("words said over the mic-open chime are kept: the utterance starts where the chime did", () => {
+  const ep = new Endpointer(OPTS);
+  let r = null;
+  for (let i = 0; i < ms(300); i++) r ??= ep.push(frame("noise")); // mic warm-up
+  const chimeFrame = ms(300);
+  ep.setIgnoring(true);
+  for (let i = 0; i < ms(600); i++) r ??= ep.push(frame("speech")); // the user is already talking under the tick
+  ep.setIgnoring(false);
+  for (let i = 0; i < ms(1500); i++) r ??= ep.push(frame("speech"));
+  for (let i = 0; i < ms(2000) && !r; i++) r = ep.push(frame("noise"));
+  assert.equal(r, "end-of-turn");
+  assert.equal(ep.speechStartFrame, chimeFrame, "starts at the chime, not after it");
+  const [first] = ep.trimRange(ms(5000));
+  assert.ok(first <= chimeFrame, "the trimmed audio keeps the words said over the chime");
+});
+
+test("speech that begins late under the chime starts where it began, not at the chime (no extra quiet kept)", () => {
+  const ep = new Endpointer(OPTS);
+  let r = null;
+  for (let i = 0; i < ms(300); i++) r ??= ep.push(frame("noise"));
+  ep.setIgnoring(true); // the chime window: quiet room, then the user starts near its end
+  for (let i = 0; i < ms(900); i++) r ??= ep.push(frame("noise"));
+  const voiceFrame = ms(1200);
+  for (let i = 0; i < ms(150); i++) r ??= ep.push(frame("speech"));
+  ep.setIgnoring(false);
+  for (let i = 0; i < ms(1500); i++) r ??= ep.push(frame("speech"));
+  for (let i = 0; i < ms(2000) && !r; i++) r = ep.push(frame("noise"));
+  assert.equal(r, "end-of-turn");
+  assert.equal(ep.speechStartFrame, voiceFrame);
+});
