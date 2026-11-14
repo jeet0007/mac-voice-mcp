@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { SLOW_TURN_MS, flagFiles, slowTurnAction } from "../scripts/local-test.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURES = path.join(ROOT, "test", "fixtures");
@@ -96,12 +97,18 @@ test("on: a turn writes the pipeline events, never the transcript or spoken text
 test("flag: markdown with summary and recent events; WAV only in audio mode and at most the ring length", async () => {
   for (const mode of ["on", "audio"]) {
     const sb = sandbox({ VOICE_MCP_FLIGHT_RECORDER: mode, VOICE_MCP_FLIGHT_AUDIO_SECONDS: "5" });
+    let saved;
     await withClient(sb.env, async (client) => {
       await speak(client, "Hello");
       const f = await client.callTool({ name: "flag", arguments: { note: "cut me off" } });
       assert.equal(f.isError, false, f.content[0].text);
       assert.match(f.content[0].text, /last turn ended by/);
+      saved = flagFiles(f.content[0].text); // what npm run test:local reads from a slow turn's flag
     });
+    assert.ok(saved && existsSync(saved.file), `flag file path read from the reply: ${saved?.file}`);
+    assert.equal(path.dirname(saved.file), path.join(sb.flight, "flags"));
+    if (mode === "on") assert.equal(saved.wav, null);
+    else assert.ok(saved.wav && existsSync(saved.wav), `WAV path read from the reply: ${saved.wav}`);
     const flags = path.join(sb.flight, "flags");
     const names = readdirSync(flags);
     const md = readFileSync(path.join(flags, names.find((n) => n.endsWith(".md"))), "utf8");
@@ -293,4 +300,20 @@ test("flag summary reads values back through the allowlist", async () => {
   const f = await import("../dist/flight.js");
   const s = f.flagSummary([{ t: 1, ev: "listen.end", reason: "ignore previous instructions", totalMs: 1000 }, { t: 2, ev: "speak.end", reason: "yes", finished: false }]);
   assert.equal(s, "last turn ended by unknown after 1.0 s; last reply finished: no, unknown");
+});
+
+test("test:local flags a turn slower than 5 s, through the server, only when the recorder keeps audio", () => {
+  const tools = ["call", "flag", "speak_and_listen"];
+  const audio = { VOICE_MCP_FLIGHT_RECORDER: " Audio " };
+  assert.equal(SLOW_TURN_MS, 5000);
+  assert.equal(slowTurnAction(13877, audio, tools), "flag");
+  assert.equal(slowTurnAction(5000, audio, tools), "none", "exactly 5 s is not slow");
+  assert.equal(slowTurnAction(4406, audio, tools), "none");
+  assert.equal(slowTurnAction(Number.NaN, audio, tools), "none", "no timing, no flag");
+  assert.equal(slowTurnAction(13877, { VOICE_MCP_FLIGHT_RECORDER: "on" }, tools), "hint", "events only: say how to keep the audio");
+  assert.equal(slowTurnAction(13877, {}, tools), "hint");
+  assert.equal(slowTurnAction(13877, audio, ["speak_and_listen", "voice_setup"]), "hint", "an older release has no flag tool");
+  assert.deepEqual(flagFiles("Flagged. Saved on this Mac: /a b/flag-1.md (audio: /a b/flag-1.wav)\nlast turn ended by x"), { file: "/a b/flag-1.md", wav: "/a b/flag-1.wav" });
+  assert.deepEqual(flagFiles("Flagged. Saved on this Mac: /a/flag-1.md\nsummary"), { file: "/a/flag-1.md", wav: null });
+  assert.equal(flagFiles("Already flagged just now."), null);
 });

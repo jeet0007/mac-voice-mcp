@@ -19,6 +19,10 @@
  * typing test writes the same stop file Voice Buddy does).
  *
  * Results are printed as a table and saved to local-test-results/ (gitignored).
+ *
+ * A turn that replies more than 5 s after the test speaker stopped is flagged with the server's own
+ * `flag` tool when VOICE_MCP_FLIGHT_RECORDER=audio, so its audio is saved as a WAV in the flight
+ * recorder's flags folder on this Mac and the path is printed. Nothing is sent anywhere.
  */
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -90,6 +94,25 @@ export function sourceTools(root = ROOT) {
 }
 /** Every version has had these; a --compare run against an older release checks only these. */
 const CORE_TOOLS = ["speak_and_listen", "voice_setup"];
+
+/** A turn whose reply comes this long after the test speaker stopped is slow enough to keep its audio. */
+export const SLOW_TURN_MS = 5000;
+
+/**
+ * What to do after a turn: "flag" it through the server (only the server holds the audio, so the
+ * `mac-voice-mcp flag` command can't save it), "hint" how to keep the audio next time, or "none".
+ */
+export function slowTurnAction(replyAfterStopMs, env, tools) {
+  if (!(replyAfterStopMs > SLOW_TURN_MS)) return "none";
+  const audio = env.VOICE_MCP_FLIGHT_RECORDER?.trim().toLowerCase() === "audio";
+  return audio && tools.includes("flag") ? "flag" : "hint";
+}
+
+/** The files in the flag tool's answer: "Flagged. Saved on this Mac: <md> (audio: <wav>)". */
+export function flagFiles(reply) {
+  const m = /Saved on this Mac: (.+?\.md)(?: \(audio: (.+?\.wav)\))?$/m.exec(reply);
+  return m ? { file: m[1], wav: m[2] ?? null } : null;
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const median = (xs) => {
@@ -258,6 +281,7 @@ async function testTarget(label, entry, extra = {}, { exactTools = null } = {}) 
 
     // Voice turns: the script answers through the speakers while the server listens.
     r.turns = [];
+    let hinted = false;
     for (let i = 1; i <= TURNS; i++) {
       let sayDone = null;
       let speaking = null;
@@ -293,6 +317,21 @@ async function testTarget(label, entry, extra = {}, { exactTools = null } = {}) 
         !result.isError && turn.wer <= 0.3,
         `${Math.round(turn.wer * 100)}% word errors, reply ${(turn.replyAfterStopMs / 1000).toFixed(2)} s after the speaker stopped — "${heard.slice(0, 80)}"`,
       );
+      // Right away, while the turn is still in the server's audio ring (the last 30 s by default).
+      const slow = slowTurnAction(turn.replyAfterStopMs, SERVER_ENV, tools);
+      if (slow === "flag") {
+        const note = `test:local turn ${i}: reply ${(turn.replyAfterStopMs / 1000).toFixed(2)} s after the speaker stopped`;
+        const flagged = await call({ name: "flag", arguments: { note } });
+        turn.flag = flagFiles(text(flagged));
+        console.log(
+          turn.flag?.wav
+            ? `        Slow turn: its audio is saved on this Mac (nothing was sent anywhere): ${turn.flag.wav}`
+            : `        Slow turn, but no audio was saved: ${text(flagged).split("\n")[0]}`,
+        );
+      } else if (slow === "hint" && !hinted) {
+        hinted = true;
+        console.log("        Slow turn: run with VOICE_MCP_FLIGHT_RECORDER=audio to keep its audio on this Mac.");
+      }
       await sleep(800);
     }
 
