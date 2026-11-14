@@ -14,8 +14,9 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 | `VOICE_MCP_KOKORO_VOICE` | `af_heart` | Kokoro voice. American English starts with `a`, British with `b`, e.g. `af_bella`, `am_michael`, `bf_emma`, `bm_george`. |
 | `VOICE_MCP_KOKORO_SPEED` | `1` | Kokoro speaking speed, `0.5` to `2`. |
 | `VOICE_MCP_KOKORO_DTYPE` | `fp32` | `q8`: a smaller model (~90 MB instead of ~330 MB) that's about half as fast. |
+| `VOICE_MCP_KOKORO_STALL_SECONDS` | `30` | If the Kokoro voice makes no sound for this long, voice-mcp resets it and the built-in voice finishes the reply. |
 | `VOICE_MCP_KOKORO_DIR` | `~/.cache/mac-voice-mcp/kokoro` | Where the Kokoro voice is installed. |
-| `VOICE_MCP_MAX_SPEAK_WORDS` | `120` | Longer text is cut at a sentence boundary ("the rest is on screen"). |
+| `VOICE_MCP_MAX_SPEAK_WORDS` | `120` | Longer text is cut at a sentence boundary ("the rest is on screen"), and Claude is told how much was spoken. |
 | `VOICE_MCP_VOICE_STANDBY` | `1` | The built-in voice is started ahead of each reply and waits for the text, so the reply starts sooner (about 0.8 s sooner with Siri voices). It's started after your first voice turn and stopped after 15 idle minutes. `0` starts it only when there's something to say. |
 | `VOICE_MCP_CHIME` | `1` | Set to `0` to turn off the mic open/close sounds. |
 | `VOICE_MCP_PHASE_FILE` | `1` | Writes what a voice turn is doing (`speaking`, `listening`, `transcribing`, `waiting`) to `voice-mode/phase.json` in the cache folder, for Voice Buddy's status line, the call bubble, or a display of your own. One file for the whole Mac; removed when the turn ends. `0` turns it off. |

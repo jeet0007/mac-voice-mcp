@@ -120,15 +120,21 @@ export function prepareSpeech(input: string, opts: PrepareOptions = {}): Prepare
   s = s.replace(OPENER, "$1, $2");
 
   // Keep it listenable: cut at a sentence boundary once it gets long.
+  let cutNote: string | undefined;
   const words = s.split(" ");
   if (maxWords > 0 && words.length > maxWords) {
     let cut = words.slice(0, maxWords).join(" ");
     const lastStop = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("? "), cut.lastIndexOf("! "));
     if (lastStop > cut.length * 0.4) cut = cut.slice(0, lastStop + 1);
     s = `${cut} The rest is on screen.`;
-    notes.add(`length (over ${maxWords} words)`);
+    cutNote =
+      `voice-mcp note: text_to_speak was too long (over ${maxWords} words), so only the first ${cut.split(" ").length} of ${words.length} words were spoken, ` +
+      "then \"The rest is on screen.\" Make sure what you cut is in your on-screen reply, and keep spoken text short.";
   }
-  s = s.slice(0, maxChars);
+  if (s.length > maxChars) {
+    s = s.slice(0, maxChars);
+    cutNote ??= `voice-mcp note: text_to_speak was too long, so it was cut at ${maxChars} characters. Keep spoken text short.`;
+  }
 
   const noteList = notes.size
     ? [
@@ -136,6 +142,7 @@ export function prepareSpeech(input: string, opts: PrepareOptions = {}): Prepare
           "Next time send only short, plain spoken sentences — keep code, paths, links and tables in your on-screen reply.",
       ]
     : [];
+  if (cutNote) noteList.push(cutNote);
 
   // When the spoken text points the user at something to look at, remind the model that only
   // its own assistant message renders — not the speech, and not Bash/tool output (issue #3).
@@ -167,16 +174,20 @@ const STOCK_SENTENCES = [
   /^(?:please |don'?t forget to )?(?:like and )?subscribe(?: to (?:my|our|the) channel)?$/,
   /^(?:you can )?find the links? in the description(?: below)?$/,
   /^see you in the next (?:video|episode)$/,
-  /^(?:subtitles|captions|transcription|translated|transcribed)(?: by| provided by)? .*$/,
+  /^(?:subtitles|captions|transcription|translated|transcribed|subtitled) (?:by|provided by) .*$/, // a credit line
 ];
 
-function isStockSentence(sentence: string): boolean {
-  const s = sentence.toLowerCase().replace(/[.!?,"“”]/g, "").replace(/\s+/g, " ").trim();
-  return STOCK_SENTENCES.some((re) => re.test(s));
-}
+/**
+ * A bare credit word ("Transcription.", "Subtitles"): whisper invents these from noise. Dropped only
+ * when it is the whole transcript and nothing else is said, so "Transcription is wrong." is kept.
+ */
+const LOOSE_CREDITS = /^(?:subtitles|subtitled|captions|transcription|translated|transcribed)$/;
+
+const squash = (sentence: string) => sentence.toLowerCase().replace(/[.!?,"“”]/g, "").replace(/\s+/g, " ").trim();
+const isStockSentence = (sentence: string): boolean => STOCK_SENTENCES.some((re) => re.test(squash(sentence)));
 
 /** whisper's raw output → just the words: no timestamps, sound notes or invented stock sentences. */
-export function cleanTranscript(raw: string): string {
+export function cleanTranscript(raw: string, dropped?: string[]): string {
   const text = raw
     .split("\n")
     .map((l) => l.replace(/^\s*\[[\d:.\s\->]+\]\s*/, "")) // stray timestamps
@@ -185,8 +196,17 @@ export function cleanTranscript(raw: string): string {
     .replace(/\s+/g, " ")
     .trim();
   const sentences = text.match(/.+?(?:[.!?]+(?=\s|$)|$)/g) ?? []; // a "." inside "1.2.3" or "Amara.org" doesn't end a sentence
+  // A loose credit line ("Transcription by…") that is all there is: whisper made it up from noise.
+  if (sentences.length === 1 && LOOSE_CREDITS.test(squash(sentences[0]!))) {
+    dropped?.push(sentences[0]!.trim());
+    return "";
+  }
   return sentences
-    .filter((s) => !isStockSentence(s))
+    .filter((s) => {
+      const stock = isStockSentence(s);
+      if (stock) dropped?.push(s.trim());
+      return !stock;
+    })
     .join("")
     .replace(/\s+/g, " ")
     .trim();
