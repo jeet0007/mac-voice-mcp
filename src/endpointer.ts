@@ -4,6 +4,8 @@
  *
  *   - waits for speech (≥120 ms above threshold) for up to `startTimeoutMs`
  *   - once speaking, ends the turn after `endSilenceMs` of quiet
+ *   - once speaking, a sound far below the user's own voice (typing, someone across the room) is not
+ *     them: it neither keeps the turn open nor drags the voice level down toward the room
  *   - ignores blips shorter than 180 ms of voice (a cough, a click) and keeps listening;
  *     a real short answer like "yes" (~200 ms) still counts
  *   - `maxMs` is how long the user may talk, counted from when they start; a hard overall
@@ -43,6 +45,10 @@ const FLOOR_CEILING_BELOW_SPEECH_DB = 24;
 // over the tick still reach whisper, and quiet before them doesn't.
 const OVER_CHIME_SLACK_FRAMES = 5;
 const OVER_CHIME_GAP_FRAMES = 10; // 300 ms of quiet under the chime: what came before wasn't the same utterance
+// Once the user is talking, a frame this far below their voice (its running level, which follows speech
+// that slowly gets softer) isn't them. Without this, quiet room sounds just over minSpeechDb kept resetting
+// the end-silence timer and pulled the voice level down to the room's, so turns ran on for 8-13 s.
+const BELOW_VOICE_DB = 18;
 const STEADY_SPREAD_DB = 2.5; // sound this steady for a whole end-silence window is noise, not speech
 const STEADY_BELOW_SPEECH_DB = 6; // …as long as it's also clearly quieter than the user's voice
 
@@ -161,7 +167,8 @@ export class Endpointer {
     }
     const threshold = Math.max(this.floorDb + this.opts.marginDb, this.opts.minSpeechDb);
     this.lastThresholdDb = threshold;
-    const loud = db > threshold && idx >= SETTLE_FRAMES;
+    const loud =
+      db > threshold && idx >= SETTLE_FRAMES && !(this.started && db < this.speechDb - BELOW_VOICE_DB);
 
     if (loud) {
       this.loudRun++;

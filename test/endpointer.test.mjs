@@ -266,3 +266,57 @@ test("a loud chime followed by quiet doesn't pull the start back to the chime", 
   assert.equal(r, "end-of-turn");
   assert.equal(ep.speechStartFrame, voiceFrame);
 });
+
+// --- Replay of Jeet's live run, 2026-11-14 07:00 (local-test-results/2026-11-14T07-00-52-384Z.json) ----------
+// The flight recorder (mode "on") keeps one summary per turn, not frame levels, so each turn is rebuilt from
+// what it recorded: the room's mean and spread (recentDb ± recentSpreadDb), the voice at turn 3's level (the same
+// sentence, voice and speaker: speechDb -19.08), and, after the sentence, short quiet sounds just over the
+// -48 dBFS minimum. Before the fix, turns 1 and 2 ran on 8.6 s and 11.2 s here (10.0 s and 13.4 s live), with
+// the voice level dragged down to -43.7 and -45.5 (-41.72 and -45.51 recorded) and the floor capped 24 dB
+// under it (-65.72 and -69.51 recorded): those room sounds counted as the user, every 1.5 s.
+const JEET = { maxMs: 25_000, startTimeoutMs: 8_000, endSilenceMs: 2_000, marginDb: 10, minSpeechDb: -48 };
+function replayTurn({ roomDb, roomSd, tailDb, tailDuty, tailMs }) {
+  let s = 7;
+  const u = () => ((s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  const g = () => { let t = 0; for (let i = 0; i < 6; i++) t += u(); return (t - 3) * Math.SQRT2; };
+  const room = () => roomDb + roomSd * g();
+  const levels = [];
+  for (let i = 0; i < ms(1300); i++) levels.push(room()); // the harness waits 1.3 s after the tick
+  for (let i = 0; i < ms(4600); i++) { // the sentence: syllables ~4/s, quiet gaps between words
+    const syl = Math.sin(2 * Math.PI * 4 * i * (FRAME_MS / 1000));
+    levels.push(syl > -0.6 ? -22 + 8 * syl + 2 * g() : room());
+  }
+  const speechEnd = levels.length;
+  for (let i = 0; i < ms(tailMs); i++) levels.push(i % 50 < Math.round(50 * tailDuty) ? tailDb + 1.5 * g() : room());
+  const ep = new Endpointer(JEET);
+  for (let i = 0; i < levels.length + ms(25_000); i++) {
+    const r = ep.push(toneFrame(i < levels.length ? levels[i] : room()));
+    if (r) return { reason: r, afterSpeechMs: (i + 1 - speechEnd) * FRAME_MS, ep };
+  }
+  return { reason: null, afterSpeechMs: Infinity, ep };
+}
+
+test("replay of Jeet's slow turns: quiet room sounds 20+ dB below the voice don't hold the turn open", () => {
+  const turns = {
+    "turn 1 (10.02 s live)": { roomDb: -59.78, roomSd: 2.63, tailDb: -44, tailDuty: 0.35, tailMs: 7000 },
+    "turn 2 (13.40 s live)": { roomDb: -54.07, roomSd: 1.98, tailDb: -46, tailDuty: 0.16, tailMs: 10300 },
+    "turn 3 (3.03 s live)": { roomDb: -52.95, roomSd: 1.97, tailDb: -46, tailDuty: 0, tailMs: 0 },
+  };
+  for (const [name, spec] of Object.entries(turns)) {
+    const { reason, afterSpeechMs, ep } = replayTurn(spec);
+    assert.equal(reason, "end-of-turn", name);
+    assert.ok(afterSpeechMs >= 1900 && afterSpeechMs <= 2300, `${name}: ended ${afterSpeechMs} ms after the speech`);
+    assert.ok(ep.diagnostics().speechDb > -30, `${name}: voice level dragged to ${ep.diagnostics().speechDb.toFixed(1)} dB`);
+  }
+});
+
+test("speech that suddenly drops 18 dB is still the user and is kept (as before the fix)", () => {
+  // The voice gate must not cut anything the floor cap already kept: both keep an 18 dB drop, both lose 20 dB.
+  const script = [[-60, 1000]];
+  for (let i = 0; i < 6; i++) script.push([-20, 210], [-26, 210]); // ~2.5 s at a normal level
+  for (let i = 0; i < 9; i++) script.push([-38, 210], [-44, 210]); // ~3.8 s, 18 dB softer at once
+  const softEndMs = 1000 + 30 * 210;
+  const [reason, , fed] = runLevels(script, JEET);
+  assert.equal(reason, "end-of-turn");
+  assert.ok(fed * FRAME_MS - softEndMs >= 1900, `ended ${fed * FRAME_MS - softEndMs} ms after the soft speech, i.e. during it`);
+});
