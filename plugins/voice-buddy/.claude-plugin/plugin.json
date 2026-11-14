@@ -1,6 +1,6 @@
 {
   "name": "voice-buddy",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Companion to Mac Voice for Claude Code: a one-line status above the prompt that shows when Claude is speaking or listening, typing that interrupts the voice at once, and on a call it hands what you say to Claude while it waits.",
   "author": {
     "name": "Jeet"
