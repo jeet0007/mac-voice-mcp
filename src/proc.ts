@@ -77,6 +77,19 @@ export interface RunOptions {
 /** Every child we start, so shutdown can stop them all. */
 export const activeChildren = new Set<ChildProcess>();
 
+const alive = (c: ChildProcess) => c.exitCode === null && c.signalCode === null;
+
+/**
+ * Shutdown: ask every child process to stop (SIGTERM), give them a moment, then SIGKILL the ones
+ * still running — before the caller exits, so a slow recorder can't be left holding the mic.
+ */
+export async function terminateChildren(graceMs = 400): Promise<void> {
+  for (const c of activeChildren) if (alive(c)) c.kill("SIGTERM");
+  const until = Date.now() + graceMs;
+  while (Date.now() < until && [...activeChildren].some(alive)) await sleep(20);
+  for (const c of activeChildren) if (alive(c)) c.kill("SIGKILL");
+}
+
 export function run(cmd: string, args: string[], opts: RunOptions = {}): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     if (opts.signal?.aborted) return reject(new CancelledError());

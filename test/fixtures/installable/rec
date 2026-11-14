@@ -8,7 +8,16 @@ const fs = require("fs");
 // First, so a stop that comes while the audio below is still being built is logged too.
 process.on("SIGTERM", () => {
   fs.appendFileSync(process.env.STUB_LOG, "rec stopped\n");
-  process.exit(0);
+  // STUB_EXIT_DELAY_MS: a recorder that is slow to exit after SIGTERM (a Bluetooth mic closing).
+  const exit = () => {
+    fs.appendFileSync(process.env.STUB_LOG, "rec exited\n");
+    process.exit(0);
+  };
+  const delay = Number(process.env.STUB_EXIT_DELAY_MS || 0);
+  if (delay > 0) {
+    process.stdout.destroy();
+    setTimeout(exit, delay);
+  } else exit();
 });
 fs.appendFileSync(process.env.STUB_LOG, `rec ${process.argv.slice(2).join(" ")}\n`);
 const runs = fs.readFileSync(process.env.STUB_LOG, "utf8").match(/^rec /gm).length;

@@ -303,6 +303,16 @@ export function stopKokoro(): void {
   worker.stop();
 }
 
+/**
+ * Load the Kokoro model in the background, so the next reply isn't a cold start (the worker may have
+ * been idle-stopped or recycled). Only when Kokoro is in use and its files are already there: never
+ * downloads. A worker that's already running is left alone, so its idle timer isn't extended.
+ */
+export function prewarmKokoro(): void {
+  if (!kokoroEnabled() || !isKokoroInstalled() || !isKokoroModelPresent() || worker.running) return;
+  worker.start().catch((e: unknown) => debug("kokoro: warm-up failed:", e instanceof Error ? e.message : e));
+}
+
 /** The voice actually in use, once the worker has loaded (for reports). */
 export function kokoroVoiceLabel(): string {
   const voice = worker.info?.voice ?? CONFIG.kokoroVoice;

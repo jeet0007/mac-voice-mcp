@@ -4,7 +4,7 @@
 
 ## Privacy and safety
 
-- **Audio stays on your machine.** Recordings go to a temporary file that's deleted after each turn. The only network use is the one-time model download from Hugging Face, plus npm and Hugging Face once more if you install the Kokoro voice. Speaking never downloads anything.
+- **Audio stays on your machine.** Your reply is kept in memory while it's transcribed and never written to disk. Two exceptions use a temporary file that's deleted right after: calls write each utterance, and the `whisper-cli` fallback (when `VOICE_MCP_WHISPER_SERVER=0` or the warm server isn't usable) writes the reply. The only network use is the one-time model download from Hugging Face, plus npm and Hugging Face once more if you install the Kokoro voice. Speaking never downloads anything.
 - **Between turns, only "Claude, …" is kept.** With the plugin in Claude Code, the mic stays open while Claude works (the orange dot shows it). What it hears is transcribed on your Mac and dropped unless it starts with Claude's name; that sentence is left in a local file only your account can read, for the plugin to hand to Claude, then deleted. A video or call that says "Claude, …" is passed on too, so the talk skill has Claude confirm anything destructive by voice first. `VOICE_MCP_LISTEN_WHILE_WORKING=0` turns this off.
 - **The warm whisper server is local only.** It listens on `127.0.0.1` on a random port, and stops when idle or when this server exits.
 - **Setup can only install known packages.** Its install list is fixed in the code (`sox`, `whisper-cpp`, and `kokoro-js@1.2.1` for the optional voice), so nothing Claude says can make it install anything else. It never uninstalls or modifies other software.

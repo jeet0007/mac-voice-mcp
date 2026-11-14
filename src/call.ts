@@ -30,6 +30,7 @@ import { acquireMicLock } from "./lock.js";
 import { ensureModel } from "./model.js";
 import { CancelledError, sleep } from "./proc.js";
 import { detectDuplex, pauseSpeech } from "./speakers.js";
+import { prewarmKokoro } from "./kokoro.js";
 import { prewarm, transcribe } from "./stt.js";
 import { PERMISSION_NOTICE } from "./texts.js";
 import { addToInbox, inboxDir, setOwnSession, showPhase, takeInbox, voiceModeDir, type InboxEntry } from "./worklisten.js";
@@ -253,6 +254,7 @@ export class Call {
   private async run(signal: AbortSignal): Promise<void> {
     const model = await ensureModel({ download: false });
     prewarm(model);
+    prewarmKokoro(); // the first words of the call shouldn't wait for the voice to load
     const dir = await mkdtemp(path.join(os.tmpdir(), "voice-mcp-call-"));
     let levelFrames = 0;
     try {

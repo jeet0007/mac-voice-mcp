@@ -10,6 +10,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **Flag a moment.** Say a turn went wrong and Claude can save the last minute to a file on your Mac with the new `flag` tool; or run `mac-voice-mcp flag "what happened"` yourself. `mac-voice-mcp flight status` shows what is kept and `mac-voice-mcp flight purge` deletes all of it.
 - **Optional audio.** `VOICE_MCP_FLIGHT_RECORDER=audio` also holds the last 30 seconds of mic audio in memory (`VOICE_MCP_FLIGHT_AUDIO_SECONDS`). It reaches the disk only when you flag a moment, and is gone when voice-mcp stops. `doctor` says when the recorder is on.
 
+### Changed
+- **Replies are transcribed as soon as you stop talking.** voice-mcp no longer waits for the mic to close before it starts transcribing. The audio stays in memory instead of a temporary file.
+- **The Kokoro voice is loaded when a call starts and while you talk,** so a reply doesn't start with a cold voice.
+
 ### Fixed
 - **Typing in another Claude window no longer stops this window's speech.** Voice Buddy's stop request now says which session typed, and each voice-mcp only listens to its own once it knows which window it belongs to: after its first voice turn, with listening while Claude works on (the default), or once a call starts. Before that, or with `VOICE_MCP_LISTEN_WHILE_WORKING=0`, any window's typing still stops it, as before. An older Voice Buddy still works as before. Already have it? Run `/plugin marketplace update mac-voice-mcp`, then `/reload-plugins`.
 - **A stuck Kokoro voice no longer means silence.** If the Kokoro voice makes no sound for 30 seconds (`VOICE_MCP_KOKORO_STALL_SECONDS`), voice-mcp resets it and the built-in voice finishes the reply.
