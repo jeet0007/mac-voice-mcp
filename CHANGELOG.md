@@ -11,6 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **Quiet, even speech is no longer cut off mid-sentence.** While you talk, voice-mcp now keeps its idea of the background noise well below your voice, so a soft, steady voice isn't mistaken for silence.
 - **A turn no longer runs on after you stop in a room that gets louder.** The fix above held voice-mcp's idea of the background below your voice even after you'd finished, so when the room got louder (a laptop mic turning up its gain) the turn kept going, up to the time limit. It now lets go 0.6 s after your last clear syllable.
 - **Words said over the "mic open" tick are kept.** If you start talking while the tick is still playing, the turn now starts where you did instead of after the tick, so your first words still reach the speech-to-text.
+- **`npm run test:local` checks the real tool list.** It read only `speak_and_listen` and `voice_setup` and failed on every newer tool; it now reads the tool list from `src/server.ts`. Its test speaker also waits for the tick, as a person would, so the first words aren't lost.
 
 ## [0.9.0] - 2026-11-03
 
