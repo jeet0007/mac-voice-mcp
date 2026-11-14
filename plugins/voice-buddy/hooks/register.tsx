@@ -101,7 +101,7 @@ async function userTyped($: EngineInterface): Promise<void> {
   if (!dir) throw new Error('no HOME to find voice-mcp in')
   if (running === 0 && now > updateUntil && !(await listeningHere($, dir))) return
   signalled = true
-  await $.fs.write(`${dir}/stop`, JSON.stringify({ at: now }))
+  await $.fs.write(`${dir}/stop`, JSON.stringify({ at: now, session: await $.session.id() }))
 }
 
 /**

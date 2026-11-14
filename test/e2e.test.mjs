@@ -84,7 +84,7 @@ test("lists the tools, the prompts, and compact server instructions", async () =
   const { client } = await connect(sb.env());
   try {
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-    assert.deepEqual(tools, ["call", "listen", "say", "speak_and_listen", "voice_setup"]);
+    assert.deepEqual(tools, ["call", "flag", "listen", "say", "speak_and_listen", "voice_setup"]);
     // npm run test:local checks the same set, read from src/server.ts, so its check can't go stale.
     assert.deepEqual(sourceTools(ROOT), tools);
     const prompts = (await client.listPrompts()).prompts.map((p) => p.name).sort();
@@ -512,6 +512,21 @@ test("if Kokoro fails partway, the built-in voice says only what wasn't said yet
     assert.match(notes, /fake generate failure/);
     assert.equal(lines(log, "kokoro-generate").length, 2);
     assert.deepEqual(lines(log, "speak ").map((l) => l.replace(/ voice=.*/, "")), ['speak "The second one is not."']);
+  } finally {
+    await client.close();
+  }
+});
+
+test("a stuck Kokoro worker is reset after a timeout and the built-in voice finishes the text", async () => {
+  const sb = sandbox();
+  fakeKokoro(sb);
+  const { client } = await connect(sb.env({ FAKE_KOKORO: "hang-generate", VOICE_MCP_KOKORO_STALL_SECONDS: "0.5" }));
+  try {
+    const { result, notes, log } = await spokenUpdate(sb, client, "The first sentence is spoken by Kokoro. The second one hangs.");
+    assert.equal(result.isError, false);
+    assert.match(notes, /stopped answering/);
+    assert.equal(lines(log, "kokoro-generate").length, 2);
+    assert.deepEqual(lines(log, "speak ").map((l) => l.replace(/ voice=.*/, "")), ['speak "The second one hangs."']);
   } finally {
     await client.close();
   }

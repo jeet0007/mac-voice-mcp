@@ -42,6 +42,7 @@ import { createInterface } from "node:readline/promises";
 import { DEFAULT_LISTEN_SECONDS, envNum, log, PKG } from "./config.js";
 import { startServer } from "./server.js";
 import { runDoctor } from "./doctor.js";
+import { flightDir, flightEnabled, flightFlag, flightMode, flightPurge, flightStatus } from "./flight.js";
 import { stopKokoro } from "./kokoro.js";
 import { runSetupFlow } from "./setup.js";
 import { stopWhisperServer } from "./stt.js";
@@ -59,6 +60,8 @@ Usage:
   npx -y ${PKG.name} test ["text"]    Speak, listen for one turn and print the transcript
   npx -y ${PKG.name} doctor           Self-check: setup, voice → transcript, speakers → mic (PASS/WARN/FAIL)
   npx -y ${PKG.name} doctor --no-loopback   …without playing sound through the speakers
+  npx -y ${PKG.name} flag ["note"]    Save the last minute of the flight recorder to a local file (needs it on)
+  npx -y ${PKG.name} flight status|purge   Show the flight recorder's folder and size, or delete it
   npx -y ${PKG.name} --version
 
 Environment variables (all optional):
@@ -78,6 +81,7 @@ Environment variables (all optional):
   VOICE_MCP_SERVER_IDLE_MINUTES    stop the warm server after this idle time (default 15)
   VOICE_MCP_CHIME                  0 to disable the mic open/close sounds
   VOICE_MCP_CALL_BUBBLE            0 to never show the floating call bubble
+  VOICE_MCP_FLIGHT_RECORDER        off (default) | on | audio: keep a local log of what a turn decided, for "flag" (7 days, never transcripts)
   VOICE_MCP_DEBUG                  1 for verbose logs and timings (stderr)`);
 }
 
@@ -109,6 +113,7 @@ async function runDoctorCli(args: string[]): Promise<number> {
   console.error(`${PKG.name} v${PKG.version} doctor — checking the voice pipeline on this machine\n`);
   const loopback = !args.includes("--no-loopback");
   if (loopback) console.error("You'll hear a short sentence from the speakers. Keep the room quiet and don't talk.\n");
+  if (flightEnabled()) console.error(`Flight recorder is ${flightMode()}: events are kept on this Mac in ${flightDir()} (flight status | flight purge).\n`);
   const report = await runDoctor({ loopback, log: (line) => console.error(line) });
   console.error(`\n${report.ok ? "All checks passed." : "Some checks failed — see the details above."}`);
   if (report.reportFile) console.error(`Report saved to ${report.reportFile}`);
@@ -135,6 +140,29 @@ async function runTestCli(text?: string): Promise<number> {
   }
 }
 
+function runFlightCli(args: string[], note: string): number {
+  if (args[0] === "flag") {
+    const flag = flightFlag(note);
+    if (!flag) {
+      console.error("Nothing to flag: the flight recorder is off and has no log. Set VOICE_MCP_FLIGHT_RECORDER=on for the server, then try again.");
+      return 1;
+    }
+    if (flag.tooSoon) {
+      console.error(flag.summary);
+      return 0;
+    }
+    console.error(`${flag.summary}\nSaved on this Mac (nothing was sent anywhere): ${flag.file}`);
+    return 0;
+  }
+  if (args[0] === "purge") {
+    console.error(`Deleted ${flightPurge()} file(s) from ${flightStatus().dir}`);
+    return 0;
+  }
+  const s = flightStatus();
+  console.error(`Flight recorder: ${s.mode}\nFolder: ${s.dir}${s.exists ? "" : " (nothing recorded yet)"}\n${s.files} file(s), ${(s.bytes / 1024).toFixed(1)} KB, kept ${s.days} day(s)`);
+  return args[0] === undefined || args[0] === "status" ? 0 : 2;
+}
+
 async function main(): Promise<void> {
   const [cmd, ...rest] = process.argv.slice(2);
   switch (cmd) {
@@ -145,6 +173,10 @@ async function main(): Promise<void> {
       process.exit(await runSetupCli(rest));
     case "doctor":
       process.exit(await runDoctorCli(rest));
+    case "flag":
+      process.exit(runFlightCli(["flag"], rest.join(" ")));
+    case "flight":
+      process.exit(runFlightCli(rest, ""));
     case "test":
       process.exit(await runTestCli(rest.join(" ").trim()));
     case "-v":

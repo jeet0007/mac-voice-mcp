@@ -19,7 +19,7 @@ import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { CONFIG, debug, IS_MAC, log } from "./config.js";
+import { CONFIG, debug, envNum, IS_MAC, log } from "./config.js";
 import { prepareForKokoro } from "./kokoro-text.js";
 import { resamplePcm16, wavHeaderFor } from "./pcm.js";
 import { CancelledError, isExecutable, run, SetupError, tail, which } from "./proc.js";
@@ -99,6 +99,13 @@ interface Request {
   resolve: (r: { rssMb: number; cancelled: boolean }) => void;
   reject: (e: Error) => void;
 }
+
+/**
+ * How long the worker may go without producing the next chunk of audio before it counts as stuck
+ * (it is then killed and the built-in voice finishes). A chunk is one sentence, which Kokoro
+ * generates in a second or two; this is generous so a busy Mac doesn't trigger it.
+ */
+const stallMs = () => Math.max(0.05, envNum("VOICE_MCP_KOKORO_STALL_SECONDS", 30)) * 1000;
 
 class KokoroWorker {
   private child: ChildProcess | null = null;
@@ -225,13 +232,32 @@ class KokoroWorker {
         req?.resolve({ rssMb: 0, cancelled: true });
       };
       signal?.addEventListener("abort", onAbort, { once: true });
+      // A worker that stops answering would mean silence for good: give up on it, and let the caller fall back.
+      let stall: NodeJS.Timeout | undefined;
+      const watchStall = () => {
+        clearTimeout(stall);
+        stall = setTimeout(() => {
+          const req = this.requests.get(id);
+          if (!req) return;
+          this.requests.delete(id);
+          debug("kokoro: the worker stopped answering — resetting it");
+          this.stop();
+          req.reject(new Error(`the Kokoro worker stopped answering (nothing for ${Math.round(stallMs() / 1000)} s)`));
+        }, stallMs());
+        stall.unref();
+      };
       const done = () => {
+        clearTimeout(stall);
         signal?.removeEventListener("abort", onAbort);
         this.touch();
       };
       if (signal?.aborted) return resolve({ rssMb: 0, cancelled: true });
+      watchStall();
       this.requests.set(id, {
-        onAudio,
+        onAudio: (seq, pcm) => {
+          watchStall();
+          onAudio(seq, pcm);
+        },
         resolve: (r) => {
           done();
           if (r.rssMb > RECYCLE_RSS_MB) {

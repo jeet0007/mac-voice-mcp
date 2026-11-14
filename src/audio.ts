@@ -5,6 +5,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { CONFIG, debug, IS_MAC, IS_WIN, log } from "./config.js";
 import { Endpointer, FRAME_BYTES, FRAME_MS, wavHeader, type EndReason, type EndpointerDiagnostics } from "./endpointer.js";
+import { flightAudio, flightEvent } from "./flight.js";
 import { KokoroError, kokoroEnabled, speakKokoro, synthesizeKokoroToFile } from "./kokoro.js";
 import { wavSeconds } from "./pcm.js";
 import { trackSpeaker } from "./speakers.js";
@@ -113,6 +114,20 @@ export interface Spoken {
  */
 export async function speak(text: string, signal?: AbortSignal): Promise<Spoken> {
   if (!text) return { engine: "built-in" };
+  const t0 = Date.now();
+  flightEvent("speak.start", { engine: kokoroEnabled() ? "kokoro" : "say", chars: text.length, words: text.split(/\s+/).filter(Boolean).length });
+  try {
+    const spoken = await speakNow(text, signal);
+    flightEvent("speak.end", { finished: true, reason: spoken.fallback ? "fallback" : "done", ms: Date.now() - t0 });
+    return spoken;
+  } catch (err) {
+    const reason = err instanceof CancelledError ? "stopped" : "error";
+    flightEvent("speak.end", { finished: false, reason, ms: Date.now() - t0 });
+    throw err;
+  }
+}
+
+async function speakNow(text: string, signal?: AbortSignal): Promise<Spoken> {
   if (kokoroEnabled()) {
     try {
       return { engine: "kokoro", ...(await speakKokoro(text, signal)) };
@@ -434,6 +449,15 @@ export async function listenForTurn(maxSeconds: number, outFile: string, signal?
   debug("exec:", recorder.bin, args.join(" "));
   const child = spawn(recorder.bin, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
   activeChildren.add(child);
+  const listenedAt = Date.now();
+  flightEvent("listen.start", {
+    mode: "turn",
+    maxMs: maxSeconds * 1000,
+    endSilenceMs: CONFIG.endSilenceMs,
+    marginDb: CONFIG.speechMarginDb,
+    minSpeechDb: CONFIG.minSpeechDb,
+    chime: !!opts.onListening && CONFIG.chime,
+  });
 
   const exitCode = await new Promise<number | null>((resolve, reject) => {
     const stop = () => {
@@ -456,6 +480,7 @@ export async function listenForTurn(maxSeconds: number, outFile: string, signal?
         const frame = Buffer.from(pending.subarray(off, off + FRAME_BYTES));
         off += FRAME_BYTES;
         frames.push(frame);
+        flightAudio(frame);
         reason = endpointer.push(frame);
         if (!announced && frames.length >= warmupFrames) announce();
       }
@@ -475,8 +500,19 @@ export async function listenForTurn(maxSeconds: number, outFile: string, signal?
     });
   });
 
-  if (signal?.aborted) throw new CancelledError();
+  const ended = (why: string) =>
+    flightEvent("listen.end", {
+      reason: why,
+      totalMs: Date.now() - listenedAt,
+      speechMs: Math.round(endpointer.speechSeconds * 1000),
+      ...endpointer.diagnostics(),
+    });
+  if (signal?.aborted) {
+    ended("stopped");
+    throw new CancelledError();
+  }
   if (!frames.length) {
+    ended("error");
     throw new Error(
       `Recording failed (${describeRecorder(recorder)}, exit ${exitCode}). ${tail(stderr)}`.trim() +
         (IS_MAC ? `\n${MIC_PERMISSION_HINT}` : ""),
@@ -487,6 +523,7 @@ export async function listenForTurn(maxSeconds: number, outFile: string, signal?
   const pcm = Buffer.concat(frames.slice(first, last));
   await writeFile(outFile, Buffer.concat([wavHeader(pcm.length), pcm]));
 
+  ended(reason ?? "max-duration");
   return {
     reason: reason ?? "max-duration",
     digitalSilence: !endpointer.anyNonZero,
@@ -530,6 +567,7 @@ export async function listenContinuously(signal: AbortSignal, opts: ContinuousOp
       minSpeechDb: CONFIG.minSpeechDb,
     });
   let endpointer = fresh();
+  flightEvent("listen.start", { mode: "call", maxMs: UTTERANCE_MAX_MS, endSilenceMs: CONFIG.endSilenceMs, marginDb: CONFIG.speechMarginDb, minSpeechDb: CONFIG.minSpeechDb, chime: false }, null);
   let frames: Buffer[] = [];
   let pending: Buffer = Buffer.alloc(0);
   let count = 0;
@@ -562,9 +600,11 @@ export async function listenContinuously(signal: AbortSignal, opts: ContinuousOp
         }
       } else {
         frames.push(frame);
+        flightAudio(frame);
         const reason = endpointer.push(frame);
         opts.onLevel?.(endpointer.lastDb, endpointer.lastThresholdDb);
         if (reason) {
+          flightEvent("listen.end", { mode: "call", reason, totalMs: frames.length * FRAME_MS, speechMs: Math.round(endpointer.speechSeconds * 1000), ...endpointer.diagnostics() }, null);
           if (reason !== "no-speech") {
             const [first, last] = endpointer.trimRange(frames.length);
             const pcm = Buffer.concat(frames.slice(first, last));

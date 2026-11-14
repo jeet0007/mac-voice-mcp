@@ -5,7 +5,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- **A flight recorder, off by default, to find out why a turn went wrong.** Set `VOICE_MCP_FLIGHT_RECORDER=on` and voice-mcp keeps a log on your Mac of what each turn decided: timings, audio levels and why a turn ended. It holds numbers and reasons, never what you or Claude said, only how long it was. It is kept for 7 days (`VOICE_MCP_FLIGHT_DAYS`) and is never sent anywhere. Details in [Privacy and security](docs/privacy-security.md).
+- **Flag a moment.** Say a turn went wrong and Claude can save the last minute to a file on your Mac with the new `flag` tool; or run `mac-voice-mcp flag "what happened"` yourself. `mac-voice-mcp flight status` shows what is kept and `mac-voice-mcp flight purge` deletes all of it.
+- **Optional audio.** `VOICE_MCP_FLIGHT_RECORDER=audio` also holds the last 30 seconds of mic audio in memory (`VOICE_MCP_FLIGHT_AUDIO_SECONDS`). It reaches the disk only when you flag a moment, and is gone when voice-mcp stops. `doctor` says when the recorder is on.
+
 ### Fixed
+- **Typing in another Claude window no longer stops this window's speech.** Voice Buddy's stop request now says which session typed, and each voice-mcp only listens to its own once it knows which window it belongs to: after its first voice turn, with listening while Claude works on (the default), or once a call starts. Before that, or with `VOICE_MCP_LISTEN_WHILE_WORKING=0`, any window's typing still stops it, as before. An older Voice Buddy still works as before. Already have it? Run `/plugin marketplace update mac-voice-mcp`, then `/reload-plugins`.
+- **A stuck Kokoro voice no longer means silence.** If the Kokoro voice makes no sound for 30 seconds (`VOICE_MCP_KOKORO_STALL_SECONDS`), voice-mcp resets it and the built-in voice finishes the reply.
+- **Claude is told when a long reply was shortened.** If the text to speak runs over 120 words, Claude is told how much was spoken and to make sure the rest is on screen.
+- **Claude is told when lines were left out of what you said** (in `speak_and_listen` turns). Speech-to-text sometimes invents lines such as "Thanks for watching". They are still left out, and Claude is now told which, so it can ask you if something looks missing.
+- **Real sentences that start with "Translated" or "Transcription" are no longer dropped.** Only a credit line such as "Transcription by …", or one that is your whole reply, is left out.
 - **Short answers like "yes" are no longer thrown away.** A one-word reply is only about 0.2 s of speech, and voice-mcp used to treat anything under 0.3 s as noise. It now keeps sounds of 0.18 s or more; a click or a cough shorter than that is still ignored.
 - **The 30-second talking limit counts from your first word.** It used to start when the mic opened, so a slow start left you less time. `listen_seconds` is now how long you may talk. A stuck mic is still cut off after the wait for speech plus that limit.
 - **Quiet, even speech is no longer cut off mid-sentence.** While you talk, voice-mcp now keeps its idea of the background noise well below your voice, so a soft, steady voice isn't mistaken for silence.
