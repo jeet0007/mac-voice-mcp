@@ -7,7 +7,7 @@ import { stopKokoro } from "./kokoro.js";
 import { interjectionNote, takeInbox, workListener } from "./worklisten.js";
 import { type CallToolResult, StdioMcpServer } from "./mcp.js";
 import { locateModel } from "./model.js";
-import { activeChildren, CancelledError, SetupError } from "./proc.js";
+import { CancelledError, SetupError, terminateChildren } from "./proc.js";
 import { runSetupFlow } from "./setup.js";
 import { prepareSpeech } from "./speech-text.js";
 import { stopWhisperServer } from "./stt.js";
@@ -285,7 +285,7 @@ export async function startServer(): Promise<void> {
     void workListener.stop();
     stopWhisperServer();
     stopKokoro();
-    for (const child of activeChildren) child.kill("SIGTERM");
+    await terminateChildren(); // SIGTERM, then SIGKILL for any that haven't exited
     server.close();
     process.exit(code);
   };

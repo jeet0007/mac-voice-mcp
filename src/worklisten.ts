@@ -15,8 +15,6 @@
  * (default 10) without a voice turn.
  */
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import * as files from "../hooks/voice-files.mjs";
 import { chime, findRecorder, listenForTurn } from "./audio.js";
@@ -24,7 +22,7 @@ import { CONFIG, debug, envNum } from "./config.js";
 import { lockFile } from "./lock.js";
 import { ensureModel } from "./model.js";
 import { CancelledError, sleep } from "./proc.js";
-import { transcribe } from "./stt.js";
+import { transcribeBuffer } from "./stt.js";
 
 /** Shared with the hook: both live in the voice-mode state folder (hooks/voice-files.mjs). */
 export const voiceModeDir = () => files.voiceModeDir(CONFIG.cacheDir);
@@ -183,8 +181,7 @@ class WorkListener {
 
     setOwnSession(readListening()?.session); // the hook's mark names this window's session
     const model = await ensureModel({ download: false });
-    const tmp = await mkdtemp(path.join(os.tmpdir(), "voice-mcp-work-"));
-    try {
+    {
       while (!signal.aborted) {
         if (!ours(readListening()) || stopRequestedSince(turnEnd)) return; // the user typed, voice mode ended, or another session took over
         if (Date.now() - turnEnd > idleMs) return;
@@ -192,7 +189,6 @@ class WorkListener {
           await sleep(1000);
           continue;
         }
-        const wav = path.join(tmp, "heard.wav");
         // Check a few times a second, so the mic closes right away when the user types, voice mode
         // ends or another session starts a turn, not only after the next 15-second wait.
         const listening = new AbortController();
@@ -202,26 +198,29 @@ class WorkListener {
           if (!ours(readListening()) || stopRequestedSince(turnEnd) || micBusyElsewhere() || Date.now() - turnEnd > idleMs) listening.abort();
         }, WATCH_MS);
         let heard: Awaited<ReturnType<typeof listenForTurn>>;
+        let exited: Promise<void> = Promise.resolve();
         try {
-          heard = await listenForTurn(30, wav, listening.signal);
+          heard = await listenForTurn(30, null, listening.signal, { onRecorder: (e) => (exited = e) });
         } catch (e) {
-          if (e instanceof CancelledError) continue; // the checks at the top of the loop decide what's next
+          if (e instanceof CancelledError) {
+            await exited; // one recorder at a time: a cancelled one may still be closing
+            continue; // the checks at the top of the loop decide what's next
+          }
           throw e;
         } finally {
           clearInterval(watch);
           signal.removeEventListener("abort", onStop);
         }
+        await heard.recorderExited; // one recorder at a time: the next loop (or a turn) opens the mic again
         if (signal.aborted) return;
         if (heard.reason === "no-speech" || heard.digitalSilence) continue;
-        const text = await transcribe(wav, model, signal);
+        const text = await transcribeBuffer(heard.wav, model, signal);
         const said = parseInterjection(text);
         debug(`work listener heard: ${JSON.stringify(text)} → ${said === null ? "not for Claude" : JSON.stringify(said)}`);
         if (said === null || signal.aborted) continue;
         addToInbox(said);
         void chime("stop"); // a soft "got it"
       }
-    } finally {
-      await rm(tmp, { recursive: true, force: true });
     }
   }
 }

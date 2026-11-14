@@ -293,7 +293,9 @@ test("two sessions on one Mac take turns at the mic instead of talking over each
     assert.equal(ra.isError, false);
     assert.equal(rb.isError, false);
     assert.deepEqual(audioEvents(sb.readLog()), ["speak", "rec", "transcribe", "speak", "rec", "transcribe"]);
-    assert.ok(!existsSync(path.join(sb.home, ".cache", "mac-voice-mcp", "mic.lock")), "the lock is released after the turns");
+    // The lock is let go once each turn's recorder has really exited, which can be just after the result.
+    const lock = path.join(sb.home, ".cache", "mac-voice-mcp", "mic.lock");
+    assert.ok(await waitFor(() => !existsSync(lock), 3000), "the lock is released after the turns");
   } finally {
     await a.client.close();
     await b.client.close();
