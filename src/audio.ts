@@ -483,7 +483,7 @@ export async function listenForTurn(maxSeconds: number, outFile: string | null, 
       reason ??= "max-duration";
       stop();
       if (frames.length) resolve("decided");
-    }, (maxSeconds + 5) * 1000);
+    }, (Math.min(CONFIG.startTimeoutSeconds, maxSeconds) + maxSeconds + 5) * 1000); // wait for speech + talking time + slack
     const onAbort = () => stop();
     signal?.addEventListener("abort", onAbort, { once: true });
 

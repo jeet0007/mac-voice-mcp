@@ -12,6 +12,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { sourceTools } from "../scripts/local-test.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURES = path.join(ROOT, "test", "fixtures");
@@ -84,6 +85,8 @@ test("lists the tools, the prompts, and compact server instructions", async () =
   try {
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
     assert.deepEqual(tools, ["call", "flag", "listen", "say", "speak_and_listen", "voice_setup"]);
+    // npm run test:local checks the same set, read from src/server.ts, so its check can't go stale.
+    assert.deepEqual(sourceTools(ROOT), tools);
     const prompts = (await client.listPrompts()).prompts.map((p) => p.name).sort();
     assert.deepEqual(prompts, ["call", "setup", "voice_mode"]);
     assert.ok(Buffer.byteLength(client.getInstructions() ?? "") < 2048, "Claude Code truncates instructions at 2 KB");

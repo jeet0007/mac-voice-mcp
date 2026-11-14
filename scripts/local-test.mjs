@@ -21,7 +21,7 @@
  * Results are printed as a table and saved to local-test-results/ (gitignored).
  */
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -75,6 +75,21 @@ const LONG_REPLY =
   "If you hear this whole sentence, the interrupt did not work.";
 
 const STOP_FILE = path.join(voiceModeDir(cacheRoot()), "stop");
+
+/**
+ * The "listening" phase is reported before the mic is open: the recorder starts, warms up for 250 ms,
+ * then plays the tick (about 0.6 s). A person waits for the tick, so the test speaker does too.
+ * Starting at once lost the first words on some turns ("The build passed" -> "Test").
+ */
+const AFTER_TICK_MS = 1300;
+
+/** The tools this checkout's server registers, read from its source so the check never goes stale. */
+export function sourceTools(root = ROOT) {
+  const server = readFileSync(path.join(root, "src", "server.ts"), "utf8");
+  return [...server.matchAll(/registerTool\(\s*"([a-z_]+)"/g)].map((m) => m[1]).sort();
+}
+/** Every version has had these; a --compare run against an older release checks only these. */
+const CORE_TOOLS = ["speak_and_listen", "voice_setup"];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const median = (xs) => {
@@ -181,7 +196,7 @@ class Skip extends Error {}
 
 // --- The checks, against one server ------------------------------------------------------------
 
-async function testTarget(label, entry, extra = {}) {
+async function testTarget(label, entry, extra = {}, { exactTools = null } = {}) {
   console.log(`\n▶ ${label}`);
   const r = { label, ...extra, checks: {} };
   const check = (name, ok, detail) => {
@@ -218,7 +233,15 @@ async function testTarget(label, entry, extra = {}) {
     t = performance.now();
     const tools = (await client.listTools()).tools.map((x) => x.name).sort();
     r.toolsListMs = performance.now() - t;
-    check("Tools", tools.join() === "speak_and_listen,voice_setup", tools.join(", "));
+    if (exactTools) {
+      const missing = exactTools.filter((x) => !tools.includes(x));
+      const unknown = tools.filter((x) => !exactTools.includes(x));
+      const off = [missing.length && `missing ${missing.join(", ")}`, unknown.length && `not in src/server.ts: ${unknown.join(", ")}`].filter(Boolean);
+      check("Tools", !off.length, off.length ? `${tools.join(", ")} (${off.join("; ")})` : tools.join(", "));
+    } else {
+      const missing = CORE_TOOLS.filter((x) => !tools.includes(x));
+      check("Tools", !missing.length, missing.length ? `${tools.join(", ")} (missing ${missing.join(", ")})` : tools.join(", "));
+    }
     await res.idle();
 
     const setup = await call({ name: "voice_setup", arguments: {} });
@@ -244,8 +267,11 @@ async function testTarget(label, entry, extra = {}) {
         {
           onPhase: (phase) => {
             if (phase === "listening" && !speaking) {
-              speaking = spawn("say", [SENTENCE], { stdio: "ignore" });
-              speaking.on("exit", () => (sayDone = performance.now()));
+              speaking = true;
+              setTimeout(() => {
+                const say = spawn("say", [SENTENCE], { stdio: "ignore" });
+                say.on("exit", () => (sayDone = performance.now()));
+              }, AFTER_TICK_MS);
             }
           },
         },
@@ -386,14 +412,14 @@ async function main() {
 
     const targets = [];
     if (COMPARE) targets.push({ label: `${COMPARE} (npm)`, spec: `mac-voice-mcp@${COMPARE}` });
-    targets.push({ label: `this checkout (${version})`, spec: path.join(work, packed) });
+    targets.push({ label: `this checkout (${version})`, spec: path.join(work, packed), exactTools: sourceTools() });
 
     const results = [];
     for (const target of targets) {
       console.log(`Installing ${target.spec}…`);
       const installed = await install(target.spec, work);
       const { entry, ...metrics } = installed;
-      results.push(await testTarget(target.label, entry, metrics));
+      results.push(await testTarget(target.label, entry, metrics, { exactTools: target.exactTools }));
     }
 
     console.log("\n" + table(results) + "\n");
@@ -408,7 +434,17 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Run only as a script: test/local-test-tools.test.mjs imports sourceTools without starting a hardware run.
+const isScript = () => {
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+};
+if (isScript()) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

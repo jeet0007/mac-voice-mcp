@@ -146,3 +146,286 @@ test("the last frame's level and threshold: speech sits above the threshold, a q
   ep.push(frame("speech"));
   assert.ok(ep.lastDb > ep.lastThresholdDb, `speech ${ep.lastDb} dB is over ${ep.lastThresholdDb} dB`);
 });
+
+// --- level-exact synthetic frames (a sine at a given dBFS) for the turn-taking regressions ---
+function toneFrame(db) {
+  const buf = Buffer.alloc(FRAME_SAMPLES * 2);
+  const amp = db === null ? 0 : Math.SQRT2 * 32768 * 10 ** (db / 20);
+  for (let i = 0; i < FRAME_SAMPLES; i++) buf.writeInt16LE(Math.round(amp * Math.sin(i / 5) + rand() * 3), i * 2);
+  return buf;
+}
+const LONG = { maxMs: 30_000, startTimeoutMs: 15_000, endSilenceMs: 1_500, marginDb: 12, minSpeechDb: -48 };
+
+/** Script of [dB, ms] segments, then -60 dB room forever. Returns [reason, endpointer, framesFed]. */
+function runLevels(script, opts = LONG) {
+  const ep = new Endpointer(opts);
+  let fed = 0;
+  const levels = script.flatMap(([db, dur]) => Array(ms(dur)).fill(db));
+  const total = ms(opts.maxMs + opts.startTimeoutMs) + 100;
+  for (let i = 0; i < total; i++) {
+    fed++;
+    const r = ep.push(toneFrame(i < levels.length ? levels[i] : -60));
+    if (r) return [r, ep, fed];
+  }
+  return [null, ep, fed];
+}
+
+test("a short answer like \"yes\" (210 ms and 270 ms) ends the turn as end-of-turn", () => {
+  for (const dur of [210, 270]) {
+    const [reason, ep] = runLevels([[-60, 1000], [-25, dur]]);
+    assert.equal(reason, "end-of-turn", `${dur} ms yes`);
+    assert.ok(ep.speechStartFrame >= 0);
+  }
+});
+
+test("a 150 ms cough is ignored and a 200 ms \"yes\" is kept, wherever they fall across the 30 ms frames", () => {
+  // The e2e stub's cough (0.15 s of +-9000) at 1 s straddles 6 frames; at 180 ms that counted as speech.
+  const SR = 16000;
+  const sound = (lead, len) => [...Array(lead).fill(0), ...Array((SR * len) / 1000).fill(0).map((_, i) => (i % 2 ? 9000 : -9000))];
+  for (const [len, want] of [[150, "no-speech"], [200, "end-of-turn"]]) {
+    for (let off = 0; off < FRAME_SAMPLES; off += 20) {
+      const pcm = [...Array(SR).fill(0).map(() => Math.round(rand() * 40)), ...sound(off, len)];
+      const ep = new Endpointer(LONG);
+      let reason = null;
+      for (let f = 0; !reason && f < ms(LONG.startTimeoutMs) + 10; f++) {
+        const buf = Buffer.alloc(FRAME_SAMPLES * 2);
+        for (let i = 0; i < FRAME_SAMPLES; i++) buf.writeInt16LE(pcm[f * FRAME_SAMPLES + i] ?? Math.round(rand() * 40), i * 2);
+        reason = ep.push(buf);
+      }
+      assert.equal(reason, want, `${len} ms sound ${off} samples into a frame`);
+    }
+  }
+});
+
+test("a very short click (90 ms) is still ignored", () => {
+  const [reason] = runLevels([[-60, 1000], [-25, 90]]);
+  assert.equal(reason, "no-speech");
+});
+
+test("max duration counts from when the user starts talking, not from the start of listening", () => {
+  const [reason, , fed] = runLevels([[-60, 12_000], [-25, 25_000]]);
+  assert.equal(reason, "end-of-turn");
+  assert.ok(fed * FRAME_MS > 37_000, `ended at ${fed * FRAME_MS} ms`);
+});
+
+test("talking past the limit from speech start still gives max-duration", () => {
+  const [reason, , fed] = runLevels([[-60, 12_000], [-25, 60_000]]);
+  assert.equal(reason, "max-duration");
+  assert.ok(Math.abs(fed * FRAME_MS - 42_000) < 200, `stopped at ${fed * FRAME_MS} ms`);
+});
+
+test("speech that varies only 8 or 10 dB between syllables does not end the turn early", () => {
+  for (const low of [-33, -35]) {
+    const script = [[-60, 1000]];
+    for (let i = 0; i < 24; i++) script.push([-25, 210], [low, 210]); // ~10 s of syllables, no pauses
+    const speechEndMs = ms(1000) * FRAME_MS + 24 * 2 * ms(210) * FRAME_MS;
+    const [reason, , fed] = runLevels(script);
+    assert.equal(reason, "end-of-turn", `-25/${low}`);
+    const afterSpeechMs = fed * FRAME_MS - speechEndMs;
+    assert.ok(afterSpeechMs >= 1400 && afterSpeechMs <= 2100, `-25/${low}: ended ${afterSpeechMs} ms after speech stopped`);
+  }
+});
+
+test("speech that goes softer for a few seconds after a loud start is not cut off", () => {
+  // Review finding: releasing the floor cap 0.6 s after the last strong syllable ended this turn
+  // about 1 s before the soft part did.
+  const script = [[-60, 1000]];
+  for (let i = 0; i < 6; i++) script.push([-25, 210], [-30, 210]); // ~2.5 s at a normal level
+  for (let i = 0; i < 7; i++) script.push([-34, 210], [-40, 210]); // ~3 s trailing off, 9-10 dB softer
+  const softEndMs = 1000 + 26 * 210;
+  const [reason, , fed] = runLevels(script);
+  assert.equal(reason, "end-of-turn");
+  const afterSoftMs = fed * FRAME_MS - softEndMs;
+  assert.ok(afterSoftMs >= 1400, `ended ${afterSoftMs} ms after the soft speech, i.e. during it`);
+});
+
+test("words said over the mic-open chime are kept: the utterance starts where the chime did", () => {
+  const ep = new Endpointer(OPTS);
+  let r = null;
+  for (let i = 0; i < ms(300); i++) r ??= ep.push(frame("noise")); // mic warm-up
+  const chimeFrame = ms(300);
+  ep.setIgnoring(true);
+  for (let i = 0; i < ms(600); i++) r ??= ep.push(frame("speech")); // the user is already talking under the tick
+  ep.setIgnoring(false);
+  for (let i = 0; i < ms(1500); i++) r ??= ep.push(frame("speech"));
+  for (let i = 0; i < ms(2000) && !r; i++) r = ep.push(frame("noise"));
+  assert.equal(r, "end-of-turn");
+  assert.equal(ep.speechStartFrame, chimeFrame, "starts at the chime, not after it");
+  const [first] = ep.trimRange(ms(5000));
+  assert.ok(first <= chimeFrame, "the trimmed audio keeps the words said over the chime");
+});
+
+test("speech that begins late under the chime starts where it began, not at the chime (no extra quiet kept)", () => {
+  const ep = new Endpointer(OPTS);
+  let r = null;
+  for (let i = 0; i < ms(300); i++) r ??= ep.push(frame("noise"));
+  ep.setIgnoring(true); // the chime window: quiet room, then the user starts near its end
+  for (let i = 0; i < ms(900); i++) r ??= ep.push(frame("noise"));
+  const voiceFrame = ms(1200);
+  for (let i = 0; i < ms(150); i++) r ??= ep.push(frame("speech"));
+  ep.setIgnoring(false);
+  for (let i = 0; i < ms(1500); i++) r ??= ep.push(frame("speech"));
+  for (let i = 0; i < ms(2000) && !r; i++) r = ep.push(frame("noise"));
+  assert.equal(r, "end-of-turn");
+  assert.equal(ep.speechStartFrame, voiceFrame);
+});
+
+test("a loud chime followed by quiet doesn't pull the start back to the chime", () => {
+  const ep = new Endpointer(OPTS);
+  let r = null;
+  for (let i = 0; i < ms(300); i++) r ??= ep.push(frame("noise"));
+  ep.setIgnoring(true);
+  for (let i = 0; i < ms(150); i++) r ??= ep.push(frame("loudnoise")); // the tick itself, loud at the mic
+  for (let i = 0; i < ms(600); i++) r ??= ep.push(frame("noise")); // its tail: quiet room
+  const voiceFrame = ms(1050);
+  for (let i = 0; i < ms(150); i++) r ??= ep.push(frame("speech"));
+  ep.setIgnoring(false);
+  for (let i = 0; i < ms(1500); i++) r ??= ep.push(frame("speech"));
+  for (let i = 0; i < ms(2000) && !r; i++) r = ep.push(frame("noise"));
+  assert.equal(r, "end-of-turn");
+  assert.equal(ep.speechStartFrame, voiceFrame);
+});
+
+// --- Replay of Jeet's live run, 2026-11-14 07:00 (local-test-results/2026-11-14T07-00-52-384Z.json) ----------
+// The flight recorder (mode "on") keeps one summary per turn, not frame levels, so each turn is rebuilt from
+// what it recorded: the room's mean and spread (recentDb ± recentSpreadDb), the voice at turn 3's level (the same
+// sentence, voice and speaker: speechDb -19.08), and, after the sentence, short quiet sounds just over the
+// -48 dBFS minimum. Before the fix, turns 1 and 2 ran on 8.6 s and 11.2 s here (10.0 s and 13.4 s live), with
+// the voice level dragged down to -43.7 and -45.5 (-41.72 and -45.51 recorded) and the floor capped 24 dB
+// under it (-65.72 and -69.51 recorded): those room sounds counted as the user, every 1.5 s.
+const JEET = { maxMs: 25_000, startTimeoutMs: 8_000, endSilenceMs: 2_000, marginDb: 10, minSpeechDb: -48 };
+function replayTurn({ roomDb, roomSd, tailDb, tailDuty, tailMs }) {
+  let s = 7;
+  const u = () => ((s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  const g = () => { let t = 0; for (let i = 0; i < 6; i++) t += u(); return (t - 3) * Math.SQRT2; };
+  const room = () => roomDb + roomSd * g();
+  const levels = [];
+  for (let i = 0; i < ms(1300); i++) levels.push(room()); // the harness waits 1.3 s after the tick
+  for (let i = 0; i < ms(4600); i++) { // the sentence: syllables ~4/s, quiet gaps between words
+    const syl = Math.sin(2 * Math.PI * 4 * i * (FRAME_MS / 1000));
+    levels.push(syl > -0.6 ? -22 + 8 * syl + 2 * g() : room());
+  }
+  const speechEnd = levels.length;
+  for (let i = 0; i < ms(tailMs); i++) levels.push(i % 50 < Math.round(50 * tailDuty) ? tailDb + 1.5 * g() : room());
+  const ep = new Endpointer(JEET);
+  for (let i = 0; i < levels.length + ms(25_000); i++) {
+    const r = ep.push(toneFrame(i < levels.length ? levels[i] : room()));
+    if (r) return { reason: r, afterSpeechMs: (i + 1 - speechEnd) * FRAME_MS, ep };
+  }
+  return { reason: null, afterSpeechMs: Infinity, ep };
+}
+
+test("replay of Jeet's slow turns: quiet room sounds far below the voice don't hold the turn open", () => {
+  const turns = {
+    "turn 1 (10.02 s live)": { roomDb: -59.78, roomSd: 2.63, tailDb: -44, tailDuty: 0.35, tailMs: 7000 },
+    "turn 2 (13.40 s live)": { roomDb: -54.07, roomSd: 1.98, tailDb: -46, tailDuty: 0.16, tailMs: 10300 },
+    "turn 3 (3.03 s live)": { roomDb: -52.95, roomSd: 1.97, tailDb: -46, tailDuty: 0, tailMs: 0 },
+  };
+  for (const [name, spec] of Object.entries(turns)) {
+    const { reason, afterSpeechMs, ep } = replayTurn(spec);
+    assert.equal(reason, "end-of-turn", name);
+    assert.ok(afterSpeechMs >= 1900 && afterSpeechMs <= 2300, `${name}: ended ${afterSpeechMs} ms after the speech`);
+    assert.ok(ep.diagnostics().speechDb > -30, `${name}: voice level dragged to ${ep.diagnostics().speechDb.toFixed(1)} dB`);
+  }
+});
+
+test("speech that suddenly drops 18 dB is still the user and is kept (as before the fix)", () => {
+  // The voice gate must not cut anything the floor cap already kept: both keep an 18 dB drop, both lose 20 dB.
+  const script = [[-60, 1000]];
+  for (let i = 0; i < 6; i++) script.push([-20, 210], [-26, 210]); // ~2.5 s at a normal level
+  for (let i = 0; i < 9; i++) script.push([-38, 210], [-44, 210]); // ~3.8 s, 18 dB softer at once
+  const softEndMs = 1000 + 30 * 210;
+  const [reason, , fed] = runLevels(script, JEET);
+  assert.equal(reason, "end-of-turn");
+  assert.ok(fed * FRAME_MS - softEndMs >= 1900, `ended ${fed * FRAME_MS - softEndMs} ms after the soft speech, i.e. during it`);
+});
+
+test("a loud cough or first word, a pause, then speech 20-30 dB softer: the softer speech is kept", () => {
+  // Review finding on the voice gate: the loud start set the voice level, and everything after it was gated out.
+  for (const [loudDb, loudMs, voiceDb] of [[-10, 400, -30], [-8, 500, -38]]) {
+    const script = [[-60, 1000], [loudDb, loudMs], [-60, 300]];
+    for (let i = 0; i < 10; i++) script.push([voiceDb, 210], [voiceDb - 6, 210]); // ~4.2 s of speech
+    const speechEndMs = 1000 + loudMs + 300 + 20 * 210;
+    const [reason, ep, fed] = runLevels(script, JEET);
+    assert.equal(reason, "end-of-turn");
+    const after = fed * FRAME_MS - speechEndMs;
+    assert.ok(after >= 1900, `${loudDb} dB start, ${voiceDb} dB speech: ended ${after} ms after the speech, i.e. during it`);
+    assert.ok(ep.lastVoicedFrame * FRAME_MS >= speechEndMs - 300, `${loudDb}/${voiceDb}: last voiced at ${ep.lastVoicedFrame * FRAME_MS} ms, so the speech would be trimmed off`);
+  }
+});
+
+// Soft words after a loud start, with real pauses between them (review of 0341586: a 180 ms gap limit cut these).
+function loudStartThenWords(loudMs, gapMs) {
+  const script = [[-60, 1000], [-18, loudMs], [-60, 400]];
+  const n = Math.round(4000 / (300 + gapMs));
+  for (let i = 0; i < n; i++) script.push([-40, 300], [-60, gapMs]);
+  return [script, 1000 + loudMs + 400 + n * (300 + gapMs) - gapMs];
+}
+
+test("a loud 0.4 s start, then soft words 22 dB below it with 90-450 ms gaps: all the words are kept", () => {
+  for (const gapMs of [90, 180, 210, 250, 300, 450]) {
+    const [script, lastWordEndMs] = loudStartThenWords(400, gapMs);
+    const [reason, ep, fed] = runLevels(script, JEET);
+    assert.equal(reason, "end-of-turn", `gap ${gapMs}`);
+    assert.ok((ep.lastVoicedFrame + 1) * FRAME_MS >= lastWordEndMs - 150, `gap ${gapMs}: last voiced at ${(ep.lastVoicedFrame + 1) * FRAME_MS} ms, last word ends at ${lastWordEndMs} ms`);
+    assert.ok(fed * FRAME_MS - lastWordEndMs >= 1800, `gap ${gapMs}: ended ${fed * FRAME_MS - lastWordEndMs} ms after the last word`);
+  }
+});
+
+// Known limits. Level and timing alone can't tell these apart from the cases above: soft words at -40 dB,
+// 300 ms on / 300 ms off, must be kept, and room sounds at -46 dB, 360 ms on / 300 ms off, must not be.
+// No version of the endpointer (main included) handles them. Telling them apart needs real audio:
+// run with VOICE_MCP_FLIGHT_RECORDER=audio and have Claude call the `flag` tool after a slow or cut turn
+// (npm run test:local does this itself for slow turns). The `mac-voice-mcp flag` command runs in its own
+// process, so it saves the events but never the server's in-memory audio.
+test("known limit: after a short \"yes\", on-and-off room sounds still hold the turn open", {
+  todo: "same as main; needs real audio to separate from soft speech after a cough",
+}, () => {
+  for (const yesMs of [300, 600]) {
+    for (const [on, off] of [[360, 150], [240, 180], [240, 210], [360, 300], [150, 450]]) {
+      const script = [[-60, 1000], [-22, yesMs]];
+      for (let i = 0; i < 30; i++) script.push([-46, on], [-60, off]);
+      const [, ep] = runLevels(script, JEET);
+      const after = (ep.lastVoicedFrame + 1) * FRAME_MS - (1000 + yesMs);
+      assert.ok(after <= 300, `${yesMs} ms yes, room ${on}/${off}: counted as voice until ${after} ms after the answer`);
+    }
+  }
+});
+
+test("known limit: after a loud start of 1.5 s, soft words 22 dB below it are lost", {
+  todo: "same as main; the background estimate climbs to the soft speech",
+}, () => {
+  for (const gapMs of [90, 300]) {
+    const [script, lastWordEndMs] = loudStartThenWords(1500, gapMs);
+    const [, ep] = runLevels(script, JEET);
+    assert.ok((ep.lastVoicedFrame + 1) * FRAME_MS >= lastWordEndMs - 150, `gap ${gapMs}: last voiced at ${(ep.lastVoicedFrame + 1) * FRAME_MS} ms, last word ends at ${lastWordEndMs} ms`);
+  }
+});
+
+/** A 3 s sentence (-19/-25 dB syllables), then 150 ms room sounds every 1.2 s at these levels. */
+function sentenceThenSounds(levels) {
+  const script = [[-60, 1300]];
+  for (let t = 0; t < 3000; t += 420) script.push([-19, 210], [-25, 210]);
+  const sentenceEndMs = 1300 + Math.ceil(3000 / 420) * 420;
+  for (const db of levels) script.push([-60, 1200], [db, 150]);
+  return [script, sentenceEndMs];
+}
+
+test("room sounds at one level, more than 18 dB below the voice, don't hold the turn open", () => {
+  const [script, sentenceEndMs] = sentenceThenSounds(Array(11).fill(-45));
+  const [reason, , fed] = runLevels(script, JEET);
+  assert.equal(reason, "end-of-turn");
+  assert.ok(fed * FRAME_MS - sentenceEndMs <= 2600, `ended ${fed * FRAME_MS - sentenceEndMs} ms after the sentence`);
+});
+
+// Jeet's live run 2026-11-14 08:11 (turn 3, 13.88 s): the turn ended with the voice level at -45.15 dB and the
+// floor at -69.15 (= voice - 24); this script ends at -45.9 and -69.9. Each sound is just within 18 dB of the
+// voice level, counts as voice, and pulls the level down, so the next, quieter sound counts too.
+test("known limit: room sounds that get a little quieter each time walk the voice level down and hold the turn", {
+  todo: "same as main; needs real audio to tell from speech that gets softer",
+}, () => {
+  const [script, sentenceEndMs] = sentenceThenSounds([-36, -38, -40, -41, -42, -43, -44, -45, -46, -46, -47]);
+  const [reason, , fed] = runLevels(script, JEET);
+  assert.equal(reason, "end-of-turn");
+  assert.ok(fed * FRAME_MS - sentenceEndMs <= 2600, `ended ${fed * FRAME_MS - sentenceEndMs} ms after the sentence`);
+});
