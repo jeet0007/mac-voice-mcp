@@ -48,7 +48,7 @@ Claude is still writing (MCP only sees finished tool calls), telephony, cloud sp
 
 - **Start:** `/mac-voice-mcp:call` (Claude Code skill) or the `call` MCP prompt (Desktop/Cursor). Claude calls
   `call { action: "start" }`; the server takes the mic lock, starts the mic engine, writes
-  `voice-mode/call.json` `{ session, startedAt, duplex }`, and says a short greeting.
+  `voice-mode/call.json` `{ session, startedAt, duplex }`, and says nothing aloud. Claude's `CALL_RULES` tell it to greet once, in a few words, with `say`, then `listen`; the server's own greeting was dropped so the user doesn't hear two.
 - **During:** the mic stays open. Silence never ends the call.
 - **End:** the user says a hang-up phrase ("hang up", "bye Claude", "end the call"), types `/mac-voice-mcp:hangup`,
   or Claude calls `call { action: "end" }`. Also ends on session end, or after `VOICE_MCP_CALL_IDLE_MINUTES`

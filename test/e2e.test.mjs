@@ -1014,7 +1014,8 @@ test("a call: one recorder throughout, listen hears the user, say returns at onc
     assert.equal(started.isError, false);
     assert.match(text(started), /^The call is on: the microphone stays open until the user hangs up\./);
     assert.equal(JSON.parse(readFileSync(callFile(sb), "utf8")).duplex, "half");
-    assert.ok(await waitFor(() => /^speak "I'm here\."/m.test(sb.readLog())), "the greeting was spoken");
+    await new Promise((r) => setTimeout(r, 500));
+    assert.doesNotMatch(sb.readLog(), /^speak /m, "call start speaks nothing: Claude greets, once, with say");
     assert.match(text(await client.callTool({ name: "call", arguments: { action: "start" } })), /A call is already on/);
 
     const heard = await client.callTool({ name: "listen", arguments: {} });
@@ -1185,14 +1186,32 @@ test("call.json disappearing (the session ended) makes the server hang up", asyn
   }
 });
 
+test("call start speaks nothing; only Claude's first say is heard, and the rules tell Claude to greet once", async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ STUB_SCENARIO: "silent" }));
+  try {
+    const started = await client.callTool({ name: "call", arguments: { action: "start" } });
+    assert.match(text(started), /Greet the user once, in a few words, with say/);
+    await new Promise((r) => setTimeout(r, 700));
+    assert.doesNotMatch(sb.readLog(), /^speak /m, "nothing was spoken at call start");
+    await client.callTool({ name: "say", arguments: { text: "Hi, I'm here." } });
+    assert.ok(await waitFor(() => /^speak "Hi, I'm here\."/m.test(sb.readLog())), "Claude's greeting was the first speech");
+    assert.equal(sb.readLog().match(/^speak /gm).length, 1, "and the only one");
+  } finally {
+    await client.close();
+  }
+});
+
 test("while the call speaks, the mic is muted: what plays isn't transcribed back", async () => {
   const sb = sandbox();
   fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
-  // The greeting plays for 4 s, over both of the recorder's utterances (at about 0.5 s and 2.7 s).
+  // Claude's first say plays for 4 s, over both of the recorder's utterances (at about 0.5 s and 2.7 s).
   const { client } = await connect(sb.env({ STUB_SCENARIO: "call", STUB_SAY_MS: "4000" }));
   try {
     await client.callTool({ name: "call", arguments: { action: "start" } });
-    assert.ok(await waitFor(() => /^speak-end "I'm here\."/m.test(sb.readLog()), 6000));
+    await client.callTool({ name: "say", arguments: { text: "Hi there." } });
+    assert.ok(await waitFor(() => /^speak-end "Hi there\."/m.test(sb.readLog()), 6000));
     assert.doesNotMatch(sb.readLog(), /whisper-server inference|whisper-cli wav/, "nothing was transcribed");
   } finally {
     await client.close();
@@ -1333,7 +1352,7 @@ test("another window's voice turn during a call gives up at once, saying the use
     assertQuick(t);
     assert.equal(r.isError, true);
     assert.match(text(r), /^The user is on a call in another window/);
-    assert.equal(sb.readLog().match(/^speak /gm).length, 1, "only the call's greeting was spoken");
+    assert.equal(sb.readLog().match(/^speak /gm)?.length ?? 0, 0, "nothing was spoken: the call says no greeting");
   } finally {
     await a.client.close();
     await b.client.close();
