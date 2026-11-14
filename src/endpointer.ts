@@ -6,8 +6,9 @@
  *   - once speaking, ends the turn after `endSilenceMs` of quiet
  *   - once speaking, a sound far below the user's own voice (typing, someone across the room) is not
  *     them: it neither keeps the turn open nor drags the voice level down toward the room
- *   - ignores blips shorter than 180 ms of voice (a cough, a click) and keeps listening;
- *     a real short answer like "yes" (~200 ms) still counts
+ *   - ignores blips of 150 ms or less (a cough, a click) and keeps listening; a real short
+ *     answer like "yes" (~200 ms) still counts. Counted in whole frames: a sound touches one more
+ *     frame than its length, so 150 ms can light 6 frames (180 ms) and the bar is 7 (210 ms).
  *   - `maxMs` is how long the user may talk, counted from when they start; a hard overall
  *     cap of `startTimeoutMs + maxMs` keeps a stuck mic from listening forever
  *   - while `ignoring` (our own "mic open" chime is playing), frames are neither speech nor background;
@@ -34,7 +35,7 @@ export interface EndpointerOptions {
 }
 
 const ONSET_FRAMES = 4; // 120 ms of sound before we believe it's speech
-const MIN_UTTERANCE_MS = 180; // shorter bursts are treated as noise (a one-word "yes" is ~200 ms)
+const MIN_UTTERANCE_MS = 210; // in frames: fewer is noise. A 150 ms cough lights at most 6; a 200 ms "yes" at least 7
 const SETTLE_FRAMES = 3; // ignore the first 90 ms while the mic settles
 const FLOOR_WINDOW_FRAMES = 50; // background level = quietest frame of the last 1.5 s
 // While the user is talking, the background estimate may not rise above this far below their voice,

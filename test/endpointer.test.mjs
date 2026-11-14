@@ -178,6 +178,25 @@ test("a short answer like \"yes\" (210 ms and 270 ms) ends the turn as end-of-tu
   }
 });
 
+test("a 150 ms cough is ignored and a 200 ms \"yes\" is kept, wherever they fall across the 30 ms frames", () => {
+  // The e2e stub's cough (0.15 s of +-9000) at 1 s straddles 6 frames; at 180 ms that counted as speech.
+  const SR = 16000;
+  const sound = (lead, len) => [...Array(lead).fill(0), ...Array((SR * len) / 1000).fill(0).map((_, i) => (i % 2 ? 9000 : -9000))];
+  for (const [len, want] of [[150, "no-speech"], [200, "end-of-turn"]]) {
+    for (let off = 0; off < FRAME_SAMPLES; off += 20) {
+      const pcm = [...Array(SR).fill(0).map(() => Math.round(rand() * 40)), ...sound(off, len)];
+      const ep = new Endpointer(LONG);
+      let reason = null;
+      for (let f = 0; !reason && f < ms(LONG.startTimeoutMs) + 10; f++) {
+        const buf = Buffer.alloc(FRAME_SAMPLES * 2);
+        for (let i = 0; i < FRAME_SAMPLES; i++) buf.writeInt16LE(pcm[f * FRAME_SAMPLES + i] ?? Math.round(rand() * 40), i * 2);
+        reason = ep.push(buf);
+      }
+      assert.equal(reason, want, `${len} ms sound ${off} samples into a frame`);
+    }
+  }
+});
+
 test("a very short click (90 ms) is still ignored", () => {
   const [reason] = runLevels([[-60, 1000], [-25, 90]]);
   assert.equal(reason, "no-speech");
