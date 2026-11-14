@@ -27,6 +27,8 @@ npm run test:local -- --compare 0.7.0    # side by side with a published version
 
 It packs this checkout and installs it the way npm users get it, starts the server, and talks to it over MCP as Claude does. The voice turns run by themselves: while the server listens, the script says a known sentence through the speakers and scores the transcript. It also checks speak-only replies, typing to interrupt, and cancelling. It prints a table of install time and size, startup, reply time after you stop talking, transcription time, word errors, and memory and CPU use, and saves it to `local-test-results/`.
 
+To find out why a turn was slow, run it with `VOICE_MCP_FLIGHT_RECORDER=audio`. Any turn that replies more than 5 s after the test speaker stopped is then flagged through the server's `flag` tool, and its audio is saved as a WAV in the flight recorder's flags folder on this Mac. The test prints the path. Without audio mode, it only says that the turn was slow.
+
 Turn the volume up, keep the room quiet, and stop voice mode in other sessions while it runs. It uses the settings in your shell, not your Claude config, so set the ones you use, for example `VOICE_MCP_VOICE="Voice 4" npm run test:local`.
 
 | Module | Responsibility |
