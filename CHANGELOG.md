@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-14
+
 ### Added
 - **Distinct sounds for each moment of a turn.** A soft tick means the mic is open, a pop means it heard you, a low purr means it heard nothing, and a low thud means something is wrong. `VOICE_MCP_CHIME=0` turns the tones off.
 - **When voice can't work, you hear why.** If the mic is blocked, there's no recorder or speech engine, or the model is missing or still downloading, voice-mcp says one short line out loud, once, and Claude explains the fix on screen. `VOICE_MCP_SPOKEN_ERRORS=0` turns the spoken lines off.
@@ -217,7 +219,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   - `voice_setup`: checks first, installs only what's missing, and only after you agree.
   - The `setup` and `voice_mode` prompts.
 
-[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.7.1...v0.8.0
