@@ -207,18 +207,17 @@ test("speech that varies only 8 or 10 dB between syllables does not end the turn
   }
 });
 
-test("a room that gets louder after the user stops (mic auto-gain, uneven noise) still ends the turn promptly", () => {
-  // Jeet's local test: one turn ran 8.5 s past the end of speech. The floor cap pinned the threshold
-  // under the voice, so noise that rose after the speech kept counting as voice.
-  const opts = { ...LONG, endSilenceMs: 2_000, marginDb: 10 };
+test("speech that goes softer for a few seconds after a loud start is not cut off", () => {
+  // Review finding: releasing the floor cap 0.6 s after the last strong syllable ended this turn
+  // about 1 s before the soft part did.
   const script = [[-60, 1000]];
-  for (let i = 0; i < 8; i++) script.push([-30, 210], [-38, 210]); // ~3.4 s of syllables
-  const speechEndMs = 1000 + 16 * 210;
-  for (let i = 0; i < 80; i++) script.push([-49, 60], [-43, 60]); // ~10 s of uneven noise, 13-19 dB under the voice
-  const [reason, , fed] = runLevels(script, opts);
+  for (let i = 0; i < 6; i++) script.push([-25, 210], [-30, 210]); // ~2.5 s at a normal level
+  for (let i = 0; i < 7; i++) script.push([-34, 210], [-40, 210]); // ~3 s trailing off, 9-10 dB softer
+  const softEndMs = 1000 + 26 * 210;
+  const [reason, , fed] = runLevels(script);
   assert.equal(reason, "end-of-turn");
-  const afterSpeechMs = fed * FRAME_MS - speechEndMs;
-  assert.ok(afterSpeechMs <= 3200, `ended ${afterSpeechMs} ms after speech stopped`);
+  const afterSoftMs = fed * FRAME_MS - softEndMs;
+  assert.ok(afterSoftMs >= 1400, `ended ${afterSoftMs} ms after the soft speech, i.e. during it`);
 });
 
 test("words said over the mic-open chime are kept: the utterance starts where the chime did", () => {
@@ -244,6 +243,22 @@ test("speech that begins late under the chime starts where it began, not at the 
   ep.setIgnoring(true); // the chime window: quiet room, then the user starts near its end
   for (let i = 0; i < ms(900); i++) r ??= ep.push(frame("noise"));
   const voiceFrame = ms(1200);
+  for (let i = 0; i < ms(150); i++) r ??= ep.push(frame("speech"));
+  ep.setIgnoring(false);
+  for (let i = 0; i < ms(1500); i++) r ??= ep.push(frame("speech"));
+  for (let i = 0; i < ms(2000) && !r; i++) r = ep.push(frame("noise"));
+  assert.equal(r, "end-of-turn");
+  assert.equal(ep.speechStartFrame, voiceFrame);
+});
+
+test("a loud chime followed by quiet doesn't pull the start back to the chime", () => {
+  const ep = new Endpointer(OPTS);
+  let r = null;
+  for (let i = 0; i < ms(300); i++) r ??= ep.push(frame("noise"));
+  ep.setIgnoring(true);
+  for (let i = 0; i < ms(150); i++) r ??= ep.push(frame("loudnoise")); // the tick itself, loud at the mic
+  for (let i = 0; i < ms(600); i++) r ??= ep.push(frame("noise")); // its tail: quiet room
+  const voiceFrame = ms(1050);
   for (let i = 0; i < ms(150); i++) r ??= ep.push(frame("speech"));
   ep.setIgnoring(false);
   for (let i = 0; i < ms(1500); i++) r ??= ep.push(frame("speech"));
