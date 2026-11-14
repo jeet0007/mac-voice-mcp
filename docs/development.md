@@ -39,6 +39,7 @@ Turn the volume up, keep the room quiet, and stop voice mode in other sessions w
 | `kokoro-text.ts`, `pcm.ts` | Pronunciation fixes and sentence chunks for Kokoro, PCM conversion (pure, unit-tested) |
 | `model.ts` | Finding, symlinking or downloading the model |
 | `stt.ts` | The warm `whisper-server` with orphan guard, and the `whisper-cli` fallback |
+| `flight.ts` | The opt-in flight recorder: event log, flags, audio ring, retention. Off = no-ops; imports no network module (tested) |
 | `setup.ts` | Requirement checks and consent-based background installs |
 | `lock.ts` | One voice turn (or call) at a time across every session on the Mac |
 | `worklisten.ts` | Listening for "Claude, …" while Claude works, the inbox and phase file shared with the plugin hook and Voice Buddy |

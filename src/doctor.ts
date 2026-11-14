@@ -17,6 +17,7 @@ import os from "node:os";
 import path from "node:path";
 import { chooseVoice, describeRecorder, findRecorder, recordForSeconds, speak, synthesizeToFile } from "./audio.js";
 import { CONFIG, IS_MAC, PKG } from "./config.js";
+import { flightDir, flightEnabled, flightMode } from "./flight.js";
 import { kokoroEnabled, kokoroVoiceLabel, stopKokoro } from "./kokoro.js";
 import { ensureModel } from "./model.js";
 import { run } from "./proc.js";
@@ -90,7 +91,7 @@ export async function runDoctor(opts: { loopback?: boolean; reportDir?: string; 
   const report: DoctorReport = {
     version: PKG.version,
     date: new Date().toISOString(),
-    machine: { platform: `${process.platform} ${os.release()}`, arch: process.arch, node: process.version, ...(await audioDevices()) },
+    machine: { platform: `${process.platform} ${os.release()}`, arch: process.arch, node: process.version, ...(flightEnabled() ? { flightRecorder: `${flightMode()} (events kept on this Mac in ${flightDir()}; "flight purge" deletes them)` } : {}), ...(await audioDevices()) },
     checks,
     ok: false,
   };

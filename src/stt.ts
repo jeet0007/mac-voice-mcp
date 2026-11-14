@@ -15,7 +15,8 @@ import os from "node:os";
 import path from "node:path";
 import { CONFIG, debug, IS_WIN, log } from "./config.js";
 import { CancelledError, isExecutable, run, SetupError, sleep, tail, which } from "./proc.js";
-import { cleanTranscript } from "./speech-text.js";
+import { flightEvent } from "./flight.js";
+import { cleanTranscript as cleanText } from "./speech-text.js";
 
 export const STT_MISSING =
   "whisper.cpp (speech-to-text) is not installed. Call the voice_setup tool to check and install what's missing " +
@@ -255,8 +256,23 @@ async function transcribeCli(bin: string, wavFile: string, model: string, signal
   return cleanTranscript(result.stdout, dropped);
 }
 
+/** What the last clean-up removed from a transcript, in characters (the recorder logs the number, never the text). */
+let lastDropped = 0;
+function cleanTranscript(raw: string, dropped?: string[]): string {
+  const text = cleanText(raw, dropped);
+  lastDropped = Math.max(0, raw.trim().length - text.length);
+  return text;
+}
+
 /** `dropped`, when given, receives whatever cleaning removed as invented (whisper's stock sentences). */
 export async function transcribe(wavFile: string, model: string, signal?: AbortSignal, dropped?: string[]): Promise<string> {
+  const started = Date.now();
+  const text = await transcribeNow(wavFile, model, signal, dropped);
+  flightEvent("stt.done", { ms: Date.now() - started, chars: text.length, words: text.split(/\s+/).filter(Boolean).length, droppedChars: lastDropped });
+  return text;
+}
+
+async function transcribeNow(wavFile: string, model: string, signal?: AbortSignal, dropped?: string[]): Promise<string> {
   const started = Date.now();
   if (serverUsable()) {
     try {
