@@ -46,5 +46,3 @@ export function wavSeconds(wav: Buffer): number {
   return 0;
 }
 
-// Kept for the test that imports it from dist/pcm.js; the one WAV header is endpointer.ts's.
-export { wavHeader as wavHeaderFor } from "./endpointer.js";

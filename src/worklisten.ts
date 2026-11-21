@@ -23,9 +23,6 @@ import { CancelledError, sleep } from "./proc.js";
 import { addToInbox, isAlive, readJson, readListening, setOwnSession, stopRequestedSince, type InboxEntry } from "./state/voice-mode.js";
 import { transcribeBuffer } from "./stt.js";
 
-// Kept for tests that import these from dist/worklisten.js; new code imports state/voice-mode.js.
-export { addToInbox, inboxDir, INBOX_MAX_CHARS, stopFile, stopRequestedSince, takeInbox, voiceModeDir } from "./state/voice-mode.js";
-
 /** How long after our voice turn the hook has to confirm voice mode before we give up (no hook → no listening). */
 const CONFIRM_MS = Math.max(200, envNum("VOICE_MCP_WORK_LISTEN_CONFIRM_MS", 10_000));
 /** How often, while listening, we check whether to stop (the user typed, voice mode ended, …). */

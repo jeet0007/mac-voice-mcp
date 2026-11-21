@@ -6,7 +6,8 @@ import os from "node:os";
 import path from "node:path";
 
 process.env.VOICE_MCP_CACHE_DIR = mkdtempSync(path.join(os.tmpdir(), "voice-work-"));
-const { parseInterjection, addToInbox, takeInbox, interjectionNote, inboxDir, INBOX_MAX_CHARS } = await import("../dist/worklisten.js");
+const { parseInterjection, interjectionNote } = await import("../dist/worklisten.js");
+const { addToInbox, takeInbox, inboxDir, INBOX_MAX_CHARS } = await import("../dist/state/voice-mode.js");
 const { takeInterjections, interjectionReason } = await import("../hooks/voice-mode-lib.mjs");
 
 test("only speech that starts with Claude's name is for Claude", () => {
@@ -55,7 +56,7 @@ test("the inbox is private to this account, and a runaway transcript is cut shor
 
 test("a stop carries its session: ours and unmarked stops are honoured, another window's is ignored", async () => {
   const { writeFileSync } = await import("node:fs");
-  const { stopFile, stopRequestedSince } = await import("../dist/worklisten.js");
+  const { stopFile, stopRequestedSince } = await import("../dist/state/voice-mode.js");
   mkdirSync(path.dirname(stopFile()), { recursive: true });
   const since = Date.now() - 1000;
   const stop = (o) => writeFileSync(stopFile(), JSON.stringify({ at: Date.now(), ...o }));

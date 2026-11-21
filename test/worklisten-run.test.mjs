@@ -24,7 +24,8 @@ Object.assign(process.env, {
   VOICE_MCP_CACHE_DIR: path.join(dir, "cache"),
   PATH: [path.join(ROOT, "test", "fixtures", "installable"), process.env.PATH].join(path.delimiter),
 });
-const { workListener, takeInbox, voiceModeDir } = await import("../dist/worklisten.js");
+const { workListener } = await import("../dist/worklisten.js");
+const { takeInbox, voiceModeDir } = await import("../dist/state/voice-mode.js");
 const { stopWhisperServer } = await import("../dist/stt.js");
 
 const temps = () => readdirSync(os.tmpdir()).filter((n) => n.startsWith("voice-mcp-work-") || n.startsWith("voice-mcp-stt-")).sort();
