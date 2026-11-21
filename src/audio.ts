@@ -621,6 +621,7 @@ export async function listenContinuously(signal: AbortSignal, opts: ContinuousOp
       if (opts.muted()) {
         // Whatever was being said is cut: the speaker's echo would end up in it anyway.
         if (frames.length) {
+          if (endpointer.speaking) flightEvent("listen.cut", { speechMs: Math.round(endpointer.speechSeconds * 1000) }, null);
           endpointer = fresh();
           frames = [];
           opts.live?.end();
