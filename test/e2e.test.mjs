@@ -912,7 +912,7 @@ test("typing while voice-mcp listens stops listening at once and tells Claude to
     assertQuick(t);
     assert.equal(r.isError, false);
     assert.match(r.content[0].text, /^\(The user started typing/);
-    assert.match(sb.readLog(), /^rec stopped$/m, "the recorder was stopped");
+    assert.ok(await waitFor(() => /^rec stopped$/m.test(sb.readLog()), 2000), "the recorder was stopped"); // a turn now returns before the recorder has exited
   } finally {
     await client.close();
   }
