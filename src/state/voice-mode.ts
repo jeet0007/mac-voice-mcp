@@ -1,7 +1,7 @@
 /**
  * The voice-mode state folder (<cache>/voice-mode/): every file the server reads or writes there,
- * shared with the plugin hook and Voice Buddy. The only TS module that imports
- * hooks/voice-files.mjs, which stays the single source of the shared names.
+ * shared with the plugin hook and Voice Buddy. Besides config.ts (which needs cacheRoot before this
+ * module can load), the only TS module that imports hooks/voice-files.mjs, the source of the shared names.
  */
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
