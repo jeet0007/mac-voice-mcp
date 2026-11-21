@@ -37,6 +37,8 @@
  *   native-build.ts build the native binaries (call bubble, audio worker) with the user's swiftc, after consent
  *   bubble.ts       the floating call bubble: start and stop it with a call
  *   audio/protocol.ts  the wire protocol of the native audio worker (not used by a call yet)
+ *   call/engine/    every rule of a call: step(state, event) → effects, and what a transcript is  (pure)
+ *   call/session.ts a call: the open mic, transcripts and replies around the engine
  *   voice.ts        the speak → listen → transcribe round trip
  *   wer.ts          word error rate (pure)
  *   doctor.ts       objective self-check with PASS / WARN / FAIL
