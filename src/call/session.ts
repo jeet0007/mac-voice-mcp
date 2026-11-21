@@ -14,7 +14,9 @@
  * turns give up at once. On speakers the mic can't hear the user while `say` plays
  * (src/audio/device.ts), so a reply waits for them to finish their sentence; on headphones it stays
  * open, so the user can talk over Claude: speech pauses the reply, real words drop the rest of it,
- * and a filler ("mm-hm") or a cough resumes it.
+ * and a filler ("mm-hm") or a cough resumes it. On the native backend the mic hears the user over
+ * the reply too: speech makes it quieter, words in a partial transcript pause it, and the final
+ * transcript stops or resumes it.
  *
  * It ends when the user says "hang up", when Claude calls `call end`, after
  * VOICE_MCP_CALL_IDLE_MINUTES (default 30) without a word either way, when call.json disappears
@@ -43,7 +45,7 @@ import { PERMISSION_NOTICE } from "../texts.js";
 import { trackSpeaking } from "../voice.js";
 import { initial, nextWake, step } from "./engine/step.js";
 import type { Effect, EndReason, Event, SayId, State, UtteranceId } from "./engine/types.js";
-import { classify, heardSoFar } from "./engine/words.js";
+import { classify, echoes, heardSoFar } from "./engine/words.js";
 
 /** The last speech-to-text failure on a call, kept for debugging (and a future /issue). */
 const sttFailureFile = () => path.join(CONFIG.cacheDir, "last-stt-failure.json");
@@ -58,6 +60,10 @@ const WATCH_MS = 250;
 const EARLY_FAILURE_MS = 300;
 /** The call ends after this long without a word either way. Fractions are fine (the tests use seconds). */
 const IDLE_MS = Math.max(0.01, envNum("VOICE_MCP_CALL_IDLE_MINUTES", 30)) * 60_000;
+/** A talked-over reply's volume while the word check decides (interrupt "duck"). */
+const DUCK_GAIN = 0.3;
+/** Whisper serves one request at a time: a word check that can't start this soon is decided by the final transcript. */
+const CHECK_START_MS = 300;
 /** The longest setTimeout takes: a longer one fires at once. */
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
 
@@ -98,6 +104,10 @@ export class Call {
   private transcripts = new Map<UtteranceId, string>();
   /** Utterances are transcribed in the order they were said. */
   private transcribing: Promise<void> = Promise.resolve();
+  /** Final transcripts queued or running: a word check would wait behind them. */
+  private finals = 0;
+  /** The partial transcripts of the utterance being said, shared by the bubble and the word check. */
+  private live: LiveTranscript | null = null;
   /** Every `say` so far, for the next voice turn to wait on: a dropped say settles at once, while the one before it may still play (a goodbye). */
   private spoken: Promise<unknown> = Promise.resolve();
   /** Problems with earlier speech, reported in the next result. */
@@ -122,7 +132,7 @@ export class Call {
     rmSync(permissionFile(), { force: true });
     const startedAt = Date.now();
     const duplex = session.interrupt === "none" ? "half" : "full";
-    this.engine = initial({ interrupt: duplex === "half" ? "none" : "pause", thinkingTick: CONFIG.callThinkingSound, idleMs: IDLE_MS }, startedAt);
+    this.engine = initial({ interrupt: session.interrupt, thinkingTick: CONFIG.callThinkingSound, idleMs: IDLE_MS }, startedAt);
     mkdirSync(voiceModeDir(), { recursive: true });
     writeFileSync(callFile(), JSON.stringify({ pid: process.pid, startedAt, duplex }));
     this.watch = setInterval(() => this.poll(), WATCH_MS);
@@ -216,10 +226,16 @@ export class Call {
     switch (effect.type) {
       case "speech.start":
         return this.play(effect.say);
-      case "speech.pause":
-        return this.says.get(effect.say)?.reply?.duck(0);
-      case "speech.resume":
+      case "speech.duck":
+        return this.says.get(effect.say)?.reply?.duck(DUCK_GAIN);
+      case "speech.restore":
         return this.says.get(effect.say)?.reply?.duck(1);
+      case "speech.pause":
+        return this.says.get(effect.say)?.reply?.pause();
+      case "speech.resume":
+        return this.says.get(effect.say)?.reply?.resume();
+      case "words.check":
+        return this.checkWords(effect.say);
       case "speech.stop":
         return this.says.get(effect.say)?.reply?.stop();
       case "speech.drop":
@@ -264,6 +280,17 @@ export class Call {
     })();
   }
 
+  /** Are there words in what the user has said so far over `id`? Our own reply heard back doesn't count. */
+  private checkWords(id: SayId): void {
+    const live = this.live;
+    const reply = this.says.get(id)?.text ?? "";
+    void (live ? live.check(CHECK_START_MS) : Promise.resolve(null)).then((partial) => {
+      const heard = partial === null ? null : classify(partial);
+      const words = heard === null ? null : (heard === "words" || heard === "hang-up") && !echoes(partial!, reply);
+      this.dispatch({ type: "words.checked", words, quietMs: live?.quietMs ?? 0 });
+    });
+  }
+
   /** Everything that must not outlive the call, done at once: a shutdown that exits right after leaves nothing behind. */
   private teardown(reason: EndReason): void {
     this.endedBecause = reason === "hang-up" ? "the user hung up" : reason === "idle" ? `nobody said anything for ${Math.round(IDLE_MS / 60_000)} minutes` : this.requested;
@@ -298,12 +325,13 @@ export class Call {
     prewarmKokoro(); // the first words of the call shouldn't wait for the voice to load
     let levelFrames = 0;
     // Rough words while the user talks, for the bubble's panel only (docs/specs/live-transcript.md).
-    const live = new LiveTranscript({
+    const live = (this.live = new LiveTranscript({
       everyMs: CONFIG.liveTranscriptMs,
       enabled: () => bubbleTakesText() && partialsAvailable(),
+      ready: () => partialsAvailable() && !this.finals,
       request: (wav, sig) => transcribePartial(wav, sig),
       emit: (text) => void sendToBubble({ type: "partial", text }),
-    });
+    }));
     try {
       await listenContinuously(session, {
         onHeard: (heard) => {
@@ -311,8 +339,10 @@ export class Call {
           if (heard.kind !== "ended") return this.dispatch({ type: "speech.dropped", reason: heard.kind });
           const utterance = ++this.ids as UtteranceId;
           this.dispatch({ type: "utterance.ended", utterance, reason: heard.reason });
+          this.finals++;
           this.transcribing = this.transcribing
             .then(() => this.transcribe(utterance, heard.wav, model, signal))
+            .finally(() => this.finals--)
             .catch((e: unknown) => log(`call: transcription chain failed: ${e instanceof Error ? e.message : String(e)}`)); // one failure mustn't stop the rest of the call being heard
         },
         // Every other 30 ms frame is plenty for the bubble's glow, which smooths it anyway.

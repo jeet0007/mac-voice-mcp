@@ -29,11 +29,12 @@ export const CUES = ["thinking-tick"] as const;
 
 export interface Policy {
   /**
-   * What talking over a reply does. "pause" (headphones): the reply pauses, and the transcript
-   * decides whether it stops. "none" (speakers): the mic can't hear the user while a reply plays,
-   * so a reply waits for them to finish their sentence.
+   * What talking over a reply does. "duck" (the native backend on speakers): the reply goes quieter,
+   * words in what the user has said so far pause it, and the transcript decides whether it stops.
+   * "pause" (headphones): the reply pauses at once, and the transcript decides. "none" (speakers):
+   * the mic can't hear the user while a reply plays, so a reply waits for them to finish their sentence.
    */
-  readonly interrupt: "pause" | "none";
+  readonly interrupt: "duck" | "pause" | "none";
   /** Tick while Claude thinks. */
   readonly thinkingTick: boolean;
   /** The call ends after this long without a word either way. */
@@ -42,6 +43,10 @@ export interface Policy {
 
 /** After talking over Claude, nothing real said within this long resumes the reply (LiveKit's 2 s). */
 export const GIVE_UP_MS = 2000;
+/** interrupt "duck": look for words this long after the user starts talking over a reply, and again as often while there are none. */
+export const WORD_CHECK_MS = 700;
+/** interrupt "duck": no words, and quiet this long: a clap or a cough, so the reply comes back up without waiting for the utterance to end. */
+export const BLIP_QUIET_MS = 300;
 /** While Claude thinks: a tick this often, for at most this long. */
 export const THINKING_EVERY_MS = 1500;
 export const THINKING_MAX_MS = 10_000;
@@ -88,14 +93,23 @@ interface Saying {
   readonly owesReply: boolean;
 }
 
-/** The user talking over a reply, which stays paused until their words stop it or it resumes. */
+/** The user talking over a reply, until their words stop it or it plays on as before. */
 export interface Interruption {
   readonly at: Ms;
   /** Its utterances still being transcribed. */
   readonly pending: readonly UtteranceId[];
   /** One of its utterances was only a filler, or nothing: the reply resumes once the user is done. */
   readonly filler: boolean;
+  readonly reply: TalkedOver;
 }
+
+/** What the talked-over reply does meanwhile. Whichever it is, words in the transcript stop it. */
+export type TalkedOver =
+  /** Quieter (interrupt "duck"), from `since`. `check`: when to look for words in what the user has said so far; "asked" while the shell looks. */
+  | { readonly kind: "ducked"; readonly since: Ms; readonly check: Ms | "asked" | null }
+  | { readonly kind: "paused"; readonly since: Ms }
+  /** Back to full volume: no words yet, but the transcript still decides. */
+  | { readonly kind: "playing" };
 
 export type Event = { readonly at: Ms } & (
   /** The user has talked for BARGE_IN_MS. */
@@ -104,6 +118,8 @@ export type Event = { readonly at: Ms } & (
   | { readonly type: "utterance.ended"; readonly utterance: UtteranceId; readonly reason: (typeof UTTERANCE_ENDINGS)[number] }
   | { readonly type: "transcribed"; readonly utterance: UtteranceId; readonly heard: Heard }
   | { readonly type: "transcribe.failed"; readonly utterance: UtteranceId }
+  /** What `words.check` found: words or not, null if whisper couldn't take it in time; and how long the user has been quiet. */
+  | { readonly type: "words.checked"; readonly words: boolean | null; readonly quietMs: number }
   | { readonly type: "say.requested"; readonly say: SayId }
   /** It finished, was stopped or failed. */
   | { readonly type: "playback.ended"; readonly say: SayId }
@@ -116,6 +132,10 @@ export type Event = { readonly at: Ms } & (
 
 export type Effect =
   | { readonly type: "speech.start"; readonly say: SayId }
+  /** Quieter while the user talks over it (interrupt "duck"). */
+  | { readonly type: "speech.duck"; readonly say: SayId }
+  /** Back to full volume. */
+  | { readonly type: "speech.restore"; readonly say: SayId }
   | { readonly type: "speech.pause"; readonly say: SayId }
   | { readonly type: "speech.resume"; readonly say: SayId }
   | { readonly type: "speech.stop"; readonly say: SayId }
@@ -126,6 +146,8 @@ export type Effect =
    * `missed`: how many things said before it were lost.
    */
   | { readonly type: "deliver"; readonly utterance: UtteranceId; readonly interrupted: { readonly say: SayId; readonly playedMs: number } | null; readonly missed: number }
+  /** Look for words in what the user has said so far, over `say`; the answer comes back as `words.checked`. */
+  | { readonly type: "words.check"; readonly say: SayId }
   | { readonly type: "cue"; readonly sound: (typeof CUES)[number] }
   | { readonly type: "teardown"; readonly reason: EndReason };
 
@@ -143,6 +165,7 @@ export const EVENT_STRINGS = {
   "utterance.ended": { reason: UTTERANCE_ENDINGS },
   transcribed: { heard: HEARD },
   "transcribe.failed": {},
+  "words.checked": {},
   "say.requested": {},
   "playback.ended": {},
   "inbox.drained": {},
@@ -152,11 +175,14 @@ export const EVENT_STRINGS = {
 
 export const EFFECT_STRINGS = {
   "speech.start": {},
+  "speech.duck": {},
+  "speech.restore": {},
   "speech.pause": {},
   "speech.resume": {},
   "speech.stop": {},
   "speech.drop": {},
   deliver: {},
+  "words.check": {},
   cue: { sound: CUES },
   teardown: { reason: END_REASONS },
 } as const satisfies StringTable<Effect>;

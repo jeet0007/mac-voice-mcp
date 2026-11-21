@@ -3,8 +3,8 @@
 // commands on stdin, mic frames on stdout, events on fd 3.
 //
 // Mic: the STUB_SCENARIO audio the `rec` stub plays (test/fixtures/scenarios.cjs), at the same 10x pace.
-//   talk     noise; 1.5 s of speech each time the file $STUB_LOG.talk appears, which it removes
-//   bargein  noise until a PCM sound has played STUB_BARGEIN_MS (500), then 1.5 s of speech over it
+//   talk     noise; STUB_SPEECH_S (1.5) of speech each time the file $STUB_LOG.talk appears, which it removes
+//   bargein  noise until a PCM sound has played STUB_BARGEIN_MS (500), then STUB_SPEECH_S of speech over it
 // Playback: makes no sound. A sound's position advances in real time through the PCM it was sent;
 //   a cue file lasts STUB_CUE_MS (100).
 // STUB_WORKER: fail-start (an error event, exit 1) | dies (exit 1 after a second, no goodbye)
@@ -58,7 +58,7 @@ if (STUB_WORKER === "route") {
 // --- Mic ---
 // Re-cut across the scenario's parts: the worker only ever writes whole frames.
 const frames = scenarios.toFrames(scenarios.scenarioFrames(scenario).flat()).filter((f) => f.length === 480);
-const userSpeaks = () => frames.push(...scenarios.toFrames(scenarios.speech(1.5)));
+const userSpeaks = () => frames.push(...scenarios.toFrames(scenarios.speech(Number(process.env.STUB_SPEECH_S || 1.5))));
 let next = 0;
 process.stdout.on("error", () => {});
 setInterval(() => {

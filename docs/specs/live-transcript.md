@@ -27,6 +27,9 @@ then the final transcript for a moment, then fades away.
    - a reply older than the newest one shown is dropped;
    - the text passes through `cleanTranscript`; an empty result shows nothing.
    - Never with the `whisper-cli` fallback (one process per request is too slow): no server, no partials.
+   - The call's word check (talking over a reply on the native backend, `docs/specs/call-audio-redesign.md`)
+     shares these requests: it rides the one in flight or sends the next at once, past the rules above, and
+     its text shows in the panel too. The check keeps only words-or-not.
 2. **Final.** The existing per-utterance transcript (`call/session.ts`) is sent as the final text. Partials are
    display only: they never reach the inbox, Claude, logs or the flight recorder.
 3. **Transport.** The server that launched the bubble writes one JSON object per line to the bubble's stdin:

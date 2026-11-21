@@ -68,10 +68,28 @@ and per-utterance WAVs, PR #52's `waitForQuiet`/`heardWhileSaying`, `scripts/bar
 ## Barge-in (native backend, speakers)
 
 1. Worker plays the reply through the same VPIO unit, so mic frames arrive echo-cancelled (`echo: false`).
-2. `utterances` emits `speech.onset` at 120 ms of voice. Engine: reply speaking → `speech.duck` (gain 0.3, 10 ms ramp), set `checkAt = at + 700`.
-3. `tick` at checkAt → `wordcheck`; shell runs `transcribePartial` on the utterance so far, reports `words: boolean|null`.
-4. Words → pause at the exact position. Final transcript: real words → `speech.stop` + drop queued says, delivered with `(You interrupted Claude after: …)`; not words → resume.
-5. No words → re-check while still talking, else `speech.restore`. Blip, filler, or 2 s of nothing → restore. No warm whisper → decide on the final transcript (today's rule).
+2. `utterances` emits `speech.onset` at 250 ms of voice (`BARGE_IN_MS`, as on headphones). Engine: reply speaking → `speech.duck` (gain 0.3, 10 ms ramp), word check due at `at + 700`.
+3. `tick` at that time, user still talking → `words.check`. The shell asks the call's `LiveTranscript` (the bubble's partial stream, H4): the request in flight answers it, or the next frame sends one. One that can't go out within 300 ms (server cold, or busy with a final) answers null. The shell reports `words.checked { words: boolean|null, quietMs }`. `words` is the partial classified by `words.ts` (words or hang-up), false when it is two or more words of the reply playing (H2, our own echo).
+4. Words → `speech.pause` at the exact position (worker `pause`). Final transcript: real words → `speech.stop` + drop queued says, delivered with `(You interrupted Claude after: …)`; anything else → `speech.restore` + `speech.resume`.
+5. No words, user still talking, not quiet for `BLIP_QUIET_MS` (300) and under 2 s since the duck → check again 700 ms later. Otherwise → `speech.restore`: a clap or a cough comes back up at the first check (M6). `words: null` → no more checks; the reply stays quieter and the final decides.
+6. The final transcript decides whatever happened before it: real words stop a reply that was restored, too. Once the user is quiet with no transcript out (a blip, a filler, a failed transcription), a quieter reply comes back up at once; a paused one resumes after a filler, or 2 s after it paused.
+7. Talking again over a restored reply whose transcript is still out ducks it again. Ending the call stops a paused or quieter reply.
+
+Rules as built (`src/call/engine/step.ts`, tests in `test/engine.test.mjs`):
+
+| Event (interrupt "duck", a reply speaking) | Effects |
+|---|---|
+| `speech.onset`, no interruption or the reply restored | `speech.duck`, word check due in 700 ms |
+| `tick` at the check, user talking | `words.check` |
+| `words.checked` true | `speech.pause` |
+| `words.checked` false, talking, quiet < 300 ms, < 2 s since the duck | none, check again in 700 ms |
+| `words.checked` false otherwise | `speech.restore` |
+| `words.checked` null | none, no more checks |
+| `transcribed` words | `speech.stop`, `speech.drop` per queued say, `deliver` with `interrupted` |
+| `transcribed` filler or empty: ducked / paused / restored | `speech.restore` / `speech.restore` + `speech.resume` / none |
+| `speech.dropped` or `transcribe.failed`, nothing else out: ducked | `speech.restore` |
+| `tick` 2 s after a pause, nothing out | `speech.restore`, `speech.resume` |
+| `words.checked` with no check asked | none |
 
 Process backend: headphones → `interrupt: "pause"` (SIGSTOP), today's behaviour. Speakers → `interrupt: "none"`, frames during playback are `echo`, says hold while the user talks.
 

@@ -11,6 +11,7 @@ const ENGINE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", 
 const IDLE_MS = 1_800_000;
 const SPEAKERS = { interrupt: "none", thinkingTick: true, idleMs: IDLE_MS };
 const HEADPHONES = { ...SPEAKERS, interrupt: "pause" };
+const NATIVE = { ...SPEAKERS, interrupt: "duck" };
 
 /** Every state and effect any test here produced, for the privacy test at the end. */
 const seen = [];
@@ -37,10 +38,15 @@ const played = (at, id) => ({ at, type: "playback.ended", say: id });
 const drained = (at) => ({ at, type: "inbox.drained" });
 const tick = (at) => ({ at, type: "tick" });
 const end = (at, reason = "requested") => ({ at, type: "end.requested", reason });
+const checked = (at, words, quietMs = 0) => ({ at, type: "words.checked", words, quietMs });
 
 const start = (id) => ({ type: "speech.start", say: id });
 const deliver = (utterance, more = {}) => ({ type: "deliver", utterance, interrupted: null, missed: 0, ...more });
 const CUE = { type: "cue", sound: "thinking-tick" };
+const DUCK = { type: "speech.duck", say: 1 };
+const RESTORE = { type: "speech.restore", say: 1 };
+const CHECK = { type: "words.check", say: 1 };
+const PAUSE = { type: "speech.pause", say: 1 };
 
 test("on speakers a say waits while the user talks, and starts however their utterance ends (mute cuts it)", () => {
   const endings = [ended(900, 7), ended(900, 7, "max-duration"), ended(900, 7, "cut"), dropped(900, "blip"), dropped(900, "no-speech")];
@@ -111,6 +117,93 @@ test("speech to text failing on what was said over a reply resumes it after the 
 test("a reply that starts while the user is already talking isn't paused by it; talking while nothing plays pauses nothing", () => {
   const { effects } = call(HEADPHONES, [onset(0), say(100, 1), ended(900, 7), transcribed(1300, 7, "filler"), transcribed(1400, 8, "empty")]);
   assert.deepEqual(effects, [[], [start(1)], [], [deliver(7)], []]);
+});
+
+test("native: talking over a reply makes it quieter, and 700 ms later asks the shell to look for words", () => {
+  const { effects, state } = call(NATIVE, [say(1000, 1), onset(2000), tick(2699), tick(2700), tick(2800)]);
+  assert.deepEqual(effects, [[start(1)], [DUCK], [], [CHECK], []]);
+  assert.equal(nextWake(call(NATIVE, [say(1000, 1), onset(2000)]).state), 2700);
+  assert.equal(nextWake(state), IDLE_MS, "nothing to wake for while the check is out");
+});
+
+test("native: words in the check pause the reply; real words in the transcript stop it, drop the queue, and say where it was cut", () => {
+  const { effects } = call(NATIVE, [say(1000, 1), say(1100, 2), onset(2111), tick(2811), checked(3000, true), ended(3800, 7), transcribed(4200, 7)]);
+  assert.deepEqual(effects.slice(2), [
+    [DUCK],
+    [CHECK],
+    [PAUSE],
+    [],
+    [{ type: "speech.stop", say: 1 }, { type: "speech.drop", say: 2 }, deliver(7, { interrupted: { say: 1, playedMs: 1111 } })],
+  ]);
+});
+
+test("native: words in the check, then a filler or a cough in the transcript: back to full volume and on from where it paused", () => {
+  for (const heard of ["filler", "empty"]) {
+    const { effects } = call(NATIVE, [say(0, 1), onset(1000), tick(1700), checked(1800, true), ended(2500, 7), transcribed(2900, 7, heard), onset(4000), ended(4500, 8), transcribed(4900, 8)]);
+    assert.deepEqual(effects.slice(4, 6), [[], [RESTORE, { type: "speech.resume", say: 1 }]], heard);
+    assert.deepEqual(effects.at(-1), [{ type: "speech.stop", say: 1 }, deliver(8, { interrupted: { say: 1, playedMs: 2900 } })], "4000 ms, 1100 of them paused");
+  }
+});
+
+test("native: no words while the user still talks checks again 700 ms later; quiet by then (a clap) or 2 s of nothing brings the reply back up", () => {
+  const talking = call(NATIVE, [say(0, 1), onset(1000), tick(1700), checked(1800, false, 90), tick(2499), tick(2500)]);
+  assert.deepEqual(talking.effects.slice(3), [[], [], [CHECK]]);
+
+  const clap = call(NATIVE, [say(0, 1), onset(1000), tick(1700), checked(1800, false, 300)]);
+  assert.deepEqual(clap.effects.at(-1), [RESTORE]);
+  assert.equal(nextWake(clap.state), IDLE_MS, "no more checks once it plays on");
+
+  const noise = call(NATIVE, [say(0, 1), onset(1000), tick(1700), checked(1800, false), tick(2500), checked(2600, false), tick(3300), checked(3400, false)]);
+  assert.deepEqual(noise.effects.slice(3), [[], [CHECK], [], [CHECK], [RESTORE]]);
+});
+
+test("native: back up, the transcript still decides: real words stop the reply, anything else changes nothing", () => {
+  const before = [say(0, 1), onset(1000), tick(1700), checked(1800, false, 400), ended(2500, 7)];
+  assert.deepEqual(call(NATIVE, [...before, transcribed(2900, 7)]).effects.at(-1), [{ type: "speech.stop", say: 1 }, deliver(7, { interrupted: { say: 1, playedMs: 1000 } })]);
+  assert.deepEqual(call(NATIVE, [...before, transcribed(2900, 7, "filler")]).effects.at(-1), []);
+  assert.deepEqual(call(NATIVE, [...before, transcribed(2900, 7, "filler"), played(3000, 1)]).effects.at(-1), [], "the interruption is over");
+
+  const again = call(NATIVE, [...before, onset(2600), tick(3300), checked(3400, true)]);
+  assert.deepEqual(again.effects.slice(5), [[DUCK], [CHECK], [PAUSE]], "talking again while the transcript is out ducks it again");
+});
+
+test("native: a check whisper couldn't take in time leaves the reply quieter, with no more checks: the transcript decides", () => {
+  const { effects, state } = call(NATIVE, [say(0, 1), onset(1000), tick(1700), checked(2000, null), tick(2700), tick(5000), ended(5500, 7)]);
+  assert.deepEqual(effects.slice(3), [[], [], [], []]);
+  assert.deepEqual(step(state, transcribed(6000, 7))[1], [{ type: "speech.stop", say: 1 }, deliver(7, { interrupted: { say: 1, playedMs: 1000 } })]);
+  assert.deepEqual(step(state, transcribed(6000, 7, "filler"))[1], [RESTORE]);
+});
+
+test("native: a blip or a failed transcript brings a quieter reply straight back up; a reply already paused waits out the 2 s", () => {
+  assert.deepEqual(call(NATIVE, [say(0, 1), onset(1000), dropped(1300)]).effects.at(-1), [RESTORE]);
+  assert.deepEqual(call(NATIVE, [say(0, 1), onset(1000), ended(1600, 7), failed(2000, 7)]).effects.at(-1), [RESTORE]);
+
+  const paused = call(NATIVE, [say(0, 1), onset(1000), tick(1700), checked(1800, true), ended(2400, 7), failed(2600, 7)]);
+  assert.deepEqual(paused.effects.at(-1), []);
+  assert.equal(nextWake(paused.state), 3800, "2 s after it paused");
+  assert.deepEqual(step(paused.state, tick(3800))[1], [RESTORE, { type: "speech.resume", say: 1 }]);
+});
+
+test("native: a check answered late, after the transcript decided or with none asked, changes nothing", () => {
+  const states = [
+    call(NATIVE, [say(0, 1), onset(1000), tick(1700), ended(1800, 7), transcribed(2200, 7)]),
+    call(NATIVE, [say(0, 1), onset(1000)]),
+    call(NATIVE, [say(0, 1), onset(1000), tick(1700), checked(1800, true)]),
+    call(NATIVE, [say(0, 1)]),
+  ].map((c) => c.state);
+  for (const state of states) {
+    for (const words of [true, false, null]) assert.deepEqual(step(state, checked(2300, words, 500)), [state, []]);
+  }
+});
+
+test("native: a reply that starts while the user talks isn't ducked; a say asked for meanwhile isn't held", () => {
+  const { effects } = call(NATIVE, [onset(0), say(100, 1), tick(800), ended(900, 7)]);
+  assert.deepEqual(effects, [[], [start(1)], [], []]);
+});
+
+test("native: hanging up over a quieter reply stops it", () => {
+  const { effects } = call(NATIVE, [say(0, 1), onset(1000), ended(1500, 7), transcribed(1900, 7, "hang-up")]);
+  assert.deepEqual(effects.at(-1), [{ type: "speech.stop", say: 1 }, { type: "teardown", reason: "hang-up" }]);
 });
 
 test("once the user's words reach Claude a tick plays every 1.5 s for 10 s at most, until Claude speaks", () => {
@@ -187,7 +280,7 @@ test("a tick nobody asked for changes nothing, in any state", () => {
 });
 
 test("no state or effect carries a string that isn't one of the engine's enums", () => {
-  const enums = new Set(["on", "off", "quiet", "talking", "idle", "thinking", "held", "speaking", "pause", "none"]);
+  const enums = new Set(["on", "off", "quiet", "talking", "idle", "thinking", "held", "speaking", "pause", "none", "duck", "ducked", "paused", "playing", "asked"]);
   for (const table of [EVENT_STRINGS, EFFECT_STRINGS]) {
     for (const [type, fields] of Object.entries(table)) [type, ...Object.values(fields).flat()].forEach((s) => enums.add(s));
   }

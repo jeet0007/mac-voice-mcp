@@ -1,7 +1,7 @@
 // Hang-up phrases: the whole transcript, with politeness around it, never a negation.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { classify, heardSoFar } from "../dist/call/engine/words.js";
+import { classify, echoes, heardSoFar } from "../dist/call/engine/words.js";
 import { headphonesFromProfile } from "../dist/audio/process.js";
 
 test("hang-up phrases end the call; anything else, including 'don't hang up', doesn't", () => {
@@ -41,4 +41,10 @@ test("how much of a reply was heard is its first words at an average pace, and a
   assert.equal(heardSoFar("One two three four five six.", 1111), "One two three…");
   assert.equal(heardSoFar("One two three four five six.", 0), "One…");
   assert.equal(heardSoFar("One two three four five six.", 2300), "One two three four five six.");
+});
+
+test("a word check that heard only a stretch of the reply playing heard our own echo, not the user", () => {
+  const reply = "Sure. The build finished, and every test passed.";
+  for (const heard of ["the build finished", "Every test passed."]) assert.equal(echoes(heard, reply), true, heard);
+  for (const heard of ["wait, stop", "the build failed", "Sure.", ""]) assert.equal(echoes(heard, reply), false, heard);
 });

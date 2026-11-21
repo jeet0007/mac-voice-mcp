@@ -45,3 +45,16 @@ export function heardSoFar(text: string, playedMs: number): string {
   const n = Math.max(1, Math.round((playedMs / 1000) * WORDS_PER_SECOND));
   return n >= words.length ? text : `${words.slice(0, n).join(" ")}…`;
 }
+
+const squash = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}' ]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+/** Is `heard` only a stretch of `reply`, two words or more: our own reply, let through by the echo canceller? */
+export function echoes(heard: string, reply: string): boolean {
+  const words = squash(heard);
+  return words.includes(" ") && ` ${squash(reply)} `.includes(` ${words} `);
+}
