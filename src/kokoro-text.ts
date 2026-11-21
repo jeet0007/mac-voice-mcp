@@ -79,6 +79,13 @@ function sentences(text: string): string[] {
 /** Cut a clause between words within `limit`, preferring just before a function word past half-way. */
 function wordCut(clause: string, limit: number): [string, string] {
   const words = clause.split(" ");
+  if (weight(words[0]!) > limit) {
+    // One word over the limit (a long URL or hash): cut inside it, or Kokoro truncates it.
+    const chars = Array.from(words[0]!);
+    let n = 0;
+    for (let w = 0; n < chars.length - 1 && w + weight(chars[n]!) <= limit; n++) w += weight(chars[n]!);
+    return [chars.slice(0, n).join(""), [chars.slice(n).join(""), ...words.slice(1)].join(" ")];
+  }
   let len = -1;
   let fit = 1;
   let best = 0;

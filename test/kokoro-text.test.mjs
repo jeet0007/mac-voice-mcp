@@ -38,8 +38,7 @@ test("long sentences are split at clauses, and no chunk is too long for Kokoro",
   assert.equal(chunks.length, 12, "one clause each");
   assert.equal(chunks[0], "clause number 0 has a few words in it,");
   assert.equal(chunks.join(" "), long, "nothing is lost or reordered");
-  const word = "x".repeat(400); // one unbreakable "word" still gets through, as its own chunk
-  assert.deepEqual(chunkForSpeech(word), [word]);
+  assert.deepEqual(chunkForSpeech("x".repeat(400)).map((c) => c.length), [60, 120, 220], "one unbreakable word is cut inside it");
 });
 
 test("the first chunk is a sentence or clause of at most 60 characters, else the first words", () => {
@@ -149,4 +148,11 @@ test("PCM helpers: float to 16-bit with clipping, resampling, WAV header", () =>
   assert.equal(h.toString("ascii", 0, 4), "RIFF");
   assert.equal(h.readUInt32LE(24), 16000);
   assert.equal(h.readUInt32LE(40), 32000);
+});
+
+test("a single word over the cap is cut inside it, so Kokoro never truncates it", () => {
+  const url = `https://example.com/${"a".repeat(400)}`;
+  const chunks = chunkForSpeech(`see ${url} ok`);
+  assert.deepEqual(chunks.map((c) => c.length), [3, 60, 120, 243]);
+  assert.equal(chunks.join(""), `see${url} ok`, "only the cuts lose their space");
 });

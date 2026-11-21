@@ -155,7 +155,7 @@ function withPause(pcm: Buffer, chunk: string, last: boolean): Buffer {
   while (end > start && !loud(end - 1)) end--;
   const body = pcm.subarray(Math.max(0, start - samples(LEAD_MS)) * 2, Math.min(n, end + samples(TAIL_MS)) * 2);
   if (last) return body;
-  const pause = /[.!?…]["')\]]*$/.test(chunk) ? SENTENCE_PAUSE_MS : /[,;:—–-]["')\]]*$/.test(chunk) ? CLAUSE_PAUSE_MS : 0;
+  const pause = /[.!?…]["'”’)\]]*$/.test(chunk) ? SENTENCE_PAUSE_MS : /[,;:—–-]["'”’)\]]*$/.test(chunk) ? CLAUSE_PAUSE_MS : 0;
   return Buffer.concat([body, Buffer.alloc(samples(pause) * 2)]);
 }
 
