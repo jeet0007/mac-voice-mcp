@@ -12,3 +12,6 @@ trufflehog-findings.json
 # Written by Claude Code for editors when it loads a mod from a folder
 plugins/*/tsconfig.json
 local-test-results/
+
+# Probe build output and reports (scripts/probe)
+scripts/probe/.build/
