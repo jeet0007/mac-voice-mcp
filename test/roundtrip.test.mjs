@@ -39,7 +39,7 @@ const LIMITS = {
 };
 
 test("speech round trip: voice → file → whisper.cpp stays accurate and fast", { skip: !enabled && "macOS + VOICE_MCP_ROUNDTRIP=1 only" }, async () => {
-  const { synthesizeToFile, chooseVoice } = await import("../dist/audio.js");
+  const { synthesizeToFile, chooseVoice } = await import("../dist/speech/synthesize.js");
   const { kokoroEnabled, kokoroVoiceLabel, stopKokoro } = await import("../dist/kokoro.js");
   const { transcribe, stopWhisperServer, describeStt } = await import("../dist/stt.js");
   const { ensureModel } = await import("../dist/model.js");

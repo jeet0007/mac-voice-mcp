@@ -21,7 +21,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { flightEvent } from "./flight.js";
-import { listenContinuously, speak } from "./audio.js";
+import { listenContinuously } from "./audio.js";
+import { detectDuplex } from "./audio/device.js";
 import { BargeIn, type Interruption } from "./barge-in.js";
 import { bubbleTakesText, bubbleWanted, sendToBubble, startBubble, stopBubble } from "./bubble.js";
 import { CONFIG, debug, envNum, log, PKG } from "./config.js";
@@ -29,19 +30,13 @@ import { thinkingTick } from "./cues.js";
 import { acquireMicLock } from "./lock.js";
 import { ensureModel } from "./model.js";
 import { CancelledError, sleep } from "./proc.js";
-import { detectDuplex, pauseSpeech } from "./speakers.js";
 import { prewarmKokoro } from "./kokoro.js";
 import { LiveTranscript } from "./live-transcript.js";
 import { partialsAvailable, prewarm, transcribe, transcribePartial } from "./stt.js";
+import { speak, type Reply } from "./speech/replies.js";
 import { PERMISSION_NOTICE } from "./texts.js";
 import { addToInbox, callFile, inboxDir, levelsFile, muteFile, permissionFile, readJson, setOwnSession, showPhase, takeInbox, voiceModeDir, type InboxEntry } from "./state/voice-mode.js";
 import { trackSpeaking } from "./voice.js";
-
-/** Talking over Claude pauses or resumes the reply: the recorder notes when. */
-const pauseForBargeIn = (paused: boolean): void => {
-  flightEvent("bargein", { action: paused ? "pause" : "resume" }, null);
-  pauseSpeech(paused);
-};
 
 /** The last speech-to-text failure on a call, kept for debugging (and a future /issue). */
 export const sttFailureFile = () => path.join(CONFIG.cacheDir, "last-stt-failure.json");
@@ -97,8 +92,10 @@ export class Call {
   private userMuted = false;
   /** `say` calls play one after another. */
   private speaking: Promise<void> = Promise.resolve();
+  /** The `say` playing now. */
+  private reply: Reply | null = null;
   /** The user talking over `say` (full duplex). A fresh one each call. */
-  private bargeIn = new BargeIn(pauseForBargeIn);
+  private bargeIn = this.newBargeIn();
   /** Utterances are transcribed in the order they were said. */
   private transcribing: Promise<void> = Promise.resolve();
   /** Problems with earlier speech, reported in the next result. */
@@ -117,6 +114,14 @@ export class Call {
   /** When the user's words last reached Claude, until it speaks (0: not thinking). */
   private thinkingSince = 0;
   private lastTickAt = 0;
+
+  /** Talking over Claude pauses or resumes the reply: the recorder notes when. */
+  private newBargeIn(): BargeIn {
+    return new BargeIn((paused) => {
+      flightEvent("bargein", { action: paused ? "pause" : "resume" }, null);
+      this.reply?.duck(paused ? 0 : 1);
+    });
+  }
 
   get on(): boolean {
     return this.state === "on";
@@ -142,7 +147,7 @@ export class Call {
     this.thinkingSince = 0;
     rmSync(muteFile(), { force: true });
     rmSync(permissionFile(), { force: true });
-    this.bargeIn = new BargeIn(pauseForBargeIn);
+    this.bargeIn = this.newBargeIn();
     this.duplex = duplex;
     this.lastActivity = Date.now();
     mkdirSync(voiceModeDir(), { recursive: true });
@@ -211,16 +216,18 @@ export class Call {
       if (!this.on) return;
       this.muteUntil = Infinity;
       showPhase("speaking");
-      const ctl = new AbortController();
-      this.bargeIn.play(text, () => ctl.abort());
+      const reply = speak(text);
+      this.reply = reply;
+      this.bargeIn.play(text, () => reply.stop());
       try {
-        await speak(text, ctl.signal);
+        await reply.done;
       } catch (err) {
         if (!(err instanceof CancelledError)) {
           if (!returned) failure = err;
           else this.laterNotes.push(`voice-mcp note: what you last said wasn't heard: ${err instanceof Error ? err.message : String(err)}`);
         }
       } finally {
+        this.reply = null;
         this.bargeIn.played();
         this.muteUntil = Date.now() + ECHO_TAIL_MS;
         this.lastActivity = Date.now();

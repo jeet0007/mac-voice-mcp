@@ -8,11 +8,12 @@
  */
 import { statSync } from "node:fs";
 import { bubbleBuilding, bubbleState, buildBubble, findSwiftc } from "./bubble.js";
-import { chooseVoice, describeRecorder, findRecorder, findTts, resetVoiceChoice, VOICE_UPGRADE_HINT } from "./audio.js";
+import { describeRecorder, findRecorder } from "./audio.js";
 import { CONFIG, IS_MAC, IS_WIN, log } from "./config.js";
 import { installKokoro, isKokoroInstalled, isKokoroModelPresent, KOKORO_SIZES_MB, kokoroVoiceLabel } from "./kokoro.js";
 import { ensureModel, isModelDownloading, locateModel, modelSource, MODEL_SIZES_MB } from "./model.js";
 import { isExecutable, resetWhichCache, run, sleep, tail, which } from "./proc.js";
+import { chooseVoice, findTts, resetVoiceChoice, VOICE_UPGRADE_HINT } from "./speech/synthesize.js";
 import { describeStt, findWhisperCli, findWhisperServer } from "./stt.js";
 
 type CheckStatus = "ok" | "missing" | "optional" | "installing";
