@@ -36,8 +36,8 @@ Turn the volume up, keep the room quiet, and stop voice mode in other sessions w
 | `config.ts` | Environment settings, logging, the PATH fix-up for GUI apps |
 | `speech-text.ts` | Rewriting screen text for speech, cleaning up transcripts (pure, unit-tested) |
 | `endpointer.ts` | Turn-taking voice-activity detection (pure, unit-tested) |
-| `audio.ts` | Text-to-speech, chimes, streaming mic capture |
-| `cues.ts` | The sounds for a turn (tick, pop, purr, thud) and the one-time spoken error lines |
+| `audio.ts` | Text-to-speech, streaming mic capture |
+| `cues.ts` | The sounds for a turn and a call (tick, pop, purr, thud, the mic chime, the thinking tick) and the one-time spoken error lines |
 | `kokoro.ts`, `kokoro-worker.ts` | The optional Kokoro voice: install, a warm worker process, sentence-by-sentence playback, fallback, and a background warm-up at the start of a call and a listen |
 | `kokoro-text.ts`, `pcm.ts` | Pronunciation fixes and sentence chunks for Kokoro, PCM conversion (pure, unit-tested) |
 | `model.ts` | Finding, symlinking or downloading the model |
@@ -45,7 +45,8 @@ Turn the volume up, keep the room quiet, and stop voice mode in other sessions w
 | `flight.ts` | The opt-in flight recorder: event log, flags, audio ring, retention. Off = no-ops; imports no network module (tested) |
 | `setup.ts` | Requirement checks and consent-based background installs |
 | `lock.ts` | One voice turn (or call) at a time across every session on the Mac |
-| `worklisten.ts` | Listening for "Claude, …" while Claude works, the inbox and phase file shared with the plugin hook and Voice Buddy |
+| `state/voice-mode.ts` | Every file in the voice-mode folder shared with the plugin hook and Voice Buddy (call, phase, inbox, mute, levels, listening, stop); the only importer of `hooks/voice-files.mjs` besides `config.ts` |
+| `worklisten.ts` | Listening for "Claude, …" while Claude works |
 | `call.ts` | A call: one open mic until the user hangs up, utterances into the inbox, hang-up phrases, idle timeout, `say` and `listen` |
 | `mcp.ts` | A small MCP server over stdio: JSON-RPC, tools, prompts, progress, cancellation |
 | `voice.ts`, `server.ts`, `index.ts` | The round trip, the MCP tools and prompts, and the CLI |

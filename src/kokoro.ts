@@ -21,7 +21,8 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { CONFIG, debug, envNum, IS_MAC, log } from "./config.js";
 import { prepareForKokoro } from "./kokoro-text.js";
-import { resamplePcm16, wavHeaderFor } from "./pcm.js";
+import { wavHeader } from "./endpointer.js";
+import { resamplePcm16 } from "./pcm.js";
 import { CancelledError, isExecutable, run, SetupError, tail, which } from "./proc.js";
 import { trackSpeaker } from "./speakers.js";
 
@@ -369,7 +370,7 @@ function afplayPlayer(): Player {
     if (killed) return;
     dir ??= mkdtemp(path.join(os.tmpdir(), "voice-mcp-kokoro-"));
     const file = path.join(await dir, `${n++}.wav`);
-    await writeFile(file, Buffer.concat([wavHeaderFor(pcm.length, KOKORO_RATE), pcm]));
+    await writeFile(file, Buffer.concat([wavHeader(pcm.length, KOKORO_RATE), pcm]));
     if (killed) return;
     await new Promise<void>((resolve, reject) => {
       const child = spawn("/usr/bin/afplay", [file], { stdio: "ignore" });
@@ -478,7 +479,7 @@ export async function synthesizeKokoroToFile(text: string, outFile: string): Pro
     parts[seq] = seq < chunks.length - 1 ? Buffer.concat([pcm, silence(GAP_MS)]) : pcm;
   });
   const pcm16k = resamplePcm16(Buffer.concat(parts), KOKORO_RATE, 16_000);
-  await writeFile(outFile, Buffer.concat([wavHeaderFor(pcm16k.length, 16_000), pcm16k]));
+  await writeFile(outFile, Buffer.concat([wavHeader(pcm16k.length), pcm16k]));
   return { firstAudioMs, coldStart };
 }
 

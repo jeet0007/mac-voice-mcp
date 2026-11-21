@@ -1,10 +1,9 @@
-/** Speaking (native TTS), the mic chimes, and listening for one conversational turn. */
+/** Speaking (native TTS) and listening for one conversational turn. */
 import { spawn } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { CONFIG, debug, IS_MAC, IS_WIN, log } from "./config.js";
-import { cue, playSound } from "./cues.js";
 import { Endpointer, FRAME_BYTES, FRAME_MS, wavHeader, type EndReason, type EndpointerDiagnostics } from "./endpointer.js";
 import { flightAudio, flightEvent } from "./flight.js";
 import { KokoroError, kokoroEnabled, speakKokoro, synthesizeKokoroToFile } from "./kokoro.js";
@@ -263,18 +262,6 @@ export async function synthesizeToFile(text: string, outFile: string): Promise<S
   }
   return { engine: "built-in" };
 }
-
-/**
- * A short, quiet cue that the mic just opened ("start") or the work listener heard something ("stop",
- * a soft "got it"). macOS only. A voice turn's own cues are in cues.ts.
- */
-export async function chime(kind: "start" | "stop"): Promise<void> {
-  if (kind === "start") await cue("open");
-  else if (CONFIG.chime) await playSound("Pop", 0.6);
-}
-
-/** The soft tick of a call while Claude thinks: 60 ms of sound, too short for the endpointer to take as speech. macOS only. */
-export const thinkingTick = () => playSound("Tink", 0.2);
 
 // ---------------------------------------------------------------------------
 // Listening

@@ -22,7 +22,7 @@
  *   proc.ts         which / run helpers, error types
  *   speech-text.ts  screen text → ear text; transcript clean-up        (pure)
  *   endpointer.ts   turn-taking voice-activity detection               (pure)
- *   audio.ts        TTS, chimes, streaming microphone capture
+ *   audio.ts        TTS, streaming microphone capture
  *   kokoro.ts       the optional Kokoro voice: install, warm worker, streaming playback
  *   kokoro-worker.ts  the process that runs the Kokoro model
  *   kokoro-text.ts  pronunciation fixes and sentence chunks for Kokoro (pure)
@@ -31,6 +31,7 @@
  *   stt.ts          warm whisper-server + whisper-cli fallback
  *   setup.ts        requirement checks and consent-based installs
  *   lock.ts         one voice turn at a time across every session on the Mac
+ *   state/voice-mode.ts  the voice-mode files shared with the plugin hook and Voice Buddy
  *   bubble.ts       the floating call bubble: build it with swiftc, start and stop it with a call
  *   voice.ts        the speak → listen → transcribe round trip
  *   wer.ts          word error rate (pure)

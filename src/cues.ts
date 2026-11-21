@@ -62,6 +62,18 @@ export async function cue(c: Cue, signal?: AbortSignal): Promise<boolean> {
   return playSound(CUES[c].sound, CUES[c].volume, signal);
 }
 
+/**
+ * A short, quiet cue that the mic just opened ("start") or the work listener heard something ("stop",
+ * a soft "got it"). macOS only.
+ */
+export async function chime(kind: "start" | "stop"): Promise<void> {
+  if (kind === "start") await cue("open");
+  else if (CONFIG.chime) await playSound("Pop", 0.6);
+}
+
+/** The soft tick of a call while Claude thinks: 60 ms of sound, too short for the endpointer to take as speech. macOS only. */
+export const thinkingTick = () => playSound("Tink", 0.2);
+
 const lastSpoken = new Map<SpokenError, number>();
 
 /** Forget what was spoken (tests). */

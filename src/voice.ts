@@ -1,7 +1,7 @@
 /** The round trip: speak → listen for one turn → transcribe. */
-import { chime, findRecorder, listenForTurn, MIC_PERMISSION_HINT, RECORDER_MISSING, speak, type Spoken } from "./audio.js";
+import { findRecorder, listenForTurn, MIC_PERMISSION_HINT, RECORDER_MISSING, speak, type Spoken } from "./audio.js";
 import { CONFIG, debug, DEFAULT_LISTEN_SECONDS, log, MAX_LISTEN_SECONDS, MAX_SPEAK_CHARS } from "./config.js";
-import { announceError, announceErrorIfMicFree, cue, errorNote, type SpokenError } from "./cues.js";
+import { announceError, announceErrorIfMicFree, chime, cue, errorNote, type SpokenError } from "./cues.js";
 import { flightStopSeen, flightTurn } from "./flight.js";
 import { prewarmKokoro } from "./kokoro.js";
 import { acquireMicLock, MicBusyError } from "./lock.js";
@@ -9,7 +9,8 @@ import { ensureModel, isModelDownloading } from "./model.js";
 import { CancelledError, resetWhichCache, SetupError, sleep } from "./proc.js";
 import { prepareSpeech } from "./speech-text.js";
 import { findWhisperCli, findWhisperServer, prewarm, STT_MISSING, transcribeBuffer } from "./stt.js";
-import { interjectionNote, showPhase, stopRequestedSince, takeInbox, workListener } from "./worklisten.js";
+import { showPhase, stopRequestedSince, takeInbox } from "./state/voice-mode.js";
+import { interjectionNote, workListener } from "./worklisten.js";
 
 export interface VoiceResult {
   ok: boolean;

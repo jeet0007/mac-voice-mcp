@@ -9,9 +9,9 @@
  */
 import { closeSync, linkSync, mkdirSync, openSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
 import path from "node:path";
-import { isAlive, readJson } from "../hooks/voice-files.mjs";
 import { CONFIG, debug } from "./config.js";
 import { CancelledError, sleep } from "./proc.js";
+import { isAlive, readJson } from "./state/voice-mode.js";
 
 /** Longer than any real turn (speaking, up to two minutes of listening, transcribing). */
 const STALE_AFTER_MS = 10 * 60_000;
