@@ -14,6 +14,8 @@ export type Sound =
    * The built-in voice speaking on its own (macOS `say`, espeak-ng, Windows SAPI). Not PCM: this
    * backend lets `say` play directly, so a voice started ahead of time keeps its first-sound latency.
    * `input` goes on stdin; without it the text is already in `args`.
+   * shortcut: a process launcher in the port, which the native backend can't honour; replace with
+   * `{ kind: "voice"; text }` (the backend owning command and standby) before the native backend plays speech.
    */
   | { kind: "voice"; bin: string; args: string[]; input?: string; standby: boolean }
   /** A short sound file (a cue). */
