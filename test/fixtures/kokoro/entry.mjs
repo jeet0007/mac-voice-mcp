@@ -1,7 +1,8 @@
 // A stand-in for the installed kokoro-js (the real one is a ~330 MB model): same API, instant,
 // and it logs what it was asked to say.
 // FAKE_KOKORO: ok (default) | broken-load | broken-generate (the first sentence works, then it fails)
-// | hang-generate (the first sentence works, then it never answers).
+// | hang-generate (the first sentence works, then it never answers)
+// | padded (a steady level with 300 ms of silence at each end, like the real model's edges).
 import fs from "node:fs";
 
 const log = (line) => process.env.STUB_LOG && fs.appendFileSync(process.env.STUB_LOG, line + "\n");
@@ -23,8 +24,12 @@ export class KokoroTTS {
     log(`kokoro-generate ${JSON.stringify(text)} voice=${voice} speed=${speed}`);
     if (mode === "broken-generate" && generated++ > 0) throw new Error("fake generate failure");
     if (mode === "hang-generate" && generated++ > 0) await new Promise(() => {});
-    // 50 ms of a quiet 220 Hz tone per character.
     const n = Math.round(24000 * 0.05 * text.length);
+    if (mode === "padded") {
+      const pad = 24000 * 0.3;
+      return { audio: new Float32Array(pad + n + pad).fill(0.2, pad, pad + n), sampling_rate: 24000 };
+    }
+    // 50 ms of a quiet 220 Hz tone per character.
     const audio = new Float32Array(n);
     for (let i = 0; i < n; i++) audio[i] = 0.2 * Math.sin((2 * Math.PI * 220 * i) / 24000);
     return { audio, sampling_rate: 24000 };
