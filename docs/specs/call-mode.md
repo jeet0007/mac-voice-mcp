@@ -77,7 +77,7 @@ Empty or noise-only transcripts are dropped. Queue entries are deleted once deli
 
 `VOICE_MCP_CALL_DUPLEX = auto | full | half` (default auto).
 
-- **half (speakers):** mic is gated while Claude speaks (what claude-call calls an echo gate); the call stays open.
+- **half (speakers):** mic is gated while Claude speaks (what claude-call calls an echo gate); the call stays open. A reply that comes while the user is mid-sentence first waits for them to finish their sentence (no time limit; the recorder ends a sentence within a minute), so the gate never cuts them off.
 - **full (headphones):** mic stays open while Claude speaks; barge-in enabled.
 - **auto:** headphones detected at call start → full, else half. macOS: default output device transport and
   data source (built-in "hdpn" = headphones; Bluetooth = headphones unless the name says speaker). First

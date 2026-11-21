@@ -58,6 +58,8 @@ Every line: `t` (ms since epoch), `ev`, `pid`, and `turn` (a per-process counter
 | `speak.end` | speech ends | `finished`, `reason` (done, stopped, barge-in, error, fallback, timeout), `ms`, `unspokenChunks` |
 | `bargein` | pause, resume, drop | `action`, `ms` |
 | `call.mute` | call mic muted or unmuted | `muted`, `why` |
+| `call.hold` | a reply on speakers waited for the user to finish talking | `heldMs` |
+| `listen.cut` | the call mic muted mid-sentence, dropping what the user had said (or the user pressed mute) | `speechMs` |
 | `stop.seen` | a stop request ends speech or listening | `stopAt`, `ownStartAt` |
 | `flag` | user flagged a moment | `id`, `hasNote` |
 

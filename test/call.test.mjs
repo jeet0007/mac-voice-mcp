@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { BargeIn, isFiller } from "../dist/barge-in.js";
 import { headphonesFromProfile } from "../dist/speakers.js";
-import { isHangUp } from "../dist/call.js";
+import { isHangUp, waitForQuiet } from "../dist/call.js";
 
 test("hang-up phrases end the call; anything else, including 'don't hang up', doesn't", () => {
   for (const said of ["Hang up.", "hang up", "Okay, hang up now.", "Claude, hang up.", "Hang up, please.", "Bye Claude!", "Goodbye, Claude.", "End the call.", "End call", "Thanks, end the call now."]) {
@@ -91,4 +91,12 @@ test("speech while nothing plays changes nothing; the call ending never leaves s
   b.speech(true);
   b.end();
   assert.deepEqual(log, ["pause", "stop", "resume"]);
+});
+
+test("waitForQuiet returns once the user stops talking", async () => {
+  let talking = true;
+  setTimeout(() => (talking = false), 60);
+  const t = Date.now();
+  await waitForQuiet(() => talking, 5);
+  assert.ok(Date.now() - t >= 55 && Date.now() - t < 500, "returns once the user stops");
 });
