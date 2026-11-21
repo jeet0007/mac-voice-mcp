@@ -88,7 +88,7 @@ Process backend: headphones → `interrupt: "pause"` (SIGSTOP), today's behaviou
 
 ## Probe results (2026-11-21, MacBook Air built-in speakers and mic, macOS 27)
 
-All gates passed: onset to duck 96 ms (tone) and 99 ms (voice), gate 200; no false onset in the first 5 s of a reply without calibration; echo residue median -100 dB, 95th percentile -69 dB, max -42.5 dB (no false onset; speech needs -48 dB, uncancelled -48.4 dB); mic permission granted to a worker spawned from Node; other-app ducking -5 dB at `min` versus about -30 dB by default; standby `say -o -f -` to the worker 452 ms to first sound versus 448 ms for today's standby `say`.
+All gates passed: onset to duck 96 ms (tone) and 99, 84 and 99 ms on three voiced tries (3 of 3 heard), gate 200; no false onset in the first 5 s of a reply without calibration; echo residue median -100 dB, 95th percentile -69 dB, max -42.5 dB (no false onset; speech needs -48 dB, uncancelled -48.4 dB); mic permission granted to a worker spawned from Node; other-app ducking -5 dB at `min` versus about -30 dB by default; standby `say -o -f -` to the worker 452 ms to first sound versus 448 ms for today's standby `say`.
 
 What it changes in this design:
 - **Whisper serves one request at a time.** A word check queued behind a final waits for it (about 0.9 s for a long utterance). The engine treats a word check that cannot start within 300 ms as `words: null` and decides on the final, keeping the reply ducked; a second whisper server is not worth its memory yet.
@@ -96,6 +96,10 @@ What it changes in this design:
 - **Other-app ducking is set to `min` before the unit starts.** The default is severe and a change takes 1 to 2 s to apply.
 - **Built-in speech keeps a standby.** A pre-started `say -o <file> -f -` per reply replaces today's standby `say`.
 - **Worker protocol:** every command carries `seq` and is acknowledged; `play` carries its sample rate; `pause`, `resume` and `duck-others` are commands; `aec`, `agc` and `duck-others` apply while running. The Endpointer's room floor resets when `aec` toggles.
+- **The native backend needs macOS 15.** The worker's lock-free rings use Swift's `Synchronization` atomics; older systems keep the process backend.
+- **Protocol as built** (`src/audio/protocol.ts`, the one definition): `ready` carries the protocol version; every ack carries `status` (`ok`, `bad-command`, `unknown-id`, `busy`, `failed`) and `playedMs` when the command names a playing sound; `done` carries `playedMs`; `frames-dropped` and `route-changed` exist. `unknown-id` after `done` is normal, since a command can cross it. A route change sends `route-changed`, then `done stopped` for each sound, then `mic-closed`, and exits 0. `playedMs` counts samples taken by the render callback, so it leads the speaker by the output latency. At most eight sounds play at once.
+- **The "echo until converged" flag (H2) is Node's job** in the native adapter; the worker knows nothing about convergence.
+- **Built-in speech on the process backend stays direct `say`** (step 3): converting it to PCM there would slow its first sound. The native backend uses the standby `say -o <file> -f -` above.
 - Not yet measured: Bluetooth speakers and AirPlay/HDMI routes (stay on the fallback per H2), a host that has never been granted mic permission.
 
 ## Owner decisions (2026-11-21)
