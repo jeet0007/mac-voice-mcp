@@ -310,7 +310,7 @@ final class Transcript {
     window.ignoresMouseEvents = true      // click-through: drag the pill to move things
     window.isOpaque = false
     window.backgroundColor = .clear
-    window.hasShadow = true
+    window.hasShadow = false   // a shadow on this borderless, rounded window shows as a dark outline
     window.hidesOnDeactivate = false
     window.alphaValue = 0
 
@@ -519,7 +519,7 @@ final class Transcript {
       let hold = min(3.0, 1.5 + 0.1 * Double(max(0, words - 8)))
       schedule(after: hold) { self.fadeOut(0.25) }
     } else {
-      schedule(after: 1.8) { self.fadeOut(0.25) }
+      schedule(after: 4.0) { self.fadeOut(0.25) }   // outlasts the end-of-turn silence and transcription, so the final replaces it
     }
   }
 
