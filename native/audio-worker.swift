@@ -244,7 +244,8 @@ func render(_ out: UnsafeMutablePointer<Float>, _ n: Int) {
 }
 
 let renderProc: AURenderCallback = { _, _, _, _, frames, ioData in
-    guard let buffers = UnsafeMutableAudioBufferListPointer(ioData), let data = buffers[0].mData else { return noErr }
+    // Not UnsafeMutableAudioBufferListPointer: its generic metadata is instantiated, under a lock, on the first call.
+    guard let data = ioData?.pointee.mBuffers.mData else { return noErr }
     render(data.assumingMemoryBound(to: Float.self), Int(frames))
     return noErr
 }
@@ -632,7 +633,6 @@ func fail(_ stage: String, _ code: OSStatus, _ message: String) -> Never {
 }
 
 signal(SIGPIPE, SIG_IGN)
-signal(SIGTERM, SIG_IGN)
 _ = fcntl(1, F_SETFL, fcntl(1, F_GETFL) | O_NONBLOCK)
 let noDevice = CommandLine.arguments.contains("--no-device")
 let aec = !CommandLine.arguments.contains("--no-aec")
@@ -682,6 +682,8 @@ let ticker = DispatchSource.makeTimerSource(queue: control)
 control.sync {
     lastInputAt = DispatchTime.now().uptimeNanoseconds
     emit(["ev": "ready", "v": protocolVersion, "rate": Int(unitRate), "aec": aec])
+    // Ignored only from here: until now SIGTERM kills it, so a start that hangs on the permission prompt can be ended.
+    signal(SIGTERM, SIG_IGN)
     on(SIGTERM) { shutdown(0) }
     if noDevice {
         signal(SIGUSR1, SIG_IGN)
