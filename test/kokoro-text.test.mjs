@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { chunkForSpeech, FIRST_CHUNK_CHARS, fixPronunciation, MAX_CHUNK_CHARS, prepareForKokoro } from "../dist/kokoro-text.js";
 import { floatToPcm16, resamplePcm16 } from "../dist/pcm.js";
 import { wavHeader as wavHeaderFor } from "../dist/endpointer.js";
@@ -24,35 +25,108 @@ test("the first chunk is short so speech starts quickly; the rest are merged int
   );
   assert.deepEqual(chunks, [
     "The build passed and all tests are green.",
-    "I also updated the changelog. Then I bumped the version. Should I open the pull request now?",
+    "I also updated the changelog. Then I bumped the version.",
+    "Should I open the pull request now?",
   ]);
   // A very short opener ("Done.") is merged into the next sentence instead of being spoken alone.
   assert.deepEqual(chunkForSpeech("Done. All seventy tests pass."), ["Done. All seventy tests pass."]);
 });
 
-test("long sentences are split at clauses, then words, and no chunk is too long for Kokoro", () => {
+test("long sentences are split at clauses, and no chunk is too long for Kokoro", () => {
   const long = Array.from({ length: 12 }, (_, i) => `clause number ${i} has a few words in it`).join(", ") + ".";
   const chunks = chunkForSpeech(long);
-  assert.ok(chunks.length > 2);
-  assert.ok(chunks[0].length <= FIRST_CHUNK_CHARS, `first chunk is ${chunks[0].length} chars`);
-  for (const c of chunks) assert.ok(c.length <= MAX_CHUNK_CHARS, `chunk is ${c.length} chars`);
+  assert.equal(chunks.length, 12, "one clause each");
+  assert.equal(chunks[0], "clause number 0 has a few words in it,");
   assert.equal(chunks.join(" "), long, "nothing is lost or reordered");
   const word = "x".repeat(400); // one unbreakable "word" still gets through, as its own chunk
   assert.deepEqual(chunkForSpeech(word), [word]);
 });
 
-test("chunks grow, so each is ready before the one before it finishes playing", () => {
-  // "Sure." alone used to be followed by a 150-character chunk: 1.2 s of silence on Jeet's Mac.
-  const chunks = chunkForSpeech(
-    "Okay. This is what I found: the test fails because the mock server starts after the first request, so the request times out before anything answers, and the retry never runs.",
+test("the first chunk is a sentence or clause of at most 60 characters, else the first words", () => {
+  assert.deepEqual(
+    chunkForSpeech(
+      "Okay. This is what I found: the test fails because the mock server starts after the first request, so the request times out before anything answers, and the retry never runs.",
+    ),
+    [
+      "Okay. This is what I found:",
+      "the test fails because the mock server starts after the first request,",
+      "so the request times out before anything answers, and the retry never runs.",
+    ],
+    "the first clause, not a lone 'Okay.'",
   );
-  assert.equal(chunks[0], "Okay. This is what I found:", "the first clause, not a lone 'Okay.'");
-  for (let k = 1; k < chunks.length; k++) {
-    assert.ok(chunks[k].length <= Math.max(FIRST_CHUNK_CHARS, chunks[k - 1].length * 3), `chunk ${k} (${chunks[k].length}) after ${chunks[k - 1].length}`);
+  // No clause in reach: cut between words, just before "with".
+  assert.deepEqual(chunkForSpeech("Sure. The build broke because the lock file is out of date with the package file, so npm refuses."), [
+    "Sure. The build broke because the lock file is out of date",
+    "with the package file, so npm refuses.",
+  ]);
+  assert.equal(FIRST_CHUNK_CHARS, 60);
+});
+
+// Issue #64: "...before the next sentence is" [pause] "ready".
+const ISSUE_64 =
+  'The voice code decides, not me. It splits my reply into sentences, and adds a short pause between them. The odd gap is most likely when a tiny first sentence like "Step six b" finishes before the next sentence is ready, so it waits in silence. Details on screen.';
+
+test("a chunk ends at a sentence or clause, never at a bare space, when a clause boundary exists", () => {
+  assert.deepEqual(chunkForSpeech(ISSUE_64), [
+    "The voice code decides, not me.",
+    "It splits my reply into sentences,",
+    "and adds a short pause between them.",
+    'The odd gap is most likely when a tiny first sentence like "Step six b" finishes before the next sentence is ready,',
+    "so it waits in silence. Details on screen.",
+  ]);
+});
+
+test("real replies: nothing lost, every later cut at punctuation, nothing over Kokoro's cap", () => {
+  const replies = JSON.parse(readFileSync(new URL("./fixtures/replies.json", import.meta.url), "utf8"));
+  assert.equal(replies.length, 35);
+  const weight = (c) => c.length + (c.match(/[\p{N}\p{Lu}]/gu)?.length ?? 0);
+  let firstCuts = 0;
+  for (const reply of replies) {
+    const chunks = prepareForKokoro(reply);
+    assert.equal(chunks.join(" "), fixPronunciation(reply).replace(/\s+/g, " ").trim(), "nothing is lost or reordered");
+    const atPunctuation = (c) => /[.!?…,;:—–]["')\]]*$/.test(c);
+    if (chunks.length > 1 && !atPunctuation(chunks[0])) firstCuts++;
+    for (const c of chunks.slice(1, -1)) assert.ok(atPunctuation(c), `cut mid-clause: "${c}"`);
+    assert.ok(weight(chunks[0]) <= 60, `first chunk "${chunks[0]}"`);
+    for (const c of chunks) assert.ok(weight(c) <= MAX_CHUNK_CHARS, `over the cap: "${c}"`);
   }
-  // A long first sentence with no clause in reach starts with its first few words.
-  const first = chunkForSpeech("Sure. The build broke because the lock file is out of date with the package file, so npm refuses.")[0];
-  assert.ok(first.length <= FIRST_CHUNK_CHARS, first);
+  assert.equal(firstCuts, 7, "only a first sentence with no clause in its first 60 characters is cut between words");
+});
+
+test("abbreviations, decimals, times and thousands are never split", () => {
+  assert.deepEqual(chunkForSpeech("Dr. Smith and Mr. Jones said so, vs. the others. Then it ended."), [
+    "Dr. Smith and Mr. Jones said so,",
+    "vs. the others. Then it ended.",
+  ]);
+  assert.deepEqual(
+    chunkForSpeech(
+      "I checked the notes from Mr. Jones and the summary from Dr. Patel this morning. They agree on the plan, e.g. the file moves first, i.e. before the rename, etc. and the rest waits.",
+    ),
+    [
+      "I checked the notes from Mr. Jones",
+      "and the summary from Dr. Patel this morning. They agree on the plan,",
+      "e.g. the file moves first, i.e. before the rename, etc. and the rest waits.",
+    ],
+  );
+  assert.deepEqual(
+    chunkForSpeech(
+      "The run took 12.5 seconds at 12:30, which is 1,000 ms slower than yesterday and about 1,250 ms slower than the week before, so the cache is probably cold again.",
+    ),
+    [
+      "The run took 12.5 seconds at 12:30,",
+      "which is 1,000 ms slower than yesterday and about 1,250 ms slower than the week before,",
+      "so the cache is probably cold again.",
+    ],
+  );
+});
+
+test("digits and capitals count double against the cap: Kokoro reads them out one by one", () => {
+  const digits = Array.from({ length: 125 }, (_, i) => String(1000 + i)).join(" ");
+  const acronyms = Array.from({ length: 125 }, () => "ABCD").join(" ");
+  // 134 characters of which 108 are digits or capitals: 242 of the 250 allowed.
+  assert.deepEqual(chunkForSpeech(digits).map((c) => c.length), [29, 54, 104, 134, 134, 134, 29]);
+  assert.deepEqual(chunkForSpeech(acronyms).map((c) => c.length), [29, 54, 104, 134, 134, 134, 29]);
+  assert.equal(chunkForSpeech(digits).join(" "), digits);
 });
 
 test("prepareForKokoro fixes pronunciation and chunks", () => {
