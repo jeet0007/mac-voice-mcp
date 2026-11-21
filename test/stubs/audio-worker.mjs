@@ -30,7 +30,7 @@ if (STUB_WORKER === "fail-start") {
 }
 emit({ ev: "ready", v: PROTOCOL_VERSION, rate: 48000, aec });
 
-/** id → { id, stream, rate, ms (audio received), played, lastPos, paused, ended } */
+/** id → { id, stream, rate, ms (audio received), played, lastPos, paused, ended, stopping } */
 const sounds = new Map();
 const playedMs = (sound) => Math.round(sound.played);
 
@@ -76,6 +76,10 @@ let last = Date.now();
 setInterval(() => {
   const now = Date.now();
   for (const sound of [...sounds.values()]) {
+    if (sound.stopping) {
+      finish(sound, "stopped");
+      continue;
+    }
     if (!sound.paused) sound.played = Math.min(sound.ms, sound.played + now - last);
     if (scenario === "bargein" && !bargedIn && sound.stream && sound.played >= bargeinMs) {
       bargedIn = true;
@@ -119,7 +123,8 @@ const handlers = {
   },
   stop(c, sound) {
     log(`stop ${c.id}`);
-    finish(sound, "stopped");
+    // done follows the ack, at the next tick, as on the real worker
+    sound.stopping = true;
   },
   aec: (c) => log(`aec ${c.on ? "on" : "off"}`),
   agc: (c) => log(`agc ${c.on ? "on" : "off"}`),
@@ -137,7 +142,8 @@ function handle(line) {
     return emit({ ev: "ack", seq: readable ? raw.seq : -1, op: readable ? raw.op : "", status: "bad-command" });
   }
   const sound = "id" in c ? sounds.get(c.id) : undefined;
-  if ("id" in c && c.op !== "play" && !sound) return emit({ ev: "ack", seq: c.seq, op: c.op, status: "unknown-id" });
+  // A stopping sound takes only gain, as on the real worker.
+  if ("id" in c && c.op !== "play" && (!sound || (sound.stopping && c.op !== "gain"))) return emit({ ev: "ack", seq: c.seq, op: c.op, status: "unknown-id" });
   const status = handlers[c.op](c, sound) ?? "ok";
   const named = sound ?? ("id" in c ? sounds.get(c.id) : undefined);
   emit({ ev: "ack", seq: c.seq, op: c.op, status, ...(status === "ok" && named && { playedMs: playedMs(named) }) });

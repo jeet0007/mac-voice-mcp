@@ -125,6 +125,7 @@ test("pause holds the exact position and resume continues from it, without a cli
   const stopped = await worker.send({ op: "stop", id: 1 });
   const done = await worker.waitFor((e) => e.ev === "done");
   assert.deepEqual({ id: done.id, reason: done.reason }, { id: 1, reason: "stopped" });
+  assert.ok(worker.events.indexOf(done) > worker.events.indexOf(stopped), "done follows the stop's ack");
   assert.ok(done.at - stopped.at < 60, `done ${done.at - stopped.at} ms after the stop was acknowledged`);
   assert.ok(done.playedMs >= resumedAt && done.playedMs < 2500, `stopped at ${done.playedMs}`);
   assert.equal((await worker.send({ op: "resume", id: 1 })).status, "unknown-id", "the sound is gone after done");

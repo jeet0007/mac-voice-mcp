@@ -63,9 +63,11 @@ test("gain and stop are acknowledged and logged with their times; a stopped soun
   const gain = worker.entries().find((e) => e.line === "worker gain 1 0.3");
   assert.ok(gain.at - sent < 100, `gain logged ${gain.at - sent} ms after it was sent`);
 
-  assert.equal((await worker.send({ op: "stop", id: 1 })).status, "ok");
+  const stopped = await worker.send({ op: "stop", id: 1 });
+  assert.equal(stopped.status, "ok");
   const done = await worker.waitFor((e) => e.ev === "done");
   assert.deepEqual({ id: done.id, reason: done.reason }, { id: 1, reason: "stopped" });
+  assert.ok(worker.events.indexOf(done) > worker.events.indexOf(stopped), "done follows the stop's ack, as on the real worker");
   assert.ok(done.playedMs >= ack.playedMs && done.playedMs < 2000);
   assert.equal((await worker.send({ op: "gain", id: 1, value: 1 })).status, "unknown-id", "the sound is gone after done");
   await hangUp(worker);
