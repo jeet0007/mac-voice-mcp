@@ -1,4 +1,4 @@
-// The mic lock shared by every voice-mcp on the Mac (src/lock.ts).
+// The mic lock shared by every voice-mcp on the Mac (src/audio/mic.ts).
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";

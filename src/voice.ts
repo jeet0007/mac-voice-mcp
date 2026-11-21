@@ -167,8 +167,8 @@ export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {
     void session.close();
   }
   if (result.announce) {
-    // Once the recorder has exited, so the tone and the line can't be recorded; and only if no other
-    // session took the mic meanwhile.
+    // The recorder has exited by then, so the tone and the line can't be recorded. Spoken only if no
+    // other session took the mic meanwhile.
     await session.ended;
     const note = errorNote(await announceErrorIfMicFree(result.announce));
     if (note) result.notes.push(note);

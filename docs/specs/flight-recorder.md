@@ -51,7 +51,7 @@ Every line: `t` (ms since epoch), `ev`, `pid`, and `turn` (a per-process counter
 | `ev` | When | Fields |
 |---|---|---|
 | `listen.start` | mic opens for a turn | `mode` (turn, call, worklisten), `maxMs`, `endSilenceMs`, `marginDb`, `minSpeechDb`, `chime` |
-| `listen.end` | turn ends | `reason` (end-of-turn, no-speech, max-duration, cut, stopped, typing, error); `cut`: the call mic stopped hearing the user mid-sentence (Claude speaking on speakers, or mute), so what they had said so far went on as the utterance, `totalMs`, `speechMs`, `speechStartMs`, `floorDb`, `speechDb`, `recentDb`, `recentSpreadDb` |
+| `listen.end` | turn ends, or an utterance on a call. `cut`: the call mic stopped hearing the user mid-sentence (Claude speaking on speakers, or mute), so what they had said so far went on as the utterance | `reason` (end-of-turn, no-speech, max-duration, cut, stopped, typing, error), `totalMs`, `speechMs`, `speechStartMs`, `floorDb`, `speechDb`, `recentDb`, `recentSpreadDb` |
 | `vad.discard` | a too-short sound is thrown away | `voicedMs` |
 | `stt.done` | transcript ready | `ms`, `chars`, `words`, `droppedChars` (what `cleanTranscript` removed) |
 | `speak.start` | speech starts | `engine` (say, kokoro), `chars`, `words`, `truncated` |
