@@ -285,8 +285,7 @@ export class Call {
     const live = this.live;
     const reply = this.says.get(id)?.text ?? "";
     void (live ? live.check(CHECK_START_MS) : Promise.resolve(null)).then((partial) => {
-      const heard = partial === null ? null : classify(partial);
-      const words = heard === null ? null : (heard === "words" || heard === "hang-up") && !echoes(partial!, reply);
+      const words = partial === null ? null : ["words", "hang-up"].includes(classify(partial)) && !echoes(partial, reply);
       this.dispatch({ type: "words.checked", words, quietMs: live?.quietMs ?? 0 });
     });
   }
@@ -324,7 +323,7 @@ export class Call {
     prewarm(model);
     prewarmKokoro(); // the first words of the call shouldn't wait for the voice to load
     let levelFrames = 0;
-    // Rough words while the user talks, for the bubble's panel only (docs/specs/live-transcript.md).
+    // Rough words while the user talks, for the bubble's panel and the word check (docs/specs/live-transcript.md).
     const live = (this.live = new LiveTranscript({
       everyMs: CONFIG.liveTranscriptMs,
       enabled: () => bubbleTakesText() && partialsAvailable(),
