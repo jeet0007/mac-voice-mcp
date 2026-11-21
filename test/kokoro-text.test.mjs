@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { chunkForSpeech, FIRST_CHUNK_CHARS, fixPronunciation, MAX_CHUNK_CHARS, prepareForKokoro } from "../dist/kokoro-text.js";
+import { chunkForSpeech, fixPronunciation, MAX_CHUNK_CHARS, prepareForKokoro } from "../dist/kokoro-text.js";
 import { floatToPcm16, resamplePcm16 } from "../dist/pcm.js";
 import { wavHeader as wavHeaderFor } from "../dist/endpointer.js";
 
@@ -59,7 +59,6 @@ test("the first chunk is a sentence or clause of at most 60 characters, else the
     "Sure. The build broke because the lock file is out of date",
     "with the package file, so npm refuses.",
   ]);
-  assert.equal(FIRST_CHUNK_CHARS, 60);
 });
 
 // Issue #64: "...before the next sentence is" [pause] "ready".
