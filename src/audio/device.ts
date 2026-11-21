@@ -77,6 +77,8 @@ const MUTE_POLL_MS = 250;
 let nativeBroken = false;
 /** The native session's worker, which plays every sound while it runs. */
 let liveWorker: native.Worker | null = null;
+/** A worker is starting: process recorders wait it out too, or they would span the unit's start. */
+let workerStarting = false;
 /** Process recorders still running, until they exit. */
 const recorders = new Set<Promise<void>>();
 
@@ -96,14 +98,18 @@ async function route(purpose: Purpose): Promise<Interrupt> {
 
 /** The audio worker, once every process recorder has exited; null, with a flight event, if it can't start. */
 async function startWorker(): Promise<native.Worker | null> {
+  workerStarting = true;
   await Promise.all(recorders); // a recorder running across the unit's start records at the wrong rate
   const t = Date.now();
   try {
     return await native.start();
   } catch (e) {
+    nativeBroken = true; // a mic prompt left unanswered would otherwise stall every call by the start timeout
     flightEvent("audio.fallback", { ms: Date.now() - t }, null);
     log(`The audio worker couldn't start, so the call uses the recorder: ${e instanceof Error ? e.message : String(e)}`);
     return null;
+  } finally {
+    workerStarting = false;
   }
 }
 
@@ -163,7 +169,7 @@ export async function openAudio(opts: OpenOptions): Promise<AudioSession> {
     frames() {
       const recorder = worker ? null : backend.findRecorder();
       if (!worker && !recorder) throw new SetupError(backend.RECORDER_MISSING);
-      if (!worker && liveWorker) throw new MicBusyError("A call is using the microphone.");
+      if (!worker && (liveWorker || workerStarting)) throw new MicBusyError("A call is using the microphone.");
       if (recorder && !ctl.signal.aborted) {
         recording = backend.record(recorder);
         const exited = recording.exited;

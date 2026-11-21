@@ -149,8 +149,10 @@ test("the worker missing or failing to start: the call falls back to the recorde
   assert.ok(lines().some((l) => l.startsWith("rec ")));
   built();
 
+  // A failed start turns native off for the process: a fresh module copy keeps that from the later tests.
+  const isolated = await import("../dist/audio/device.js?fail-start");
   fresh({ STUB_WORKER: "fail-start" });
-  session = await openAudio({ purpose: "call" });
+  session = await isolated.openAudio({ purpose: "call" });
   assert.equal(session.interrupt, "none");
   await session.frames().next();
   await session.close();
@@ -158,6 +160,12 @@ test("the worker missing or failing to start: the call falls back to the recorde
   const log = lines();
   assert.ok(log.indexOf("worker start aec=1") < log.findIndex((l) => l.startsWith("rec ")), "the recorder starts after the worker is gone");
   assert.equal(flight().filter((e) => e.ev === "audio.fallback").length, 1);
+
+  fresh();
+  session = await isolated.openAudio({ purpose: "call" });
+  assert.equal(session.interrupt, "none");
+  await session.close();
+  assert.deepEqual(workerLines(), [], "after a failed start, later calls don't wait on the worker again");
 });
 
 test("an output device change ends the session cleanly: playbacks done stopped, frames end with why", darwin, async () => {
