@@ -193,6 +193,28 @@ test("an unsafe string field is dropped, and the day's file is capped", async ()
   assert.equal(JSON.parse(lines[0]).ev, "recorder.full");
 });
 
+test("a call engine step is recorded as it is: its event, then each effect, with no string outside the engine's enums", async () => {
+  const sb = sandbox();
+  process.env.VOICE_MCP_CACHE_DIR = sb.cache;
+  process.env.VOICE_MCP_FLIGHT_RECORDER = "on";
+  const f = await import("../dist/flight.js");
+  f.recordStep({ at: 5, type: "transcribed", utterance: 7, heard: "words" }, [
+    { type: "speech.stop", say: 1 },
+    { type: "deliver", utterance: 7, interrupted: { say: 1, playedMs: 1111 }, missed: 0 },
+    { type: "teardown", reason: "hang-up" },
+  ]);
+  f.recordStep({ at: 6, type: "transcribed", utterance: 8, heard: MARKER, text: MARKER }, [{ type: MARKER, reason: MARKER }]);
+  const rows = events(sb.flight).map(({ t, pid, ...row }) => row);
+  assert.deepEqual(rows, [
+    { ev: "call.event", at: 5, type: "transcribed", utterance: 7, heard: "words" },
+    { ev: "call.effect", type: "speech.stop", say: 1 },
+    { ev: "call.effect", type: "deliver", utterance: 7, "interrupted.say": 1, "interrupted.playedMs": 1111, missed: 0 },
+    { ev: "call.effect", type: "teardown", reason: "hang-up" },
+    { ev: "call.event", at: 6, type: "transcribed", utterance: 8 },
+    { ev: "call.effect" },
+  ]);
+});
+
 test("the recorder module imports nothing that can reach the network", () => {
   const src = readFileSync(path.join(ROOT, "src", "flight.ts"), "utf8");
   const imports = [...src.matchAll(/(?:from|import)\s*\(?\s*["']([^"']+)["']/g)].map((m) => m[1]);

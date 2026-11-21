@@ -2,13 +2,19 @@
  * A call: the mic stays open from `call start` until the user hangs up, like a phone call, instead
  * of one turn at a time (docs/specs/call-mode.md).
  *
+ * This is the shell around the call engine (engine/step.ts), which holds every rule: when a reply
+ * plays, waits, pauses or stops, when Claude is thinking, when the call ends. The shell owns what
+ * the engine can't touch: the audio session, the transcripts and the texts of the replies (the
+ * engine knows them by id), the voice-mode files and the timers. It turns what happens into events,
+ * and does what the engine decides.
+ *
  * One audio session runs for the whole call (src/listen/utterances.ts listenContinuously). Each
- * utterance is transcribed on this Mac, checked for a hang-up phrase, and left in the inbox for
- * `listen`, `say`, the plugin hook or Voice Buddy to hand to Claude. The session holds the mic lock
- * throughout, so other windows' voice turns give up at once. On speakers the mic can't hear the user
- * while `say` plays (src/audio/device.ts), so a reply waits for them to finish their sentence; on
- * headphones it stays open, so the user can talk over Claude: speech pauses the reply, real words
- * drop the rest of it, and a filler ("mm-hm") or a cough resumes it.
+ * utterance is transcribed on this Mac and left in the inbox for `listen`, `say`, the plugin hook or
+ * Voice Buddy to hand to Claude. The session holds the mic lock throughout, so other windows' voice
+ * turns give up at once. On speakers the mic can't hear the user while `say` plays
+ * (src/audio/device.ts), so a reply waits for them to finish their sentence; on headphones it stays
+ * open, so the user can talk over Claude: speech pauses the reply, real words drop the rest of it,
+ * and a filler ("mm-hm") or a cough resumes it.
  *
  * It ends when the user says "hang up", when Claude calls `call end`, after
  * VOICE_MCP_CALL_IDLE_MINUTES (default 30) without a word either way, when call.json disappears
@@ -20,165 +26,117 @@
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { flightEvent } from "./flight.js";
-import { openAudio, type AudioSession } from "./audio/device.js";
-import { BargeIn, type Interruption } from "./barge-in.js";
-import { bubbleTakesText, bubbleWanted, sendToBubble, startBubble, stopBubble } from "./bubble.js";
-import { CONFIG, debug, envNum, log, PKG } from "./config.js";
-import { thinkingTick } from "./cues.js";
-import { ensureModel } from "./model.js";
-import { CancelledError, sleep } from "./proc.js";
-import { prewarmKokoro } from "./kokoro.js";
-import { LiveTranscript } from "./live-transcript.js";
-import { listenContinuously } from "./listen/utterances.js";
-import { partialsAvailable, prewarm, transcribeBuffer, transcribePartial } from "./stt.js";
-import { speak, type Reply } from "./speech/replies.js";
-import { PERMISSION_NOTICE } from "./texts.js";
-import { addToInbox, callFile, inboxDir, levelsFile, muteFile, permissionFile, readJson, setOwnSession, showPhase, takeInbox, voiceModeDir, type InboxEntry } from "./state/voice-mode.js";
-import { trackSpeaking } from "./voice.js";
+import { openAudio, type AudioSession } from "../audio/device.js";
+import { bubbleTakesText, bubbleWanted, sendToBubble, startBubble, stopBubble } from "../bubble.js";
+import { CONFIG, debug, envNum, log, PKG } from "../config.js";
+import { thinkingTick } from "../cues.js";
+import { recordStep } from "../flight.js";
+import { prewarmKokoro } from "../kokoro.js";
+import { listenContinuously } from "../listen/utterances.js";
+import { LiveTranscript } from "../live-transcript.js";
+import { ensureModel } from "../model.js";
+import { CancelledError, sleep } from "../proc.js";
+import { speak, type Reply } from "../speech/replies.js";
+import { addToInbox, callFile, inboxDir, levelsFile, muteFile, permissionFile, readJson, setOwnSession, showPhase, takeInbox, voiceModeDir, type InboxEntry } from "../state/voice-mode.js";
+import { partialsAvailable, prewarm, transcribeBuffer, transcribePartial } from "../stt.js";
+import { PERMISSION_NOTICE } from "../texts.js";
+import { trackSpeaking } from "../voice.js";
+import { initial, nextWake, step } from "./engine/step.js";
+import type { Effect, EndReason, Event, SayId, State, UtteranceId } from "./engine/types.js";
+import { classify, heardSoFar } from "./engine/words.js";
 
 /** The last speech-to-text failure on a call, kept for debugging (and a future /issue). */
-export const sttFailureFile = () => path.join(CONFIG.cacheDir, "last-stt-failure.json");
+const sttFailureFile = () => path.join(CONFIG.cacheDir, "last-stt-failure.json");
 
-const missedNote = ({ count, error }: { count: number; error: string }) =>
+const missedNote = (count: number, error: string) =>
   `(voice-mcp note: speech to text failed on ${count === 1 ? "something" : `${count} things`} the user said just before this (${error}), ` +
   `so you may have missed words. Tell them, say what you did hear, and that the failure is recorded in ${sttFailureFile()}.)`;
 
-/** How often the call checks for idleness, call.json and leftovers in the inbox. */
+/** How often the call checks call.json, the permission notice and the inbox. */
 const WATCH_MS = 250;
 /** A `say` that fails right away (no voice installed) is reported by that call; later failures by the next one. */
 const EARLY_FAILURE_MS = 300;
-/** Resolves once `talking()` is false. No time limit: the recorder ends any sentence within a minute. */
-export async function waitForQuiet(talking: () => boolean, everyMs = 50): Promise<void> {
-  while (talking()) await sleep(everyMs);
-}
-/** While Claude thinks: a tick this often, for at most this long. */
-const THINKING_EVERY_MS = 1500;
-const THINKING_MAX_MS = 10_000;
 /** The call ends after this long without a word either way. Fractions are fine (the tests use seconds). */
 const IDLE_MS = Math.max(0.01, envNum("VOICE_MCP_CALL_IDLE_MINUTES", 30)) * 60_000;
+/** The longest setTimeout takes: a longer one fires at once. */
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
 
-/**
- * Does the whole transcript mean "hang up"? Politeness and the name around it are fine
- * ("Okay, hang up now.", "Bye, Claude."); a negation is not ("Don't hang up yet.").
- */
-export function isHangUp(text: string): boolean {
-  const t = text.toLowerCase().replace(/[^a-z' ]+/g, " ").replace(/\s+/g, " ").trim();
-  if (/\b(?:don't|do not|not|never)\b/.test(t)) return false;
-  const around = "(?:okay|ok|alright|all right|yes|yeah|so|um|uh|well|please|thanks|thank you|now|for now|let's|can you|could you|claude|and)";
-  const core = "(?:hang up|hangup|end (?:the )?call|(?:good)?bye claude)";
-  return new RegExp(`^(?:${around} )*${core}(?: ${around})*$`).test(t);
+/** An engine event, before the shell stamps it with the time. */
+type Happened = Event extends infer E ? (E extends unknown ? Omit<E, "at"> : never) : never;
+
+/** One `say`: what the engine knows by id. */
+interface Say {
+  text: string;
+  reply: Reply | null;
+  /** Why it couldn't be spoken, if that was known before `say` returned. */
+  failure: unknown;
+  returned: boolean;
+  /** It has played, failed, or was dropped. */
+  settle: () => void;
 }
 
-export type CallState = "off" | "on" | "ending";
-
 export class Call {
-  state: CallState = "off";
   /** Why the last call ended, for a `listen` or `say` that comes after. */
   endedBecause = "";
+  private engine: State = { phase: "off" };
+  private events: Event[] = [];
+  private draining = false;
+  /** The engine's next deadline. */
+  private wake: NodeJS.Timeout | undefined;
+  private watch: NodeJS.Timeout | undefined;
   private session: AudioSession | null = null;
   private ctl: AbortController | null = null;
   private loop: Promise<void> | null = null;
-  private watch: NodeJS.Timeout | null = null;
-  private lastActivity = 0;
-  /** `say` calls play one after another. */
-  private speaking: Promise<void> = Promise.resolve();
-  /** The `say` playing now. */
-  private reply: Reply | null = null;
-  /** The user talking over `say` (full duplex). A fresh one each call. */
-  private bargeIn = this.newBargeIn();
+  /** The last call giving the mic back. */
+  private closing: Promise<void> = Promise.resolve();
+  /** Why `end.requested` was sent. */
+  private requested = "";
+  /** Says and utterances take their ids from one counter. */
+  private ids = 0;
+  private says = new Map<SayId, Say>();
+  /** Each transcript, while the engine decides what to do with it. */
+  private transcripts = new Map<UtteranceId, string>();
   /** Utterances are transcribed in the order they were said. */
   private transcribing: Promise<void> = Promise.resolve();
   /** Problems with earlier speech, reported in the next result. */
   private laterNotes: string[] = [];
-  /** Things the user said that speech to text failed on, since the last one it heard. */
-  private missed: { count: number; error: string } | null = null;
+  private sttError = "";
   private wakers = new Set<() => void>();
-  /** `say` calls queued or playing. */
-  private saysPending = 0;
-  /** The user has talked for BARGE_IN_MS and not stopped yet. */
-  private userTalking = false;
-  /** Words reached Claude while a `say` was still playing: start the thinking ticks once it ends. */
-  private heardWhileSaying = false;
-  /** Words are in the inbox that nobody has handed to Claude yet. */
-  private undelivered = false;
-  /** When the user's words last reached Claude, until it speaks (0: not thinking). */
-  private thinkingSince = 0;
-  private lastTickAt = 0;
-
-  /** Talking over Claude pauses or resumes the reply: the recorder notes when. */
-  private newBargeIn(): BargeIn {
-    return new BargeIn((paused) => {
-      flightEvent("bargein", { action: paused ? "pause" : "resume" }, null);
-      this.reply?.duck(paused ? 0 : 1);
-    });
-  }
 
   get on(): boolean {
-    return this.state === "on";
+    return this.engine.phase === "on";
   }
 
   /** Take the mic for the call. Resolves "already" when one is on. The caller preflights and speaks the greeting. */
   async start(signal?: AbortSignal): Promise<"started" | "already"> {
-    if (this.state === "on") return "already";
-    while (this.state === "ending") await sleep(50);
+    if (this.on) return "already";
+    await this.closing;
     const session = await openAudio({ purpose: "call", signal });
     const ctl = new AbortController();
     this.session = session;
     this.ctl = ctl;
-    this.state = "on";
     this.endedBecause = "";
-    this.missed = null;
-    this.userTalking = false;
-    this.heardWhileSaying = false;
-    this.undelivered = false;
-    this.thinkingSince = 0;
     rmSync(muteFile(), { force: true });
     rmSync(permissionFile(), { force: true });
-    this.bargeIn = this.newBargeIn();
-    this.lastActivity = Date.now();
-    mkdirSync(voiceModeDir(), { recursive: true });
+    const startedAt = Date.now();
     const duplex = session.interrupt === "none" ? "half" : "full";
-    writeFileSync(callFile(), JSON.stringify({ pid: process.pid, startedAt: this.lastActivity, duplex }));
-    this.watch = setInterval(() => this.tick(), WATCH_MS);
+    this.engine = initial({ interrupt: duplex === "half" ? "none" : "pause", thinkingTick: CONFIG.callThinkingSound, idleMs: IDLE_MS }, startedAt);
+    mkdirSync(voiceModeDir(), { recursive: true });
+    writeFileSync(callFile(), JSON.stringify({ pid: process.pid, startedAt, duplex }));
+    this.watch = setInterval(() => this.poll(), WATCH_MS);
+    this.arm();
     startBubble();
     this.loop = this.run(session, ctl.signal).catch((e: unknown) => {
       if (this.ctl !== ctl || e instanceof CancelledError) return;
-      void this.end(`voice-mcp lost the microphone: ${e instanceof Error ? e.message : String(e)}`);
+      this.finish("mic-lost", `voice-mcp lost the microphone: ${e instanceof Error ? e.message : String(e)}`);
     });
     return "started";
   }
 
   /** End the call for `reason`, whatever state it's in; harmless when it's already over. */
   async end(reason: string): Promise<void> {
-    if (this.state !== "on") return;
-    this.state = "ending";
-    this.endedBecause = reason;
-    log(`call ended: ${reason}`);
-    const { ctl, loop, session } = this;
-    this.ctl = null;
-    this.loop = null;
-    this.session = null;
-    clearInterval(this.watch!);
-    this.watch = null;
-    // Everything that must not outlive the call happens before the first await, so a shutdown
-    // that exits right after calling this still leaves nothing behind.
-    ctl!.abort();
-    this.bargeIn.end();
-    takeInbox();
-    rmSync(callFile(), { force: true });
-    rmSync(muteFile(), { force: true });
-    rmSync(levelsFile(), { force: true });
-    stopBubble();
-    showPhase(null);
-    const closed = session!.close(); // stops the recorder now; gives the mic back once it has exited
-    for (const wake of this.wakers) wake();
-    try {
-      await loop;
-      await closed;
-    } finally {
-      this.state = "off";
-    }
+    this.finish("requested", reason);
+    await this.closing;
   }
 
   /**
@@ -186,54 +144,17 @@ export class Call {
    * plays on speakers the mic can't hear the user, so there it first waits for them to finish their sentence; typing doesn't stop it. Returns notes about earlier speech that failed.
    */
   async say(text: string): Promise<string[]> {
-    let failure: unknown = null;
-    let returned = false;
-    const startedAt = Date.now();
-    // Claude is talking: words taken before this, or with this say's result, need no ticks.
-    this.thinkingSince = 0;
-    this.undelivered = false;
-    this.heardWhileSaying = false;
-    this.saysPending++;
-    const play = async () => {
-      if (!this.on || this.bargeIn.dropped(startedAt)) return;
-      // On speakers the mic goes deaf while Claude speaks, which would cut the user's sentence short.
-      if (this.session?.interrupt === "none" && this.userTalking) {
-        const heldFrom = Date.now();
-        await waitForQuiet(() => this.on && this.userTalking);
-        flightEvent("call.hold", { heldMs: Date.now() - heldFrom }, null);
-      }
-      if (!this.on) return;
-      showPhase("speaking");
-      const reply = speak(text);
-      this.reply = reply;
-      this.bargeIn.play(text, () => reply.stop());
-      try {
-        await reply.done;
-      } catch (err) {
-        if (!(err instanceof CancelledError)) {
-          if (!returned) failure = err;
-          else this.laterNotes.push(`voice-mcp note: what you last said wasn't heard: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      } finally {
-        this.reply = null;
-        this.bargeIn.played();
-        this.lastActivity = Date.now();
-        if (this.on) showPhase(null);
-      }
-    };
-    const done = this.speaking.then(play);
-    this.speaking = done;
-    void done.finally(() => {
-      // Words handed over while this played (a held sentence): Claude is now thinking about them.
-      if (--this.saysPending === 0 && this.heardWhileSaying) {
-        this.heardWhileSaying = false;
-        this.thinkingSince = this.lastTickAt = Date.now();
-      }
-    });
+    if (!this.on) return this.laterNotes.splice(0);
+    const id = ++this.ids as SayId;
+    let settle!: () => void;
+    const done = new Promise<void>((resolve) => (settle = resolve));
+    const say: Say = { text, reply: null, failure: null, returned: false, settle };
+    this.says.set(id, say);
     trackSpeaking(done);
+    this.dispatch({ type: "say.requested", say: id });
     await Promise.race([done, sleep(EARLY_FAILURE_MS)]);
-    returned = true;
-    if (failure) throw failure;
+    say.returned = true;
+    if (say.failure) throw say.failure;
     return this.laterNotes.splice(0);
   }
 
@@ -259,6 +180,115 @@ export class Call {
     }
   }
 
+  /**
+   * Hand the engine what happened, and do what it decides. An event sent from inside an effect
+   * waits its turn, so the engine never sees one before it has finished with the one before.
+   */
+  private dispatch(event: Happened): void {
+    this.events.push({ ...event, at: Date.now() } as Event);
+    if (this.draining) return;
+    this.draining = true;
+    try {
+      for (let e = this.events.shift(); e; e = this.events.shift()) {
+        const [next, effects] = step(this.engine, e);
+        this.engine = next;
+        recordStep(e, effects);
+        for (const effect of effects) this.perform(effect);
+      }
+    } finally {
+      this.draining = false;
+      this.arm();
+    }
+  }
+
+  /** One timer for every deadline of the engine. A tick that comes early changes nothing and arms the timer again. */
+  private arm(): void {
+    clearTimeout(this.wake);
+    const at = nextWake(this.engine);
+    if (at === null) return;
+    this.wake = setTimeout(() => this.dispatch({ type: "tick" }), Math.min(Math.max(0, at - Date.now()), MAX_TIMEOUT_MS));
+  }
+
+  private perform(effect: Effect): void {
+    switch (effect.type) {
+      case "speech.start":
+        return this.play(effect.say);
+      case "speech.pause":
+        return this.says.get(effect.say)?.reply?.duck(0);
+      case "speech.resume":
+        return this.says.get(effect.say)?.reply?.duck(1);
+      case "speech.stop":
+        return this.says.get(effect.say)?.reply?.stop();
+      case "speech.drop":
+        this.says.get(effect.say)?.settle();
+        this.says.delete(effect.say);
+        return;
+      case "deliver": {
+        const transcript = this.transcripts.get(effect.utterance)!;
+        const cut = effect.interrupted;
+        const interrupted = cut ? `(You interrupted Claude after: '${heardSoFar(this.says.get(cut.say)!.text, cut.playedMs)}') ` : "";
+        const missed = effect.missed ? `${missedNote(effect.missed, this.sttError)} ` : "";
+        sendToBubble({ type: "final", text: transcript }); // display only: the notes are for Claude
+        addToInbox(missed + interrupted + transcript);
+        for (const wake of this.wakers) wake();
+        return;
+      }
+      case "cue":
+        return void thinkingTick();
+      case "teardown":
+        return this.teardown(effect.reason);
+    }
+  }
+
+  private play(id: SayId): void {
+    const say = this.says.get(id)!;
+    showPhase("speaking");
+    const reply = (say.reply = speak(say.text));
+    void (async () => {
+      try {
+        await reply.done;
+      } catch (err) {
+        if (!(err instanceof CancelledError)) {
+          if (!say.returned) say.failure = err;
+          else this.laterNotes.push(`voice-mcp note: what you last said wasn't heard: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      } finally {
+        this.says.delete(id);
+        if (this.on) showPhase(null);
+        this.dispatch({ type: "playback.ended", say: id });
+        say.settle();
+      }
+    })();
+  }
+
+  /** Everything that must not outlive the call, done at once: a shutdown that exits right after leaves nothing behind. */
+  private teardown(reason: EndReason): void {
+    this.endedBecause = reason === "hang-up" ? "the user hung up" : reason === "idle" ? `nobody said anything for ${Math.round(IDLE_MS / 60_000)} minutes` : this.requested;
+    log(`call ended: ${this.endedBecause}`);
+    const { ctl, loop, session } = this;
+    this.ctl = null;
+    this.loop = null;
+    this.session = null;
+    clearInterval(this.watch);
+    ctl!.abort();
+    takeInbox();
+    rmSync(callFile(), { force: true });
+    rmSync(muteFile(), { force: true });
+    rmSync(levelsFile(), { force: true });
+    stopBubble();
+    showPhase(null);
+    const closed = session!.close(); // stops the recorder now; gives the mic back once it has exited
+    for (const wake of this.wakers) wake();
+    this.closing = Promise.all([loop, closed]).then(() => {});
+  }
+
+  /** Ask the engine to end the call; `because` is what a later `listen` or `say` is told. */
+  private finish(reason: (Event & { type: "end.requested" })["reason"], because: string): void {
+    if (!this.on) return;
+    this.requested = because;
+    this.dispatch({ type: "end.requested", reason });
+  }
+
   private async run(session: AudioSession, signal: AbortSignal): Promise<void> {
     const model = await ensureModel({ download: false });
     prewarm(model);
@@ -274,14 +304,11 @@ export class Call {
     try {
       await listenContinuously(session, {
         onHeard: (heard) => {
-          if (heard.kind === "onset") return this.talking(session, true);
-          if (heard.kind !== "ended") return this.talking(session, false); // a blip or no speech: nobody is talking
-          const from = this.bargeIn.utterance();
-          this.transcribing = this.transcribing
-            .then(() => this.heard(heard.wav, model, signal, from))
-            .catch((e: unknown) => this.notHeard(e, model, signal))
-            .finally(() => this.bargeIn.done(from));
-          this.talking(session, false);
+          if (heard.kind === "onset") return this.dispatch({ type: "speech.onset" });
+          if (heard.kind !== "ended") return this.dispatch({ type: "speech.dropped", reason: heard.kind });
+          const utterance = ++this.ids as UtteranceId;
+          this.dispatch({ type: "utterance.ended", utterance, reason: heard.reason });
+          this.transcribing = this.transcribing.then(() => this.transcribe(utterance, heard.wav, model, signal));
         },
         // Every other 30 ms frame is plenty for the bubble's glow, which smooths it anyway.
         onLevel: (db, thresholdDb) => {
@@ -296,61 +323,43 @@ export class Call {
     }
   }
 
-  /** The user has talked for BARGE_IN_MS (true), or their utterance ended (false). */
-  private talking(session: AudioSession, talking: boolean): void {
-    if (talking === this.userTalking) return;
-    this.userTalking = talking;
-    if (session.interrupt === "pause") this.bargeIn.speech(talking);
-  }
-
-  /** `from`: the reply this utterance talked over, if any. */
-  private async heard(wav: Buffer, model: string, signal: AbortSignal, from: Interruption | null): Promise<void> {
+  private async transcribe(utterance: UtteranceId, wav: Buffer, model: string, signal: AbortSignal): Promise<void> {
     if (signal.aborted) return;
-    const transcript = await transcribeBuffer(wav, model, signal);
-    debug(`call heard: ${JSON.stringify(transcript)}`);
-    if (signal.aborted) return; // the call ended meanwhile
-    if (isHangUp(transcript)) {
-      void this.end("the user hung up");
-      return;
+    try {
+      const transcript = await transcribeBuffer(wav, model, signal);
+      debug(`call heard: ${JSON.stringify(transcript)}`);
+      if (signal.aborted) return; // the call ended meanwhile
+      this.transcripts.set(utterance, transcript);
+      this.dispatch({ type: "transcribed", utterance, heard: classify(transcript) });
+    } catch (err) {
+      if (!signal.aborted && !(err instanceof CancelledError)) this.notHeard(utterance, err, model);
+    } finally {
+      this.transcripts.delete(utterance);
     }
-    const text = this.bargeIn.heard(from, transcript);
-    if (!text) return; // a cough, or a filler said over Claude (its reply resumes)
-    if (transcript) sendToBubble({ type: "final", text: transcript }); // display only; `text` may carry a note for Claude
-    this.lastActivity = Date.now();
-    addToInbox(this.missed ? `${missedNote(this.missed)} ${text}` : text);
-    this.missed = null;
-    this.undelivered = true;
-    for (const wake of this.wakers) wake();
   }
 
   /** Speech to text failed on something the user said: record it, and tell Claude with the next thing heard. */
-  private notHeard(err: unknown, model: string, signal: AbortSignal): void {
-    if (signal.aborted || err instanceof CancelledError) return;
+  private notHeard(utterance: UtteranceId, err: unknown, model: string): void {
     const error = err instanceof Error ? err.message : String(err);
     log(`call: speech to text failed: ${error}`);
-    this.missed = { count: (this.missed?.count ?? 0) + 1, error };
+    this.sttError = error;
+    this.dispatch({ type: "transcribe.failed", utterance });
+    const failures = this.engine.phase === "on" ? this.engine.missed : 0;
     try {
       writeFileSync(
         sttFailureFile(),
-        JSON.stringify({ at: new Date().toISOString(), error, failures: this.missed.count, model, version: PKG.version, platform: `${process.platform} ${os.release()}` }, null, 2),
+        JSON.stringify({ at: new Date().toISOString(), error, failures, model, version: PKG.version, platform: `${process.platform} ${os.release()}` }, null, 2),
       );
     } catch (e) {
       log(`call: couldn't record the failure: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
-  private tick(): void {
-    if (!this.on) return;
-    this.bargeIn.settle(); // backs up its timer, which may fire a moment early
-    if (Date.now() - this.lastActivity > IDLE_MS) {
-      void this.end(`nobody said anything for ${Math.round(IDLE_MS / 60_000)} minutes`);
-      return;
-    }
+  /** The world outside the engine: call.json, the permission notice, the inbox. */
+  private poll(): void {
+    if (this.engine.phase !== "on") return;
     const mark = readJson(callFile()) as { pid?: unknown; session?: unknown } | null;
-    if (mark?.pid !== process.pid) {
-      void this.end("the session ended");
-      return;
-    }
+    if (mark?.pid !== process.pid) return this.finish("session-ended", "the session ended");
     setOwnSession(mark.session); // the hook added it: this window's session, so another window's typing can't stop us
     if (existsSync(permissionFile())) {
       rmSync(permissionFile(), { force: true });
@@ -370,25 +379,7 @@ export class Call {
     } catch {
       /* no inbox yet */
     }
-    // Whoever handed the words over (listen, the plugin hook, Voice Buddy), Claude has them now.
-    if (this.undelivered && !waiting) {
-      this.undelivered = false;
-      if (!this.saysPending) this.thinkingSince = this.lastTickAt = Date.now();
-      else this.heardWhileSaying = true;
-    }
-    this.tickWhileThinking();
-  }
-
-  private tickWhileThinking(): void {
-    if (!CONFIG.callThinkingSound || !this.thinkingSince || this.saysPending || this.userTalking) return;
-    const now = Date.now();
-    if (now - this.thinkingSince > THINKING_MAX_MS) {
-      this.thinkingSince = 0;
-      return;
-    }
-    if (now - this.lastTickAt < THINKING_EVERY_MS) return;
-    this.lastTickAt = now;
-    void thinkingTick();
+    if (this.engine.undelivered && !waiting) this.dispatch({ type: "inbox.drained" });
   }
 }
 

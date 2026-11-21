@@ -1,6 +1,6 @@
 /** MCP wiring: the tools (speak_and_listen, voice_setup, call, say, listen) and prompts (setup, voice_mode, call). */
 import { z } from "zod";
-import { call } from "./call.js";
+import { call } from "./call/session.js";
 import { CONFIG, DEFAULT_LISTEN_SECONDS, log, MAX_LISTEN_SECONDS, MAX_SPEAK_CHARS, PKG } from "./config.js";
 import { flightEnabled, flightFlag, flightMode, startFlight } from "./flight.js";
 import { stopKokoro } from "./kokoro.js";

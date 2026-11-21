@@ -12,6 +12,7 @@
 import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { EFFECT_STRINGS, EVENT_STRINGS, type Effect, type Event } from "./call/engine/types.js";
 import { CONFIG, PKG } from "./config.js";
 import { FRAME_BYTES, wavHeader } from "./endpointer.js";
 import { cacheRoot, readJson, stopFile } from "./state/voice-mode.js";
@@ -51,13 +52,21 @@ const END_REASONS = ["end-of-turn", "no-speech", "max-duration", "cut", "stopped
 const SPEAK_REASONS = ["done", "stopped", "barge-in", "error", "fallback", "timeout"] as const;
 const FLAG_ID = /^\d{8}-\d{6}-\d{3}$/;
 
+/** A call engine table as one allowlist: its types, and each string field with every value it takes in any of them. */
+function engineStrings(table: Record<string, Record<string, readonly string[]>>): Record<string, readonly string[]> {
+  const out: Record<string, string[]> = { type: Object.keys(table) };
+  for (const fields of Object.values(table)) for (const [field, values] of Object.entries(fields)) (out[field] ??= []).push(...values);
+  return out;
+}
+
 /** The only string fields an event may carry, and the values each may take. Everything else is dropped. */
 const STRINGS: Record<string, Record<string, readonly string[] | RegExp>> = {
   "listen.start": { mode: ["turn", "call", "worklisten"] },
   "listen.end": { mode: ["turn", "call", "worklisten"], reason: END_REASONS },
   "speak.start": { engine: ["say", "kokoro"] },
   "speak.end": { reason: SPEAK_REASONS },
-  bargein: { action: ["pause", "resume", "drop"] },
+  "call.event": engineStrings(EVENT_STRINGS),
+  "call.effect": engineStrings(EFFECT_STRINGS),
   "call.mute": { why: ["user", "speaking", "echo-gate"] },
   flag: { id: FLAG_ID },
 };
@@ -117,6 +126,17 @@ export function flightEvent(ev: string, fields: FlightFields = {}, turn: number 
   } catch {
     /* a recorder problem never breaks a turn */
   }
+}
+
+/** `interrupted: { say, playedMs }` as `interrupted.say` and `interrupted.playedMs`. */
+const flat = (fields: object, prefix = ""): FlightFields =>
+  Object.fromEntries(Object.entries(fields).flatMap(([k, v]) => (v && typeof v === "object" ? Object.entries(flat(v, `${prefix}${k}.`)) : [[prefix + k, v]])));
+
+/** One decision of the call engine (src/call/engine/step.ts): what happened, then each thing it decided to do about it. */
+export function recordStep(event: Event, effects: readonly Effect[]): void {
+  if (!flightEnabled()) return;
+  flightEvent("call.event", flat(event), null);
+  for (const effect of effects) flightEvent("call.effect", flat(effect), null);
 }
 
 // --- The audio ring (mode audio) ----------------------------------------------------------------

@@ -27,7 +27,7 @@ then the final transcript for a moment, then fades away.
    - a reply older than the newest one shown is dropped;
    - the text passes through `cleanTranscript`; an empty result shows nothing.
    - Never with the `whisper-cli` fallback (one process per request is too slow): no server, no partials.
-2. **Final.** The existing per-utterance transcript (call.ts `heard`) is sent as the final text. Partials are
+2. **Final.** The existing per-utterance transcript (`call/session.ts`) is sent as the final text. Partials are
    display only: they never reach the inbox, Claude, logs or the flight recorder.
 3. **Transport.** The server that launched the bubble writes one JSON object per line to the bubble's stdin:
    `{"type":"partial","text":"…"}`, `{"type":"final","text":"…"}`, `{"type":"clear"}`. No files, no sockets.

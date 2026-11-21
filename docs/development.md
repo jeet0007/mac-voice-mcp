@@ -50,7 +50,8 @@ Turn the volume up, keep the room quiet, and stop voice mode in other sessions w
 | `audio/protocol.ts` | The wire protocol of `native/audio-worker.swift`, defined once: commands, events, parsing. The test stub (`test/stubs/audio-worker.mjs`) imports it and `test/audio-worker-contract.test.mjs` runs the real worker against it. Not used by a call yet |
 | `state/voice-mode.ts` | Every file in the voice-mode folder shared with the plugin hook and Voice Buddy (call, phase, inbox, mute, levels, listening, stop); the only importer of `hooks/voice-files.mjs` besides `config.ts` |
 | `worklisten.ts` | Listening for "Claude, …" while Claude works |
-| `call.ts` | A call: one open mic until the user hangs up, utterances into the inbox, hang-up phrases, idle timeout, `say` and `listen` |
+| `call/engine/` | Every rule of a call, pure: `step(state, event)` returns the next state and the effects to run, `nextWake(state)` the next deadline. When a reply plays, waits, pauses or stops, the thinking ticks, hang-up phrases and fillers (`words.ts`), the idle limit. No text or audio in its state, events or effects, so each step goes to the flight recorder as it is. Imports nothing outside the directory (tested) |
+| `call/session.ts` | A call: one open mic until the user hangs up. The shell around the engine: the audio session, transcription, the texts of the replies, the inbox, `call.json`, one timer; `start`, `say`, `listen`, `end` |
 | `mcp.ts` | A small MCP server over stdio: JSON-RPC, tools, prompts, progress, cancellation |
 | `voice.ts`, `server.ts`, `index.ts` | The round trip, the MCP tools and prompts, and the CLI |
 | `skills/`, `hooks/` | The Claude Code plugin's `/mac-voice-mcp:talk`, `:call`, `:hangup` and `:setup` commands, the `voice-help` skill, and the stay-in-voice hook |
