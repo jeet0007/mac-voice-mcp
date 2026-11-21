@@ -15,8 +15,9 @@
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describeRecorder, findRecorder, recordForSeconds } from "./audio.js";
+import { describeRecorder, findRecorder, openAudio } from "./audio/device.js";
 import { CONFIG, IS_MAC, PKG } from "./config.js";
+import { FRAME_MS, wavHeader } from "./endpointer.js";
 import { flightDir, flightEnabled, flightMode } from "./flight.js";
 import { kokoroEnabled, kokoroVoiceLabel, stopKokoro } from "./kokoro.js";
 import { ensureModel } from "./model.js";
@@ -80,6 +81,44 @@ async function audioDevices(): Promise<Record<string, string>> {
   } catch {
     return {};
   }
+}
+
+/**
+ * Record `seconds` from the microphone into `outFile` (16 kHz mono WAV), no turn-taking.
+ * `onStarted` fires once audio is actually flowing, so playback can start in sync.
+ */
+async function recordForSeconds(seconds: number, outFile: string, onStarted: () => void): Promise<{ digitalSilence: boolean; peakDb: number }> {
+  const session = await openAudio({ purpose: "doctor" });
+  const safety = setTimeout(() => void session.close(), (seconds + 10) * 1000);
+  const frames: Buffer[] = [];
+  try {
+    // Every frame counts, `echo` or not: this check is meant to hear our own speech.
+    for await (const { pcm } of session.frames()) {
+      if (!frames.length) onStarted();
+      frames.push(pcm);
+      if (frames.length * FRAME_MS >= seconds * 1000) break;
+    }
+  } catch (err) {
+    if (!frames.length) throw err; // the recorder stopping early still leaves what it heard
+  } finally {
+    clearTimeout(safety);
+    await session.close();
+  }
+  const pcm = Buffer.concat(frames);
+  await writeFile(outFile, Buffer.concat([wavHeader(pcm.length), pcm]));
+
+  let peak = 0;
+  let anyNonZero = false;
+  for (const frame of frames) {
+    let sum = 0;
+    for (let i = 0; i < frame.length; i += 2) {
+      const v = frame.readInt16LE(i);
+      if (v !== 0) anyNonZero = true;
+      sum += v * v;
+    }
+    peak = Math.max(peak, sum / (frame.length / 2));
+  }
+  return { digitalSilence: !anyNonZero, peakDb: peak > 0 ? 10 * Math.log10(peak / 32768 ** 2) : -Infinity };
 }
 
 export async function runDoctor(opts: { loopback?: boolean; reportDir?: string; log?: (line: string) => void } = {}): Promise<DoctorReport> {

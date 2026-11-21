@@ -37,7 +37,7 @@ export const STOP_REASON =
 
 /**
  * How speak_and_listen results begin when the user did NOT answer out loud (see src/voice.ts,
- * src/lock.ts and src/server.ts). Only the start of the result is checked, so a user who *says*
+ * src/audio/mic.ts and src/server.ts). Only the start of the result is checked, so a user who *says*
  * one of these phrases doesn't end voice mode.
  */
 export const NOT_HEARD_PREFIXES = [

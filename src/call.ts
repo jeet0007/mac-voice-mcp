@@ -2,12 +2,13 @@
  * A call: the mic stays open from `call start` until the user hangs up, like a phone call, instead
  * of one turn at a time (docs/specs/call-mode.md).
  *
- * One recorder runs for the whole call (src/audio.ts listenContinuously). Each utterance is
- * transcribed on this Mac, checked for a hang-up phrase, and left in the inbox for `listen`, `say`,
- * the plugin hook or Voice Buddy to hand to Claude. The call holds the mic lock throughout, so
- * other windows' voice turns give up at once. On speakers the mic is gated while `say` plays (half
- * duplex); on headphones it stays open, so the user can talk over Claude (full duplex): speech
- * pauses the reply, real words drop the rest of it, and a filler ("mm-hm") or a cough resumes it.
+ * One audio session runs for the whole call (src/listen/utterances.ts listenContinuously). Each
+ * utterance is transcribed on this Mac, checked for a hang-up phrase, and left in the inbox for
+ * `listen`, `say`, the plugin hook or Voice Buddy to hand to Claude. The session holds the mic lock
+ * throughout, so other windows' voice turns give up at once. On speakers the mic can't hear the user
+ * while `say` plays (src/audio/device.ts), so a reply waits for them to finish their sentence; on
+ * headphones it stays open, so the user can talk over Claude: speech pauses the reply, real words
+ * drop the rest of it, and a filler ("mm-hm") or a cough resumes it.
  *
  * It ends when the user says "hang up", when Claude calls `call end`, after
  * VOICE_MCP_CALL_IDLE_MINUTES (default 30) without a word either way, when call.json disappears
@@ -17,22 +18,20 @@
  * Ending stops the recorder within a second and empties the inbox. Nothing is spoken: Claude notes it on screen.
  */
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { flightEvent } from "./flight.js";
-import { listenContinuously } from "./audio.js";
-import { detectDuplex } from "./audio/device.js";
+import { openAudio, type AudioSession } from "./audio/device.js";
 import { BargeIn, type Interruption } from "./barge-in.js";
 import { bubbleTakesText, bubbleWanted, sendToBubble, startBubble, stopBubble } from "./bubble.js";
 import { CONFIG, debug, envNum, log, PKG } from "./config.js";
 import { thinkingTick } from "./cues.js";
-import { acquireMicLock } from "./lock.js";
 import { ensureModel } from "./model.js";
 import { CancelledError, sleep } from "./proc.js";
 import { prewarmKokoro } from "./kokoro.js";
 import { LiveTranscript } from "./live-transcript.js";
-import { partialsAvailable, prewarm, transcribe, transcribePartial } from "./stt.js";
+import { listenContinuously } from "./listen/utterances.js";
+import { partialsAvailable, prewarm, transcribeBuffer, transcribePartial } from "./stt.js";
 import { speak, type Reply } from "./speech/replies.js";
 import { PERMISSION_NOTICE } from "./texts.js";
 import { addToInbox, callFile, inboxDir, levelsFile, muteFile, permissionFile, readJson, setOwnSession, showPhase, takeInbox, voiceModeDir, type InboxEntry } from "./state/voice-mode.js";
@@ -47,8 +46,6 @@ const missedNote = ({ count, error }: { count: number; error: string }) =>
 
 /** How often the call checks for idleness, call.json and leftovers in the inbox. */
 const WATCH_MS = 250;
-/** The speaker's echo reaches the mic a moment after speech ends. */
-const ECHO_TAIL_MS = 300;
 /** A `say` that fails right away (no voice installed) is reported by that call; later failures by the next one. */
 const EARLY_FAILURE_MS = 300;
 /** Resolves once `talking()` is false. No time limit: the recorder ends any sentence within a minute. */
@@ -79,17 +76,11 @@ export class Call {
   state: CallState = "off";
   /** Why the last call ended, for a `listen` or `say` that comes after. */
   endedBecause = "";
-  private release: (() => void) | null = null;
+  private session: AudioSession | null = null;
   private ctl: AbortController | null = null;
   private loop: Promise<void> | null = null;
   private watch: NodeJS.Timeout | null = null;
   private lastActivity = 0;
-  /** Resolved at call start (VOICE_MCP_CALL_DUPLEX, or headphones detected). */
-  private duplex: "full" | "half" = "half";
-  /** Mic frames are dropped until then (our own speech, plus its echo). */
-  private muteUntil = 0;
-  /** The user muted the call (muteFile), refreshed every tick. */
-  private userMuted = false;
   /** `say` calls play one after another. */
   private speaking: Promise<void> = Promise.resolve();
   /** The `say` playing now. */
@@ -131,16 +122,13 @@ export class Call {
   async start(signal?: AbortSignal): Promise<"started" | "already"> {
     if (this.state === "on") return "already";
     while (this.state === "ending") await sleep(50);
-    const duplex = await detectDuplex(); // before taking the mic, so a call end meanwhile still cancels the wait
-    const release = await acquireMicLock({ signal, call: true });
+    const session = await openAudio({ purpose: "call", signal });
     const ctl = new AbortController();
-    this.release = release;
+    this.session = session;
     this.ctl = ctl;
     this.state = "on";
     this.endedBecause = "";
     this.missed = null;
-    this.muteUntil = 0;
-    this.userMuted = false;
     this.userTalking = false;
     this.heardWhileSaying = false;
     this.undelivered = false;
@@ -148,13 +136,13 @@ export class Call {
     rmSync(muteFile(), { force: true });
     rmSync(permissionFile(), { force: true });
     this.bargeIn = this.newBargeIn();
-    this.duplex = duplex;
     this.lastActivity = Date.now();
     mkdirSync(voiceModeDir(), { recursive: true });
-    writeFileSync(callFile(), JSON.stringify({ pid: process.pid, startedAt: this.lastActivity, duplex: this.duplex }));
+    const duplex = session.interrupt === "none" ? "half" : "full";
+    writeFileSync(callFile(), JSON.stringify({ pid: process.pid, startedAt: this.lastActivity, duplex }));
     this.watch = setInterval(() => this.tick(), WATCH_MS);
     startBubble();
-    this.loop = this.run(ctl.signal).catch((e: unknown) => {
+    this.loop = this.run(session, ctl.signal).catch((e: unknown) => {
       if (this.ctl !== ctl || e instanceof CancelledError) return;
       void this.end(`voice-mcp lost the microphone: ${e instanceof Error ? e.message : String(e)}`);
     });
@@ -167,10 +155,10 @@ export class Call {
     this.state = "ending";
     this.endedBecause = reason;
     log(`call ended: ${reason}`);
-    const { ctl, loop, release } = this;
+    const { ctl, loop, session } = this;
     this.ctl = null;
     this.loop = null;
-    this.release = null;
+    this.session = null;
     clearInterval(this.watch!);
     this.watch = null;
     // Everything that must not outlive the call happens before the first await, so a shutdown
@@ -183,10 +171,11 @@ export class Call {
     rmSync(levelsFile(), { force: true });
     stopBubble();
     showPhase(null);
-    release!();
+    const closed = session!.close(); // stops the recorder now; gives the mic back once it has exited
     for (const wake of this.wakers) wake();
     try {
       await loop;
+      await closed;
     } finally {
       this.state = "off";
     }
@@ -194,7 +183,7 @@ export class Call {
 
   /**
    * Queue `text` for the speaker and return once it has started (or failed at once). While it
-   * plays the mic is gated on speakers (half duplex), so there it first waits for the user to finish their sentence; typing doesn't stop it. Returns notes about earlier speech that failed.
+   * plays on speakers the mic can't hear the user, so there it first waits for them to finish their sentence; typing doesn't stop it. Returns notes about earlier speech that failed.
    */
   async say(text: string): Promise<string[]> {
     let failure: unknown = null;
@@ -207,14 +196,13 @@ export class Call {
     this.saysPending++;
     const play = async () => {
       if (!this.on || this.bargeIn.dropped(startedAt)) return;
-      // On speakers the mic goes deaf while Claude speaks, which would throw away the user's half-said sentence.
-      if (this.duplex === "half" && this.userTalking) {
+      // On speakers the mic goes deaf while Claude speaks, which would cut the user's sentence short.
+      if (this.session?.interrupt === "none" && this.userTalking) {
         const heldFrom = Date.now();
         await waitForQuiet(() => this.on && this.userTalking);
         flightEvent("call.hold", { heldMs: Date.now() - heldFrom }, null);
       }
       if (!this.on) return;
-      this.muteUntil = Infinity;
       showPhase("speaking");
       const reply = speak(text);
       this.reply = reply;
@@ -229,7 +217,6 @@ export class Call {
       } finally {
         this.reply = null;
         this.bargeIn.played();
-        this.muteUntil = Date.now() + ECHO_TAIL_MS;
         this.lastActivity = Date.now();
         if (this.on) showPhase(null);
       }
@@ -272,11 +259,10 @@ export class Call {
     }
   }
 
-  private async run(signal: AbortSignal): Promise<void> {
+  private async run(session: AudioSession, signal: AbortSignal): Promise<void> {
     const model = await ensureModel({ download: false });
     prewarm(model);
     prewarmKokoro(); // the first words of the call shouldn't wait for the voice to load
-    const dir = await mkdtemp(path.join(os.tmpdir(), "voice-mcp-call-"));
     let levelFrames = 0;
     // Rough words while the user talks, for the bubble's panel only (docs/specs/live-transcript.md).
     const live = new LiveTranscript({
@@ -286,15 +272,16 @@ export class Call {
       emit: (text) => void sendToBubble({ type: "partial", text }),
     });
     try {
-      await listenContinuously(signal, {
-        dir,
-        muted: () => this.userMuted || (this.duplex === "half" && Date.now() < this.muteUntil),
-        onUtterance: (wav) => {
+      await listenContinuously(session, {
+        onHeard: (heard) => {
+          if (heard.kind === "onset") return this.talking(session, true);
+          if (heard.kind !== "ended") return;
           const from = this.bargeIn.utterance();
           this.transcribing = this.transcribing
-            .then(() => this.heard(wav, model, signal, from))
+            .then(() => this.heard(heard.wav, model, signal, from))
             .catch((e: unknown) => this.notHeard(e, model, signal))
             .finally(() => this.bargeIn.done(from));
+          this.talking(session, false);
         },
         // Every other 30 ms frame is plenty for the bubble's glow, which smooths it anyway.
         onLevel: (db, thresholdDb) => {
@@ -303,21 +290,23 @@ export class Call {
           }
         },
         live,
-        onSpeech: (talking) => {
-          this.userTalking = talking;
-          if (this.duplex === "full") this.bargeIn.speech(talking);
-        },
       });
     } finally {
       await this.transcribing;
-      await rm(dir, { recursive: true, force: true });
     }
   }
 
+  /** The user has talked for BARGE_IN_MS (true), or their utterance ended (false). */
+  private talking(session: AudioSession, talking: boolean): void {
+    if (talking === this.userTalking) return;
+    this.userTalking = talking;
+    if (session.interrupt === "pause") this.bargeIn.speech(talking);
+  }
+
   /** `from`: the reply this utterance talked over, if any. */
-  private async heard(wav: string, model: string, signal: AbortSignal, from: Interruption | null): Promise<void> {
+  private async heard(wav: Buffer, model: string, signal: AbortSignal, from: Interruption | null): Promise<void> {
     if (signal.aborted) return;
-    const transcript = await transcribe(wav, model, signal).finally(() => rmSync(wav, { force: true }));
+    const transcript = await transcribeBuffer(wav, model, signal);
     debug(`call heard: ${JSON.stringify(transcript)}`);
     if (signal.aborted) return; // the call ended meanwhile
     if (isHangUp(transcript)) {
@@ -353,9 +342,6 @@ export class Call {
   private tick(): void {
     if (!this.on) return;
     this.bargeIn.settle(); // backs up its timer, which may fire a moment early
-    const muted = existsSync(muteFile());
-    if (muted !== this.userMuted) flightEvent("call.mute", { muted, why: "user" }, null);
-    this.userMuted = muted;
     if (Date.now() - this.lastActivity > IDLE_MS) {
       void this.end(`nobody said anything for ${Math.round(IDLE_MS / 60_000)} minutes`);
       return;

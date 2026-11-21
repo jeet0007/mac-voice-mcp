@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { CONFIG } from "../dist/config.js";
-import { acquireMicLock, lockFile, MicBusyError } from "../dist/lock.js";
+import { acquireMicLock, lockFile, MicBusyError } from "../dist/audio/mic.js";
 import { CancelledError } from "../dist/proc.js";
 
 /** Point the lock at a fresh folder for each test. */

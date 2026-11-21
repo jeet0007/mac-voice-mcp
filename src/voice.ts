@@ -1,10 +1,10 @@
 /** The round trip: speak → listen for one turn → transcribe. */
-import { findRecorder, listenForTurn, MIC_PERMISSION_HINT, RECORDER_MISSING } from "./audio.js";
+import { findRecorder, MIC_PERMISSION_HINT, MicBusyError, openAudio, RECORDER_MISSING, type AudioSession } from "./audio/device.js";
 import { CONFIG, debug, DEFAULT_LISTEN_SECONDS, log, MAX_LISTEN_SECONDS, MAX_SPEAK_CHARS } from "./config.js";
-import { announceError, announceErrorIfMicFree, chime, cue, errorNote, type SpokenError } from "./cues.js";
+import { announceErrorIfMicFree, chime, cue, errorNote, type SpokenError } from "./cues.js";
 import { flightStopSeen, flightTurn } from "./flight.js";
 import { prewarmKokoro } from "./kokoro.js";
-import { acquireMicLock, MicBusyError } from "./lock.js";
+import { listenForTurn } from "./listen/utterances.js";
 import { ensureModel, isModelDownloading } from "./model.js";
 import { CancelledError, resetWhichCache, SetupError, sleep } from "./proc.js";
 import { prepareSpeech } from "./speech-text.js";
@@ -143,48 +143,40 @@ export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {
   if (model) prewarm(model);
 
   // Wait for any other voice session on this Mac to finish with the speaker and mic.
-  let release: () => void;
+  let session: AudioSession;
   try {
-    release = await acquireMicLock({ signal, onWait: () => onPhase("waiting") });
+    session = await openAudio({ purpose: "turn", signal, onWait: () => onPhase("waiting") });
   } catch (err) {
     showPhase(null); // gave up waiting for the mic, or cancelled: don't leave "waiting" showing
     if (err instanceof MicBusyError) return { ok: false, text: err.message, notes: waiting ? [waiting] : [] };
     throw err;
   }
-  if (!listen) return speakInBackground(textToSpeak, { release, onPhase, waiting, keepListening: wasListening, startedAt });
+  if (!listen) return speakInBackground(textToSpeak, { session, onPhase, waiting, keepListening: wasListening, startedAt });
   let result: VoiceResult;
-  let announce: SpokenError | undefined;
-  // The recorder of this turn is stopped in the background once the turn is decided; the mic lock
-  // is held until it has really exited.
-  const recorder: { exited: Promise<void> } = { exited: Promise.resolve() };
   // The user starts typing: stop talking and listening now, not after the 15-second wait for speech.
   const typing = watchForTyping(startedAt, signal);
   try {
-    result = await turn(textToSpeak, seconds, model!, typing.signal, onPhase, recorder);
-    announce = result.announce;
+    result = await turn(textToSpeak, seconds, model!, typing.signal, onPhase, session);
   } catch (err) {
     if (!(typing.typed && err instanceof CancelledError)) throw err;
     result = { ok: true, text: USER_TYPED, notes: [] };
   } finally {
     typing.dispose();
     showPhase(null);
-    if (!announce) void recorder.exited.then(release);
+    // The recorder was stopped once the turn was decided; the mic is given back once it has really exited.
+    void session.close();
   }
-  if (announce) {
-    // The recorder has exited, so the tone and the line can't be recorded; we still hold the mic lock
-    // until the line is done, so no other session opens its mic over it.
-    await recorder.exited;
-    try {
-      const note = errorNote(await announceError(announce));
-      if (note) result.notes.push(note);
-    } finally {
-      release();
-    }
+  if (result.announce) {
+    // Once the recorder has exited, so the tone and the line can't be recorded; and only if no other
+    // session took the mic meanwhile.
+    await session.ended;
+    const note = errorNote(await announceErrorIfMicFree(result.announce));
+    if (note) result.notes.push(note);
   }
   result.notes.unshift(...laterNotes.splice(0));
   if (waiting) result.notes.unshift(waiting);
   // They answered out loud: keep listening while Claude works, for "Claude, …" (once the turn's recorder is gone).
-  if (result.heard) void recorder.exited.then(() => workListener.start());
+  if (result.heard) void session.ended.then(() => workListener.start());
   return result;
 }
 
@@ -196,7 +188,7 @@ export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {
  */
 async function speakInBackground(
   textToSpeak: string,
-  o: { release: () => void; onPhase: (phase: Phase) => void; waiting: string | null; keepListening: boolean; startedAt: number },
+  o: { session: AudioSession; onPhase: (phase: Phase) => void; waiting: string | null; keepListening: boolean; startedAt: number },
 ): Promise<VoiceResult> {
   const speech = prepareSpeech(textToSpeak, { maxWords: CONFIG.maxSpeakWords, maxChars: MAX_SPEAK_CHARS });
   const t0 = Date.now();
@@ -227,7 +219,7 @@ async function speakInBackground(
     .finally(() => {
       typing.dispose();
       showPhase(null);
-      o.release();
+      void o.session.close();
       // Listening while Claude works resumes once the speaker is quiet, so it doesn't hear itself.
       // It counts from when this call returned, which is when the plugin's hook marked the session.
       if (o.keepListening && !failure && !typing.typed) workListener.start(t0);
@@ -253,7 +245,7 @@ async function turn(
   model: string,
   signal: AbortSignal | undefined,
   onPhase: ((phase: Phase) => void) | undefined,
-  recorder: { exited: Promise<void> },
+  session: AudioSession,
 ): Promise<VoiceResult> {
   const speech = prepareSpeech(textToSpeak, { maxWords: CONFIG.maxSpeakWords, maxChars: MAX_SPEAK_CHARS });
   const notes = [...speech.notes];
@@ -269,11 +261,7 @@ async function turn(
     prewarmKokoro(); // no-op unless its worker was idle-stopped or recycled: the next reply isn't cold
     const tListen = Date.now();
     // The chime plays once the mic is really recording, so the first word is never lost.
-    // The exit promise is handed over right at spawn, so the mic lock outlives the recorder even when the turn is cancelled.
-    const heard = await listenForTurn(seconds, null, signal, {
-      onListening: () => chime("start"),
-      onRecorder: (exited) => (recorder.exited = exited),
-    });
+    const heard = await listenForTurn(session, seconds, { signal, onListening: () => chime("start") });
     const t1 = Date.now();
     debug(`listen: ${heard.reason}, ${heard.wav.length} bytes of audio, ${heard.speechSeconds.toFixed(1)} s of speech, digitalSilence=${heard.digitalSilence}`);
     const timing = (transcribedMs?: number) =>
@@ -370,12 +358,4 @@ export function timingNote(t: {
   }
   if (t.transcribedMs !== undefined) parts.push(`transcribed ${secs(t.transcribedMs)}`);
   return `voice-mcp timing: ${parts.join(" · ")}`;
-}
-
-/** Serialize calls: there is one speaker and one microphone. */
-let queue: Promise<unknown> = Promise.resolve();
-export function exclusive<T>(fn: () => Promise<T>): Promise<T> {
-  const next = queue.then(fn, fn);
-  queue = next.catch(() => {});
-  return next;
 }

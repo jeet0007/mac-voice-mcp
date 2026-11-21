@@ -1,13 +1,13 @@
 // The audio port is the only way into src/audio/: its backends stay internal to it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
 const AUDIO = path.join(SRC, "audio");
-const INTERNAL = ["process.ts"].map((f) => path.join(AUDIO, f));
+const INTERNAL = ["mic.ts", "process.ts"].map((f) => path.join(AUDIO, f));
 
 /** Every file under src/audio/'s internal modules that `file` imports. */
 function internalImports(file) {
@@ -26,4 +26,8 @@ test("nothing outside src/audio/ imports its backends: only audio/device.ts", ()
   assert.ok(files.length > 20, "found the sources");
   const offenders = files.flatMap((f) => internalImports(f).map((p) => `${path.relative(SRC, f)} imports ${path.relative(SRC, p)}`));
   assert.deepEqual(offenders, [], "go through src/audio/device.ts instead");
+});
+
+test("the old recorder and lock modules are gone: every caller goes through the audio port", () => {
+  for (const f of ["audio.ts", "lock.ts"]) assert.ok(!existsSync(path.join(SRC, f)), `src/${f} is gone`);
 });

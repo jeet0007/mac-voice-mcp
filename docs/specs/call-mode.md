@@ -34,12 +34,12 @@ Claude is still writing (MCP only sees finished tool calls), telephony, cloud sp
 
 | Piece | Where | Use in call mode |
 |---|---|---|
-| Recorder + turn-taking (energy VAD, end silence) | `audio.ts`, `endpointer.ts` | Segment the open mic into utterances |
+| Recorder + turn-taking (energy VAD, end silence) | `audio/device.ts`, `listen/utterances.ts`, `endpointer.ts` | Segment the open mic into utterances |
 | Listen while Claude works, inbox, hook delivery | `worklisten.ts`, `hooks/voice-mode-lib.mjs` | Becomes the call's mic engine, without the "Claude, …" wake word |
 | Warm whisper-server | `stt.ts` | Transcribe each utterance |
 | Kokoro streaming playback, background speech | `kokoro.ts`, `voice.ts` | `say`, pause/resume for barge-in |
 | Stop file (typing interrupts) | `state/voice-mode.ts` | Not on a call: typing doesn't cut Claude off (a typo would) |
-| Mic lock across windows | `lock.ts` | Held for the whole call |
+| Mic lock across windows | `audio/mic.ts` | Held for the whole call |
 | Phase file + Voice Buddy | `state/voice-mode.ts`, `plugins/voice-buddy` | Show "on a call" |
 
 ## Design

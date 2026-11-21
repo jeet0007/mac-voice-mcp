@@ -32,7 +32,8 @@ import {
   VOICE_MODE_PROMPT,
 } from "./texts.js";
 import { READY_LINE, sayLineIfMicFree } from "./cues.js";
-import { exclusive, finishSpeaking, preflight, speakAndListen, trackSpeaking } from "./voice.js";
+import { exclusive } from "./audio/device.js";
+import { finishSpeaking, preflight, speakAndListen, trackSpeaking } from "./voice.js";
 
 /** The longest `listen` may wait: the Cowork bridge drops tool calls after 60 s. */
 const MAX_LISTEN_WAIT_SECONDS = 40;

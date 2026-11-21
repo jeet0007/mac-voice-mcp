@@ -14,13 +14,13 @@
  * voice mode ends, when another session takes over, and after VOICE_MCP_WORK_LISTEN_MINUTES
  * (default 10) without a voice turn.
  */
-import { findRecorder, listenForTurn } from "./audio.js";
+import { findRecorder, MicBusyError, openAudio, type AudioSession } from "./audio/device.js";
 import { CONFIG, debug, envNum } from "./config.js";
 import { chime } from "./cues.js";
-import { lockFile } from "./lock.js";
+import { listenForTurn, type Turn } from "./listen/utterances.js";
 import { ensureModel } from "./model.js";
 import { CancelledError, sleep } from "./proc.js";
-import { addToInbox, isAlive, readJson, readListening, setOwnSession, stopRequestedSince, type InboxEntry } from "./state/voice-mode.js";
+import { addToInbox, readListening, setOwnSession, stopRequestedSince, type InboxEntry } from "./state/voice-mode.js";
 import { transcribeBuffer } from "./stt.js";
 
 /** How long after our voice turn the hook has to confirm voice mode before we give up (no hook → no listening). */
@@ -46,12 +46,6 @@ export function interjectionNote(entries: InboxEntry[]): string | null {
   if (!entries.length) return null;
   const said = entries.map((e) => (e.text ? `"${e.text}"` : "(only your name: they want to talk)")).join(", then ");
   return `voice-mcp note: while you were working, the user said by voice: ${said}. Take it into account in this reply.`;
-}
-
-/** Another process is in a voice turn (it holds the mic lock): don't compete with it. */
-function micBusyElsewhere(): boolean {
-  const pid = (readJson(lockFile()) as { pid?: unknown } | null)?.pid;
-  return typeof pid === "number" && pid !== process.pid && isAlive(pid);
 }
 
 class WorkListener {
@@ -104,33 +98,30 @@ class WorkListener {
       while (!signal.aborted) {
         if (!ours(readListening()) || stopRequestedSince(turnEnd)) return; // the user typed, voice mode ended, or another session took over
         if (Date.now() - turnEnd > idleMs) return;
-        if (micBusyElsewhere()) {
-          await sleep(1000);
+        let session: AudioSession;
+        try {
+          session = await openAudio({ purpose: "worklisten" });
+        } catch (e) {
+          if (!(e instanceof MicBusyError)) throw e;
+          await sleep(1000); // another process is in a voice turn: don't compete with it
           continue;
         }
-        // Check a few times a second, so the mic closes right away when the user types, voice mode
-        // ends or another session starts a turn, not only after the next 15-second wait.
-        const listening = new AbortController();
-        const onStop = () => listening.abort();
-        signal.addEventListener("abort", onStop, { once: true });
+        // Check a few times a second, so the mic closes right away when the user types or voice mode
+        // ends, not only after the next 15-second wait. Another session taking the mic aborts session.signal.
+        const stopped = new AbortController();
         const watch = setInterval(() => {
-          if (!ours(readListening()) || stopRequestedSince(turnEnd) || micBusyElsewhere() || Date.now() - turnEnd > idleMs) listening.abort();
+          if (!ours(readListening()) || stopRequestedSince(turnEnd) || Date.now() - turnEnd > idleMs) stopped.abort();
         }, WATCH_MS);
-        let heard: Awaited<ReturnType<typeof listenForTurn>>;
-        let exited: Promise<void> = Promise.resolve();
+        let heard: Turn;
         try {
-          heard = await listenForTurn(30, null, listening.signal, { onRecorder: (e) => (exited = e) });
+          heard = await listenForTurn(session, 30, { signal: AbortSignal.any([signal, session.signal, stopped.signal]) });
         } catch (e) {
-          if (e instanceof CancelledError) {
-            await exited; // one recorder at a time: a cancelled one may still be closing
-            continue; // the checks at the top of the loop decide what's next
-          }
+          if (e instanceof CancelledError) continue; // the checks at the top of the loop decide what's next
           throw e;
         } finally {
           clearInterval(watch);
-          signal.removeEventListener("abort", onStop);
+          await session.close(); // one recorder at a time: the next loop (or a turn) opens the mic again
         }
-        await heard.recorderExited; // one recorder at a time: the next loop (or a turn) opens the mic again
         if (signal.aborted) return;
         if (heard.reason === "no-speech" || heard.digitalSilence) continue;
         const text = await transcribeBuffer(heard.wav, model, signal);
