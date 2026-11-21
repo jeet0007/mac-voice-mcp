@@ -211,7 +211,11 @@ export class Call {
     const play = async () => {
       if (!this.on || this.bargeIn.dropped(startedAt)) return;
       // On speakers the mic goes deaf while Claude speaks, which would throw away the user's half-said sentence.
-      if (this.duplex === "half") await waitForQuiet(() => this.on && this.userTalking);
+      if (this.duplex === "half" && this.userTalking) {
+        const heldFrom = Date.now();
+        await waitForQuiet(() => this.on && this.userTalking);
+        flightEvent("call.hold", { heldMs: Date.now() - heldFrom }, null);
+      }
       if (!this.on) return;
       this.muteUntil = Infinity;
       showPhase("speaking");
