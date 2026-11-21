@@ -59,7 +59,7 @@ A second `NSPanel`, the **transcript panel**, attached to the bubble panel as a 
 | collectionBehavior | `[.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]` |
 | ignoresMouseEvents | **`true`**: click-through. Clicks go to whatever is underneath. To move it, drag the pill. |
 | isOpaque / backgroundColor | `false` / `.clear` |
-| hasShadow | `true` (system shadow follows the rounded mask); call `invalidateShadow()` after each resize |
+| hasShadow | `false`: on this borderless rounded window the system shadow read as a dark outline |
 | hidesOnDeactivate | `false` |
 | Shown with | `orderFront(nil)`, never `makeKey…`, never `NSApp.activate`. Hidden with `orderOut(nil)` once faded, so it costs nothing and VoiceOver can't see it while hidden |
 | Initial state | Not ordered in. No window exists on screen until the first text. |
@@ -158,7 +158,7 @@ The final replaces the last partial in place; it may differ by a word or two (wh
 |---|---|
 | First non-empty text (partial, or a final with no partial) | Order in, then **fade in 120 ms** (ease-out) with a **6 pt** slide from the pill's side toward its place. Empty or whitespace-only text never shows. |
 | Each new partial with different text | Swap text at once; animate height and width changes **120 ms** (ease-out). Same text as before: ignored, and it does **not** restart the idle timer. |
-| Idle fade | **1,800 ms** after the last *changed* text, fade out **250 ms** (ease-in), then `orderOut` and drop the text. (The server sends about one partial per 700 ms, so about two partials with no new words fades it.) |
+| Idle fade | **4,000 ms** after the last *changed* text, fade out **250 ms** (ease-in), then `orderOut` and drop the text. (Partials stop once the user goes quiet; the final comes after the 1.5 s end-of-turn silence plus transcription, so this outlasts that gap and the final replaces the partial.) |
 | New text during the fade-out | Cancel the fade, fade back in **80 ms**, restart the timer. |
 | Final | Show at 96% alpha for `1,500 + 100 × max(0, words − 8)` ms, at most **3,000**, then fade out 250 ms. |
 | New partial while a final shows | A new utterance: replace the final with the partial (72%) at once, no stacking. Ignore partials that arrive within **400 ms** after a final (a late in-flight reply). |
@@ -203,7 +203,7 @@ writes nothing.
 | State | On screen | Text | Trigger out |
 |---|---|---|---|
 | **Hidden** (start, silence, no words heard, muted, Claude speaking, mic closed) | nothing, window ordered out | none | first non-empty `partial`/`final` |
-| **Partial** | panel, 72% text, grows with text | newest tail of the latest partial | new partial (stay), `final`, idle 1.8 s, `clear`, mute, speaking |
+| **Partial** | panel, 72% text, grows with text | newest tail of the latest partial | new partial (stay), `final`, idle 4 s (outlasts end-of-turn silence and transcription, so the final replaces it), `clear`, mute, speaking |
 | **Final** | panel, 96% text | the final text, tail-fit | 1.5 to 3 s hold, new utterance, `clear`, speaking (after ≥ 1 s), mute |
 | **Fading out** | opacity 100% to 0 over 250 ms (200 ms on clear/speaking, 120 ms on mute) | frozen | done: Hidden; new text: Partial |
 
@@ -224,7 +224,7 @@ heard" is the Hidden state). A transcript that cleans to empty shows nothing.
 
 Run the bubble with a temp `VOICE_MCP_CACHE_DIR` holding a `call.json` whose `pid` is a live process, pipe
 the JSON lines with `sleep` between them, and screenshot the panel. Check: appears only on text; side flips
-at a screen edge; 3-line tail fit with leading `…`; 72% to 96% on final; fades at 1.8 s and after the final
+at a screen edge; 3-line tail fit with leading `…`; 72% to 96% on final; fades at 4 s and after the final
 hold; hides on `clear`, mute and "speaking"; Reduce Motion, Increase Contrast and Reduce Transparency each
 change what this section says; clicking where the panel is hits the window underneath; the front app keeps
 keyboard focus throughout.
