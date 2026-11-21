@@ -22,8 +22,11 @@
  *   proc.ts         which / run helpers, error types
  *   speech-text.ts  screen text → ear text; transcript clean-up        (pure)
  *   endpointer.ts   turn-taking voice-activity detection               (pure)
- *   audio.ts        TTS, streaming microphone capture
- *   kokoro.ts       the optional Kokoro voice: install, warm worker, streaming playback
+ *   audio.ts        streaming microphone capture
+ *   audio/device.ts the audio port's output: play() a sound, duck or stop it (process.ts behind it)
+ *   speech/synthesize.ts  text → speech (Kokoro PCM or the built-in voice), voice choice, speech to a file
+ *   speech/replies.ts     speak(): synthesize + play, Kokoro falling back to the built-in voice
+ *   kokoro.ts       the optional Kokoro voice: install, warm worker
  *   kokoro-worker.ts  the process that runs the Kokoro model
  *   kokoro-text.ts  pronunciation fixes and sentence chunks for Kokoro (pure)
  *   pcm.ts          PCM conversion and resampling (pure)

@@ -15,13 +15,15 @@
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { chooseVoice, describeRecorder, findRecorder, recordForSeconds, speak, synthesizeToFile } from "./audio.js";
+import { describeRecorder, findRecorder, recordForSeconds } from "./audio.js";
 import { CONFIG, IS_MAC, PKG } from "./config.js";
 import { flightDir, flightEnabled, flightMode } from "./flight.js";
 import { kokoroEnabled, kokoroVoiceLabel, stopKokoro } from "./kokoro.js";
 import { ensureModel } from "./model.js";
 import { run } from "./proc.js";
 import { runSetupFlow } from "./setup.js";
+import { speak } from "./speech/replies.js";
+import { chooseVoice, synthesizeToFile } from "./speech/synthesize.js";
 import { describeStt, stopWhisperServer, transcribe } from "./stt.js";
 import { wordErrorRate } from "./wer.js";
 
@@ -154,7 +156,7 @@ export async function runDoctor(opts: { loopback?: boolean; reportDir?: string; 
       let player: Promise<unknown> | undefined;
       const rec = await recordForSeconds(seconds, recorded, () => {
         // The live voice at full quality, the way speak_and_listen speaks — not the 16 kHz test file.
-        player ??= new Promise((r) => setTimeout(r, 300)).then(() => speak(DOCTOR_SENTENCE));
+        player ??= new Promise((r) => setTimeout(r, 300)).then(() => speak(DOCTOR_SENTENCE).done);
       });
       await player;
       if (rec.digitalSilence) {

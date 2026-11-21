@@ -1,7 +1,7 @@
 // Picking the most natural installed macOS voice from `say -v '?'` output.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseSayVoices, pickVoice } from "../dist/audio.js";
+import { parseSayVoices, pickVoice } from "../dist/speech/synthesize.js";
 
 const SAY_OUTPUT = [
   "Albert              en_US    # Hello! My name is Albert.",

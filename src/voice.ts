@@ -1,5 +1,5 @@
 /** The round trip: speak → listen for one turn → transcribe. */
-import { findRecorder, listenForTurn, MIC_PERMISSION_HINT, RECORDER_MISSING, speak, type Spoken } from "./audio.js";
+import { findRecorder, listenForTurn, MIC_PERMISSION_HINT, RECORDER_MISSING } from "./audio.js";
 import { CONFIG, debug, DEFAULT_LISTEN_SECONDS, log, MAX_LISTEN_SECONDS, MAX_SPEAK_CHARS } from "./config.js";
 import { announceError, announceErrorIfMicFree, chime, cue, errorNote, type SpokenError } from "./cues.js";
 import { flightStopSeen, flightTurn } from "./flight.js";
@@ -8,6 +8,8 @@ import { acquireMicLock, MicBusyError } from "./lock.js";
 import { ensureModel, isModelDownloading } from "./model.js";
 import { CancelledError, resetWhichCache, SetupError, sleep } from "./proc.js";
 import { prepareSpeech } from "./speech-text.js";
+import { speak } from "./speech/replies.js";
+import type { Spoken } from "./speech/synthesize.js";
 import { findWhisperCli, findWhisperServer, prewarm, STT_MISSING, transcribeBuffer } from "./stt.js";
 import { showPhase, stopRequestedSince, takeInbox } from "./state/voice-mode.js";
 import { interjectionNote, workListener } from "./worklisten.js";
@@ -205,7 +207,7 @@ async function speakInBackground(
   // user starting to type stops it.
   const typing = watchForTyping(o.startedAt);
   const done = speak(speech.text, typing.signal)
-    .then(
+    .done.then(
       (spoken) => {
         const fallback = fallbackNote(spoken);
         if (fallback) laterNotes.push(fallback);
@@ -259,7 +261,7 @@ async function turn(
   {
     const t0 = Date.now();
     onPhase?.("speaking");
-    const spoken = await speak(speech.text, signal);
+    const spoken = await speak(speech.text, signal).done;
     const spoke = Date.now() - t0;
     const fallback = fallbackNote(spoken);
     if (fallback) notes.push(fallback);

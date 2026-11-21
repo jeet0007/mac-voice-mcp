@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { BargeIn, isFiller } from "../dist/barge-in.js";
-import { headphonesFromProfile } from "../dist/speakers.js";
+import { headphonesFromProfile } from "../dist/audio/process.js";
 import { isHangUp, waitForQuiet } from "../dist/call.js";
 
 test("hang-up phrases end the call; anything else, including 'don't hang up', doesn't", () => {

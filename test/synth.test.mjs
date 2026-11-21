@@ -17,7 +17,7 @@ Object.assign(process.env, {
   VOICE_MCP_EXTRA_PATH: "",
   PATH: [path.join(ROOT, "test", "fixtures", "bin"), path.dirname(process.execPath), "/usr/bin", "/bin"].join(path.delimiter),
 });
-const { synthesizeToFile } = await import("../dist/audio.js");
+const { synthesizeToFile } = await import("../dist/speech/synthesize.js");
 const { wavSeconds } = await import("../dist/pcm.js");
 
 test("wavSeconds reads the data chunk, whatever comes before it", () => {

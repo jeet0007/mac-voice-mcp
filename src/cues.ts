@@ -8,10 +8,11 @@
  * (the "open" tone is the exception: it already waits out the mic warm-up and the echo tail).
  */
 import { existsSync } from "node:fs";
-import { speakBuiltIn } from "./audio.js";
+import { play } from "./audio/device.js";
 import { CONFIG, debug, IS_MAC } from "./config.js";
 import { acquireMicLock, MicBusyError } from "./lock.js";
-import { run, sleep, which } from "./proc.js";
+import { sleep } from "./proc.js";
+import { builtInVoice } from "./speech/synthesize.js";
 
 export type Cue = "open" | "close" | "no-speech" | "error";
 
@@ -47,13 +48,18 @@ const AFTER_TONE_MS = 200;
 /** Play a system sound; true when it played. A missing sound or player is never fatal. macOS only. */
 export async function playSound(name: string, volume: number, signal?: AbortSignal): Promise<boolean> {
   const sound = `/System/Library/Sounds/${name}.aiff`;
-  if (!IS_MAC || !existsSync(sound)) return false;
-  try {
-    await run(which("afplay") ?? "/usr/bin/afplay", ["-v", String(volume), sound], { timeoutMs: 3000, signal });
-    return true;
-  } catch {
-    return false;
-  }
+  if (!IS_MAC || !existsSync(sound) || signal?.aborted) return false;
+  const playback = play({ kind: "cue", file: sound, volume });
+  signal?.addEventListener("abort", () => playback.stop(), { once: true });
+  return playback.done.then(
+    (end) => end === "finished",
+    () => false,
+  );
+}
+
+/** One line in the built-in voice. */
+async function sayBuiltIn(line: string): Promise<void> {
+  await play(await builtInVoice(line)).done;
 }
 
 /** One cue's tone. VOICE_MCP_CHIME=0 turns every tone off. Aborting `signal` stops the sound if it is still playing. */
@@ -107,7 +113,7 @@ export async function announceError(kind: SpokenError, opts: { now?: number } = 
   if (!CONFIG.spokenErrors || repeat) return { spoken: false, line, repeat, toned };
   if (toned) await sleep(AFTER_TONE_MS);
   try {
-    await speakBuiltIn(line);
+    await sayBuiltIn(line);
   } catch (err) {
     debug("spoken error line failed:", err instanceof Error ? err.message : err);
     return { spoken: false, line, repeat: false, toned };
@@ -159,7 +165,7 @@ export async function sayLineIfMicFree(line: string): Promise<boolean> {
 /** Say one fixed line in the built-in voice (never throws). */
 export async function sayLine(line: string): Promise<boolean> {
   try {
-    await speakBuiltIn(line);
+    await sayBuiltIn(line);
     return true;
   } catch (err) {
     debug("spoken line failed:", err instanceof Error ? err.message : err);
