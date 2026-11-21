@@ -30,7 +30,7 @@ const STOP_TIMEOUT_MS = 2000;
  * that costs nothing audible, since the call's greeting plays then.
  */
 const CONVERGE_MS = 500;
-/** Speech goes to the worker in 100 ms commands (at SPEECH_RATE, which device.ts defines after importing this), so a long sentence never holds up a gain or a stop behind it. */
+/** Speech goes to the worker in 100 ms commands (at SPEECH_RATE), so a long sentence never holds up a gain or a stop behind it. */
 const PCM_COMMAND_BYTES = 4800;
 
 type Ack = Extract<WorkerEvent, { ev: "ack" }>;
@@ -105,9 +105,11 @@ export function start(): Promise<Worker> {
   };
   child.stdout!.on("data", (chunk: Buffer) => {
     if (end) return;
-    pending =pending.length ? Buffer.concat([pending, chunk]) : chunk;
+    pending = pending.length ? Buffer.concat([pending, chunk]) : chunk;
     let off = 0;
-    for (; pending.length - off >= FRAME_BYTES; off += FRAME_BYTES) queue.push(Buffer.from(pending.subarray(off, off + FRAME_BYTES)));
+    for (; pending.length - off >= FRAME_BYTES; off += FRAME_BYTES) {
+      queue.push(Buffer.from(pending.subarray(off, off + FRAME_BYTES)));
+    }
     pending = pending.subarray(off);
     if (queue.length) notify();
   });

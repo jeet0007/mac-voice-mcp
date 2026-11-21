@@ -61,6 +61,8 @@ Every line: `t` (ms since epoch), `ev`, `pid`, and `turn` (a per-process counter
 | `call.hold` | a reply on speakers waited for the user to finish talking | `heldMs` |
 | `listen.cut` | the call mic stopped hearing the user (Claude speaking on speakers, or mute) before they had talked for 250 ms, dropping it | `speechMs` |
 | `stop.seen` | a stop request ends speech or listening | `stopAt`, `ownStartAt` |
+| `audio.fallback` | the native audio worker couldn't start, so the call uses the recorder | `ms` |
+| `audio.lost` | the native audio worker ended mid-call (a device changed, the mic stalled, or it died) | `routeChanged` |
 | `flag` | user flagged a moment | `id`, `hasNote` |
 
 String fields are an allowlist per event (reasons, engine, mode, action, why, the flag id); any other string is dropped, so even a one-word transcript can't land in a field. No event carries transcript text, spoken text, file paths of audio, or tool arguments.

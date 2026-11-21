@@ -40,8 +40,8 @@ export type Purpose = "turn" | "call" | "worklisten" | "doctor";
 
 /**
  * What a reply can do when the user talks over it: "pause" (headphones: the mic hears the user, not
- * the reply), "duck" (the native backend: its sound is cancelled from the mic), or "none": its sound reaches the mic, so
- * frames are `echo` while it plays.
+ * the reply), "duck" (the native backend: its sound is cancelled from the mic), or "none": its sound
+ * reaches the mic, so frames are `echo` while it plays.
  */
 export type Interrupt = "duck" | "pause" | "none";
 
@@ -88,8 +88,8 @@ const recorders = new Set<Promise<void>>();
 async function route(purpose: Purpose): Promise<Interrupt> {
   if (purpose !== "call") return "none";
   // Headphones stay on the process backend, so does a VOICE_MCP_CALL_DUPLEX that says what it wants.
-  const native = CONFIG.audio === "native" && IS_MACOS_15 && CONFIG.callDuplex === "auto" && !nativeBroken && nativeState("audio-worker") === "built";
-  const output = native ? await backend.outputRoute() : undefined;
+  const useNative = CONFIG.audio === "native" && IS_MACOS_15 && CONFIG.callDuplex === "auto" && !nativeBroken && nativeState("audio-worker") === "built";
+  const output = useNative ? await backend.outputRoute() : undefined;
   if (output === "speakers") return "duck";
   return (await backend.detectDuplex(output)) === "full" ? "pause" : "none";
 }
