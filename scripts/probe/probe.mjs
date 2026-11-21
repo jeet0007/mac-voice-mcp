@@ -70,8 +70,8 @@ async function loadDist() {
     if (built.status !== 0) throw new Error(`npm run build failed:\n${built.stdout}${built.stderr}`);
   }
   const load = (name) => import(pathToFileURL(path.join(root, "dist", name)).href);
-  const [endpointer, config, audio, stt, model] = await Promise.all(["endpointer.js", "config.js", "audio.js", "stt.js", "model.js"].map(load));
-  return { ...endpointer, CONFIG: config.CONFIG, chooseVoice: audio.chooseVoice, stt, locateModel: model.locateModel };
+  const [endpointer, config, synthesize, stt, model] = await Promise.all(["endpointer.js", "config.js", "speech/synthesize.js", "stt.js", "model.js"].map(load));
+  return { ...endpointer, CONFIG: config.CONFIG, chooseVoice: synthesize.chooseVoice, stt, locateModel: model.locateModel };
 }
 
 /** Workers still running: a gate that throws leaves its worker here, and `guarded` closes it. */
