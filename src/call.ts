@@ -64,6 +64,10 @@ const WATCH_MS = 250;
 const ECHO_TAIL_MS = 300;
 /** A `say` that fails right away (no voice installed) is reported by that call; later failures by the next one. */
 const EARLY_FAILURE_MS = 300;
+/** Resolves once `talking()` is false. No time limit: the recorder ends any sentence within a minute. */
+export async function waitForQuiet(talking: () => boolean, everyMs = 50): Promise<void> {
+  while (talking()) await sleep(everyMs);
+}
 /** While Claude thinks: a tick this often, for at most this long. */
 const THINKING_EVERY_MS = 1500;
 const THINKING_MAX_MS = 10_000;
@@ -114,6 +118,8 @@ export class Call {
   private saysPending = 0;
   /** The user has talked for BARGE_IN_MS and not stopped yet. */
   private userTalking = false;
+  /** Words reached Claude while a `say` was still playing: start the thinking ticks once it ends. */
+  private heardWhileSaying = false;
   /** Words are in the inbox that nobody has handed to Claude yet. */
   private undelivered = false;
   /** When the user's words last reached Claude, until it speaks (0: not thinking). */
@@ -139,6 +145,7 @@ export class Call {
     this.muteUntil = 0;
     this.userMuted = false;
     this.userTalking = false;
+    this.heardWhileSaying = false;
     this.undelivered = false;
     this.thinkingSince = 0;
     rmSync(muteFile(), { force: true });
@@ -190,7 +197,7 @@ export class Call {
 
   /**
    * Queue `text` for the speaker and return once it has started (or failed at once). While it
-   * plays the mic is gated on speakers (half duplex); typing doesn't stop it. Returns notes about earlier speech that failed.
+   * plays the mic is gated on speakers (half duplex), so there it first waits for the user to finish their sentence; typing doesn't stop it. Returns notes about earlier speech that failed.
    */
   async say(text: string): Promise<string[]> {
     let failure: unknown = null;
@@ -199,9 +206,13 @@ export class Call {
     // Claude is talking: words taken before this, or with this say's result, need no ticks.
     this.thinkingSince = 0;
     this.undelivered = false;
+    this.heardWhileSaying = false;
     this.saysPending++;
     const play = async () => {
       if (!this.on || this.bargeIn.dropped(startedAt)) return;
+      // On speakers the mic goes deaf while Claude speaks, which would throw away the user's half-said sentence.
+      if (this.duplex === "half") await waitForQuiet(() => this.on && this.userTalking);
+      if (!this.on) return;
       this.muteUntil = Infinity;
       showPhase("speaking");
       const ctl = new AbortController();
@@ -222,7 +233,13 @@ export class Call {
     };
     const done = this.speaking.then(play);
     this.speaking = done;
-    void done.finally(() => this.saysPending--);
+    void done.finally(() => {
+      // Words handed over while this played (a held sentence): Claude is now thinking about them.
+      if (--this.saysPending === 0 && this.heardWhileSaying) {
+        this.heardWhileSaying = false;
+        this.thinkingSince = this.lastTickAt = Date.now();
+      }
+    });
     trackSpeaking(done);
     await Promise.race([done, sleep(EARLY_FAILURE_MS)]);
     returned = true;
@@ -368,6 +385,7 @@ export class Call {
     if (this.undelivered && !waiting) {
       this.undelivered = false;
       if (!this.saysPending) this.thinkingSince = this.lastTickAt = Date.now();
+      else this.heardWhileSaying = true;
     }
     this.tickWhileThinking();
   }
