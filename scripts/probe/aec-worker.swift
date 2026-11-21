@@ -244,7 +244,8 @@ func micWriter() {
 }
 
 // --- The voice-processing unit (set up as in the spike) ---
-func set<T>(_ unit: AudioUnit, _ property: AudioUnitPropertyID, _ scope: AudioUnitScope, _ element: AudioUnitElement, _ value: T) -> OSStatus {
+// BitwiseCopyable: the unit copies raw bytes, so T must hold no object references.
+func set<T: BitwiseCopyable>(_ unit: AudioUnit, _ property: AudioUnitPropertyID, _ scope: AudioUnitScope, _ element: AudioUnitElement, _ value: T) -> OSStatus {
   withUnsafePointer(to: value) { AudioUnitSetProperty(unit, property, scope, element, $0, UInt32(MemoryLayout<T>.size)) }
 }
 
@@ -334,7 +335,7 @@ func apply(_ c: [String: Any]) -> OSStatus {
     let count = bytes.count / 2
     let input = AVAudioPCMBuffer(pcmFormat: resampler.from, frameCapacity: AVAudioFrameCount(count))!
     input.frameLength = AVAudioFrameCount(count)
-    bytes.withUnsafeBytes { input.int16ChannelData![0].update(from: $0.bindMemory(to: Int16.self).baseAddress!, count: count) }
+    bytes.withUnsafeBytes { UnsafeMutableRawPointer(input.int16ChannelData![0]).copyMemory(from: $0.baseAddress!, byteCount: count * 2) }
     let more = floats(resampler.run(input))
     return withSound(id) { $0.samples.append(contentsOf: more) }
   case "end":

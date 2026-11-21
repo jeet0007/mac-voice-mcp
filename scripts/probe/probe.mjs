@@ -38,6 +38,11 @@ const CONVERGENCE_WINDOW_MS = 5000;
 const PARTIAL_UNDER_FINAL_MAX_MS = 1000;
 const SAY_PCM_SLACK_MS = 200;
 const DUCK_SETTING_MIN_DB = 3;
+const TRIALS = 3;
+const MAX_ATTEMPTS = 6;
+const BEEP_MS = 150;
+// Nobody starts talking this soon after a beep: an onset earlier than this is echo or noise, not you.
+const MIN_REACTION_MS = 150;
 
 const rows = [];
 const data = {};
@@ -69,6 +74,9 @@ async function loadDist() {
   return { ...endpointer, CONFIG: config.CONFIG, chooseVoice: audio.chooseVoice, stt, locateModel: model.locateModel };
 }
 
+/** Workers still running: a gate that throws leaves its worker here, and `guarded` closes it. */
+const live = new Set();
+
 /** Client for the worker: frames from stdout, events from fd 3, commands answered by acks. */
 class Worker {
   frames = 0;
@@ -84,6 +92,8 @@ class Worker {
     this.child = spawn(workerBin, args, { stdio: ["pipe", "pipe", "inherit", "pipe"] });
     this.child.stdin.on("error", () => {});
     this.exit = new Promise((resolve) => this.child.on("close", resolve));
+    live.add(this);
+    this.exit.then(() => live.delete(this));
     this.exit.then((code) => {
       for (const w of this.#waiters) w.reject(new Error(`the worker exited (${code}) while waiting for ${w.what}`));
     });
@@ -259,16 +269,27 @@ const nextOnset = (ear, timeoutMs) =>
     ear.onOnset = (onset) => (clearTimeout(timer), (ear.onOnset = null), resolve(onset));
   });
 
+/** Beep through the worker (so it is echo-cancelled) with the ear not judging it, the way a call ignores its own chime. */
+async function beepCue(w, ear, id, timeoutMs) {
+  ear.reset(w.frames);
+  ear.endpointer.setIgnoring(true);
+  const onset = nextOnset(ear, timeoutMs);
+  await w.play(id, tonePcm(1500, BEEP_MS, 24000, 0.5), 24000);
+  const cueT = performance.now();
+  const heard = sleep(BEEP_MS + 60).then(() => (ear.endpointer.setIgnoring(false), onset));
+  return { cueT, heard };
+}
+
 const levelsBetween = (ear, from, to) => ear.levels.filter((l) => l.t >= from && l.t < to).map((l) => l.db);
 const summary = (levels) => (levels.length ? { p50: percentile(levels, 50), p95: percentile(levels, 95), max: Math.max(...levels) } : null);
 
-async function countdown(message, seconds = 3) {
+async function countdown(message, seconds = 3, end = "now.") {
   console.log(`\n>>> ${message}`);
   for (let s = seconds; s > 0; s--) {
     process.stdout.write(`    ${s}… `);
     await sleep(1000);
   }
-  console.log("now.");
+  console.log(end);
 }
 
 async function sayArgs(dist) {
@@ -330,6 +351,16 @@ async function selfTest(dist) {
   const unknown = await w.cmd({ op: "gain", id: 99, value: 1 });
   row("self", "bad input is refused, not fatal", unknown.status === -1 ? "PASS" : "FAIL", `a malformed line was dropped; a gain for an unknown sound got status ${unknown.status}`);
 
+  const ear = listen(w, dist);
+  await sleep(1000);
+  if (ear.onsets.length) row("a", "the beep cue is not an onset", "SKIP", "the room was not quiet before the beep");
+  else {
+    const cue = await beepCue(w, ear, 4, 1500);
+    const onset = await cue.heard;
+    row("a", "the beep cue is not an onset", onset ? "FAIL" : "PASS", onset ? `the ear took gate a's own beep for a voice ${ms(onset.firstVoicedT - cue.cueT)} after it started` : "gate a's beep played with echo cancellation on, and no onset in the 1.5 s after it");
+  }
+  w.onFrame = null;
+
   const aecOff = await w.cmd({ op: "aec", on: false });
   const agc = await w.cmd({ op: "agc", on: false });
   const duck = await w.cmd({ op: "duck-others", level: "min", advanced: false });
@@ -358,6 +389,7 @@ async function loopbackDuck(w, dist) {
     return row("a", "onset to duck, tone loopback", "SKIP", "the mic never heard the tone (speakers muted, very low, or headphones)");
   }
   const ack = await w.cmd({ op: "gain", id: 3, value: DUCK_GAIN, rampMs: 10 });
+  if (ack.status !== 0) return row("a", "onset to duck, tone loopback", "FAIL", `the tone had already ended when the onset came (gain status ${ack.status})`);
   const latency = ack.t - onset.firstVoicedT;
   data.loopbackDuck = { firstVoicedToAckMs: latency, onsetDecisionToAckMs: ack.ms, playToFirstVoicedMs: onset.firstVoicedT - started };
   row("a", "onset to duck, tone loopback", latency < ONSET_TO_DUCK_MAX_MS ? "PASS" : "FAIL", `${ms(latency)} from the first voiced frame reaching Node to the gain ack (gate under ${ONSET_TO_DUCK_MAX_MS}); ${ack.ms.toFixed(1)} ms of that is command to ack, the rest is the Endpointer's 120 ms onset rule`);
@@ -434,34 +466,50 @@ async function humanSession(dist, tmp) {
   }
   if (!wanted("a")) return;
 
-  console.log("\n>>> Next: it talks again. Each time it says NOW, say a few words over it (\"wait, hold on a second\").");
+  console.log(`\n>>> Next: it talks again. After each countdown it BEEPS: start talking over it right then ("wait, hold on a second").`);
   const { w } = await startWorker();
   const ear = listen(w, dist);
-  await w.play(2, Buffer.concat([reply, reply]), 24000);
+  await w.play(2, Buffer.concat([reply, reply, reply]), 24000);
   const latencies = [];
+  const reactions = [];
+  const missed = [];
   let falseOnsets = 0;
-  for (let trial = 1; trial <= 3; trial++) {
+  let attempts = 0;
+  while (latencies.length < TRIALS && attempts < MAX_ATTEMPTS) {
+    attempts++;
     const quietFrom = ear.onsets.length;
-    await countdown(`Trial ${trial} of 3: talk over it`);
+    await countdown(`Trial ${latencies.length + 1} of ${TRIALS} (attempt ${attempts} of ${MAX_ATTEMPTS}): talk at the beep`, 3, "");
     falseOnsets += ear.onsets.length - quietFrom; // it "heard" something while you were still waiting
-    ear.reset(w.frames);
-    const onset = await nextOnset(ear, 6000);
+    const { cueT, heard } = await beepCue(w, ear, 10 + attempts, 6000);
+    console.log("    >>> NOW: TALK <<<");
+    const onset = await heard;
     if (!onset) {
-      console.log("    (heard nothing)");
+      missed.push("no voice");
+      console.log("    No attempt: heard no voice within 6 s of the beep. Retrying.");
+      continue;
+    }
+    const reaction = onset.firstVoicedT - cueT;
+    if (reaction < MIN_REACTION_MS) {
+      missed.push(`onset ${ms(reaction)} after the beep`);
+      console.log(`    No attempt: something was heard ${ms(reaction)} after the beep, too soon to be you (echo or noise). Retrying.`);
+      await sleep(2500);
       continue;
     }
     const ack = await w.cmd({ op: "gain", id: 2, value: DUCK_GAIN, rampMs: 10 });
+    if (ack.status !== 0) throw new Error(`the reply was not playing when it heard you (gain status ${ack.status})`);
     latencies.push(ack.t - onset.firstVoicedT);
-    console.log(`    ducked ${ms(ack.t - onset.firstVoicedT)} after your first sound reached Node. Stop talking now.`);
+    reactions.push(reaction);
+    console.log(`    ducked ${ms(ack.t - onset.firstVoicedT)} after your first sound reached Node (you started ${ms(reaction)} after the beep). Stop talking now.`);
     await sleep(2500);
     await w.cmd({ op: "gain", id: 2, value: 1, rampMs: 50 });
   }
   w.onFrame = null;
   await w.cmd({ op: "stop", id: 2 }).catch(() => {});
   await w.close();
-  data.onsetToDuck = { latenciesMs: latencies, onsetsBeforeTheCue: falseOnsets };
-  if (!latencies.length) return row("a", "onset to duck, your voice", "FAIL", "no speech was heard over the reply in three tries (echo cancellation may be removing your voice too)");
-  row("a", "onset to duck, your voice", Math.max(...latencies) < ONSET_TO_DUCK_MAX_MS ? "PASS" : "FAIL", `${latencies.map(ms).join(", ")} from the first voiced frame reaching Node to the gain ack (gate under ${ONSET_TO_DUCK_MAX_MS}); ${falseOnsets} onsets before a cue`);
+  data.onsetToDuck = { latenciesMs: latencies, reactionMs: reactions, attempts, missed, onsetsBeforeTheCue: falseOnsets };
+  const heardOf = `heard ${latencies.length} of ${attempts} attempts${missed.length ? ` (missed: ${missed.join("; ")})` : ""}`;
+  if (latencies.length < TRIALS) return row("a", "onset to duck, your voice", "FAIL", `${heardOf}; ${TRIALS} needed. If you did talk at every beep, echo cancellation may be removing your voice too`);
+  row("a", "onset to duck, your voice", Math.max(...latencies) < ONSET_TO_DUCK_MAX_MS ? "PASS" : "FAIL", `${latencies.map(ms).join(", ")} from the first voiced frame reaching Node to the gain ack (gate under ${ONSET_TO_DUCK_MAX_MS}); ${heardOf}; ${falseOnsets} onsets during the countdowns`);
 }
 
 // --- (d) whisper-server: a partial while a final runs ------------------------------------------------
@@ -510,6 +558,7 @@ async function gateSay(dist, tmp) {
   const sentence = "The build finished without any errors.";
   const voice = await sayArgs(dist);
   const { w } = await startWorker(["--no-aec"]); // the mic is the stopwatch here: it must hear the speakers
+  await w.cmd({ op: "duck-others", level: "min", advanced: false }); // the unit would otherwise duck the standby `say`, which is another app
   const levels = [];
   w.onFrame = (frame, t) => levels.push({ t, db: frameDb(frame) });
   const closeOf = (child) => new Promise((resolve) => child.on("close", resolve));
@@ -627,14 +676,15 @@ async function gateDucking(dist, tmp) {
     const ducked = {};
     const statuses = {};
     // A change of level takes a second or two to fade in, so wait before measuring.
-    for (const [name, level, advanced] of [["default", "default", false], ["min", "min", false], ["advanced+min with nobody talking", "min", true], ["mid", "mid", false], ["max", "max", false]]) {
+    for (const [name, level, advanced] of [["default", "default", false], ["min", "min", false], ["advanced+min with nobody talking", "min", true], ["mid", "mid", false], ["max", "max", false], ["min again", "min", false]]) {
       statuses[name] = (await w.cmd({ op: "duck-others", level, advanced })).status;
       ducked[name] = own - (await measure(2500));
     }
     data.ducking = { ownToneDb: own, roomDb: room, otherAppQuieterThanOwnByDb: ducked, setStatus: statuses };
-    const works = statuses.min === 0 && statuses.max === 0 && ducked.max - ducked.min >= DUCK_SETTING_MIN_DB;
+    // "min again" after "max": a level that only drifts with time would otherwise pass min, then max.
+    const works = statuses.min === 0 && statuses.max === 0 && ducked.max - Math.max(ducked.min, ducked["min again"]) >= DUCK_SETTING_MIN_DB;
     const shown = Object.entries(ducked).map(([name, d]) => `${name} ${d.toFixed(1)}`).join("; ");
-    row("f", "other apps' audio", works ? "PASS" : "FAIL", `another app's tone is quieter than the same tone played by the unit by (dB): ${shown}. Set status min ${statuses.min}, max ${statuses.max}. Gate: the setting is accepted and "max" ducks at least ${DUCK_SETTING_MIN_DB} dB more than "min"`);
+    row("f", "other apps' audio", works ? "PASS" : "FAIL", `another app's tone is quieter than the same tone played by the unit by (dB): ${shown}. Set status min ${statuses.min}, max ${statuses.max}. Gate: the setting is accepted and "max" ducks at least ${DUCK_SETTING_MIN_DB} dB more than "min", before and after it`);
   } finally {
     other?.kill();
     w.onFrame = null;
@@ -682,6 +732,8 @@ try {
       await run();
     } catch (err) {
       row(gate, name, "FAIL", err.message);
+    } finally {
+      await Promise.all([...live].map((w) => w.close()));
     }
   };
   console.log(SELF_TEST ? "Self-test (no human needed; plays two short tones)" : "Call audio probe");

@@ -20,7 +20,8 @@ node scripts/probe/probe.mjs --only f       # one gate; also --skip a,b and --re
 ```
 
 Use laptop speakers at normal volume, no headphones, in a quiet room. Gates a, b and c prompt you with a
-countdown: first to stay quiet while it talks, then to talk over it three times.
+countdown: first to stay quiet while it talks, then to talk over it three times. In gate a, start talking
+when it beeps and prints `NOW: TALK`.
 
 The table goes to stdout. The numbers behind it go to `scripts/probe/.build/report.json`
 (`self-test-report.json` for the self-test). The exit code is 1 if any row failed.
@@ -29,7 +30,7 @@ The table goes to stdout. The numbers behind it go to `scripts/probe/.build/repo
 
 | Gate | Question | Passes when | Needs you |
 |---|---|---|---|
-| a | How long from your first sound to the reply getting quieter, with speech detection in Node? | Under 200 ms from the first voiced frame reaching Node to the worker's ack of the gain command, in each of 3 tries | yes |
+| a | How long from your first sound to the reply getting quieter, with speech detection in Node? | Under 200 ms from the first voiced frame reaching Node to the worker's ack of the gain command, in each of 3 heard tries. A try with no voice, or an onset under 150 ms after the beep (too soon to be you), is retried, up to 6 attempts | yes |
 | b | Does it interrupt itself when it starts talking with no calibration? | 0 false onsets in the first 5 s of playback | quiet |
 | c | Does it interrupt itself during a long reply on this output? | 0 false onsets from 5 s to the end of the reply. Also reports echo residue, the uncancelled level and the room level in dB, and the output name | quiet |
 | d | Can whisper-server run a partial while a final runs? | A partial sent 50 ms after a final comes back in under 1000 ms, and none fail | no |
@@ -38,7 +39,7 @@ The table goes to stdout. The numbers behind it go to `scripts/probe/.build/repo
 | g | Does a Bluetooth headset switch to its call profile? | Report only: device sample rates before and after the unit starts. Skipped when the route is not Bluetooth | no |
 | h | Does a worker started from Node get the mic? | Permission is `authorized` and the frames are not all zeros | no |
 
-The self-test also runs gate a with a tone instead of a voice: with echo cancellation off, the worker's own
+The self-test also checks that gate a's beep is not taken for a voice, and runs gate a with a tone instead of a voice: with echo cancellation off, the worker's own
 tone is "someone talking". It is the same path (worker frames, Endpointer, gain command, ack).
 
 ### Reading the numbers
@@ -52,9 +53,14 @@ tone is "someone talking". It is the same path (worker frames, Endpointer, gain 
 - **d.** 1000 ms is this probe's number, not the spec's. The word check runs 700 ms after onset. If a
   partial waits for a whole final first, the reply stays quiet with no decision for that long.
 - **e.** The mic is the stopwatch, so both paths carry the same detection delay.
+- **a, the cue.** The beep plays through the worker, so echo cancellation removes it, and the Endpointer
+  ignores it the way a call ignores its own chime. The report lists each missed attempt and your reaction
+  time after the beep. An onset from echo that comes later than 150 ms still counts as you: compare with
+  `onsetsBeforeTheCue`, the onsets heard during the countdowns.
 - **f.** The meter is the unit's own mic with processing bypassed. The reference is the same tone played by
   the unit itself. A few dB of the difference may be the two playback paths and not ducking. Differences
-  between levels are solid. "advanced" ducking only ducks while someone talks, and nobody talks in this gate.
+  between levels are solid. `min` is measured again after `max`, so a level that only drifts with time
+  cannot pass. "advanced" ducking only ducks while someone talks, and nobody talks in this gate.
 - **f, second row.** A `rec` that was already recording when the unit starts. Report only.
 
 ## Worker protocol
