@@ -98,6 +98,8 @@ export class Call {
   private transcripts = new Map<UtteranceId, string>();
   /** Utterances are transcribed in the order they were said. */
   private transcribing: Promise<void> = Promise.resolve();
+  /** Every `say` so far, for the next voice turn to wait on: a dropped say settles at once, while the one before it may still play (a goodbye). */
+  private spoken: Promise<unknown> = Promise.resolve();
   /** Problems with earlier speech, reported in the next result. */
   private laterNotes: string[] = [];
   private sttError = "";
@@ -150,7 +152,8 @@ export class Call {
     const done = new Promise<void>((resolve) => (settle = resolve));
     const say: Say = { text, reply: null, failure: null, returned: false, settle };
     this.says.set(id, say);
-    trackSpeaking(done);
+    this.spoken = Promise.all([this.spoken, done]);
+    trackSpeaking(this.spoken);
     this.dispatch({ type: "say.requested", say: id });
     await Promise.race([done, sleep(EARLY_FAILURE_MS)]);
     say.returned = true;
