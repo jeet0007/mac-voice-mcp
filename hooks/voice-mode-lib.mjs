@@ -95,7 +95,7 @@ function clearListening(dir, session) {
   if (readListening(dir)?.session === session) rmSync(listeningFile(dir), { force: true });
 }
 
-// --- A call (shared with src/call/session.ts) ----------------------------------------------------------
+// --- A call (shared with src/call/session.ts) ---------------------------------------------------
 
 function readCall(dir) {
   const call = readJson(callFile(dir));
