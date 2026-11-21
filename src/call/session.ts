@@ -311,7 +311,9 @@ export class Call {
           if (heard.kind !== "ended") return this.dispatch({ type: "speech.dropped", reason: heard.kind });
           const utterance = ++this.ids as UtteranceId;
           this.dispatch({ type: "utterance.ended", utterance, reason: heard.reason });
-          this.transcribing = this.transcribing.then(() => this.transcribe(utterance, heard.wav, model, signal));
+          this.transcribing = this.transcribing
+            .then(() => this.transcribe(utterance, heard.wav, model, signal))
+            .catch((e: unknown) => log(`call: transcription chain failed: ${e instanceof Error ? e.message : String(e)}`)); // one failure mustn't stop the rest of the call being heard
         },
         // Every other 30 ms frame is plenty for the bubble's glow, which smooths it anyway.
         onLevel: (db, thresholdDb) => {
