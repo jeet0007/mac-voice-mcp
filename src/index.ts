@@ -22,8 +22,8 @@
  *   proc.ts         which / run helpers, error types
  *   speech-text.ts  screen text → ear text; transcript clean-up        (pure)
  *   endpointer.ts   turn-taking voice-activity detection               (pure)
- *   audio.ts        streaming microphone capture
- *   audio/device.ts the audio port's output: play() a sound, duck or stop it (process.ts behind it)
+ *   audio/device.ts the audio port: openAudio() for mic frames, play() a sound, duck or stop it (process.ts, mic.ts behind it)
+ *   listen/utterances.ts  mic frames → endpointer → utterances, for a turn or a call
  *   speech/synthesize.ts  text → speech (Kokoro PCM or the built-in voice), voice choice, speech to a file
  *   speech/replies.ts     speak(): synthesize + play, Kokoro falling back to the built-in voice
  *   kokoro.ts       the optional Kokoro voice: install, warm worker
@@ -33,7 +33,6 @@
  *   model.ts        find / symlink / download the whisper model
  *   stt.ts          warm whisper-server + whisper-cli fallback
  *   setup.ts        requirement checks and consent-based installs
- *   lock.ts         one voice turn at a time across every session on the Mac
  *   state/voice-mode.ts  the voice-mode files shared with the plugin hook and Voice Buddy
  *   native-build.ts build the native binaries (call bubble, audio worker) with the user's swiftc, after consent
  *   bubble.ts       the floating call bubble: start and stop it with a call

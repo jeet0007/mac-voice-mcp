@@ -1,16 +1,153 @@
 /**
- * The process backend's output: SoX `play` (or afplay) for speech PCM, the built-in voice's own
- * program with one started ahead of time, afplay for cues, SIGSTOP/SIGCONT for a duck, and
- * headphone detection. Internal to src/audio/: everything else goes through device.ts.
+ * The process backend: the recorder (rec, sox or ffmpeg) for the mic; SoX `play` (or afplay) for
+ * speech PCM, the built-in voice's own program with one started ahead of time, afplay for cues,
+ * SIGSTOP/SIGCONT for a duck, and headphone detection. Internal to src/audio/: everything else goes
+ * through device.ts.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { CONFIG, IS_MAC, IS_WIN, log } from "../config.js";
-import { wavHeader } from "../endpointer.js";
-import { CancelledError, isExecutable, run, SetupError, startWaiting, tail, which, type Waiting } from "../proc.js";
+import { CONFIG, debug, IS_MAC, IS_WIN, log } from "../config.js";
+import { FRAME_BYTES, wavHeader } from "../endpointer.js";
+import { activeChildren, CancelledError, isExecutable, run, SetupError, startWaiting, tail, which, type Waiting } from "../proc.js";
 import { SPEECH_RATE, type Playback, type PlayEnd, type Sound } from "./device.js";
+
+// ---------------------------------------------------------------------------
+// The mic
+// ---------------------------------------------------------------------------
+
+export type Recorder = { kind: "sox"; bin: string; viaSox: boolean } | { kind: "ffmpeg"; bin: string };
+
+export function findRecorder(): Recorder | null {
+  const pref = CONFIG.recorder;
+  if (pref !== "ffmpeg") {
+    const rec = which("rec");
+    if (rec) return { kind: "sox", bin: rec, viaSox: false };
+    const sox = which("sox");
+    if (sox) return { kind: "sox", bin: sox, viaSox: true };
+  }
+  if (pref !== "sox" && IS_MAC) {
+    const ffmpeg = which("ffmpeg");
+    if (ffmpeg) return { kind: "ffmpeg", bin: ffmpeg };
+  }
+  return null;
+}
+
+export function describeRecorder(r: Recorder): string {
+  return `${r.kind === "sox" ? "SoX" : "ffmpeg"} (${r.bin})`;
+}
+
+export const RECORDER_MISSING =
+  "No audio recorder found. Call the voice_setup tool to check and install what's missing " +
+  (IS_WIN ? "(or install SoX from https://sourceforge.net/projects/sox/)." : "(or run `brew install sox`).");
+
+export const MIC_PERMISSION_HINT =
+  "Allow microphone access for the app running this server (Claude, Cursor, Terminal, iTerm, VS Code …) " +
+  "in System Settings → Privacy & Security → Microphone, then restart that app.";
+
+function recorderArgs(r: Recorder): string[] {
+  if (r.kind === "sox") {
+    // Raw 16 kHz mono s16le to stdout; SoX resamples from the device rate.
+    return ["-q", "-V1", ...(r.viaSox ? ["-d"] : []), "-t", "raw", "-r", "16000", "-c", "1", "-b", "16", "-e", "signed-integer", "-"];
+  }
+  return [
+    "-hide_banner", "-loglevel", "error", "-nostdin",
+    "-f", "avfoundation", "-i", CONFIG.ffmpegDevice,
+    "-ac", "1", "-ar", "16000", "-f", "s16le", "-",
+  ];
+}
+
+/** One recorder process. */
+export interface Recording {
+  /**
+   * Its audio in FRAME_BYTES slices, from the start. Ends once stopped; throws when the recorder
+   * exits on its own or can't start. return() stops it without waiting for it to exit.
+   */
+  readonly frames: AsyncIterableIterator<Buffer>;
+  /** SIGTERM, then SIGKILL if it hasn't exited after 2 s. Idempotent. */
+  stop(): void;
+  /** Resolves once the process is gone. */
+  readonly exited: Promise<void>;
+}
+
+/** Start the recorder: the mic stays open until stop(). */
+export function record(recorder: Recorder): Recording {
+  const args = recorderArgs(recorder);
+  debug("exec:", recorder.bin, args.join(" "));
+  const child = spawn(recorder.bin, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+  activeChildren.add(child);
+  const queue: Buffer[] = [];
+  let pending: Buffer = Buffer.alloc(0);
+  let stderr = "";
+  let delivered = false;
+  let stopped = false;
+  /** "done" once stopped, or why the recording failed. */
+  let end: "done" | Error | null = null;
+  let wake: (() => void) | null = null;
+  const notify = () => {
+    wake?.();
+    wake = null;
+  };
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    queue.length = 0;
+    end ??= "done";
+    notify();
+    if (child.exitCode === null) child.kill("SIGTERM");
+    setTimeout(() => child.exitCode === null && child.kill("SIGKILL"), 2000).unref();
+  };
+  child.stderr!.setEncoding("utf8").on("data", (d: string) => (stderr = (stderr + d).slice(-4000)));
+  child.stdout!.on("data", (chunk: Buffer) => {
+    if (stopped) return;
+    pending = pending.length ? Buffer.concat([pending, chunk]) : chunk;
+    let off = 0;
+    for (; pending.length - off >= FRAME_BYTES; off += FRAME_BYTES) queue.push(Buffer.from(pending.subarray(off, off + FRAME_BYTES)));
+    pending = pending.subarray(off);
+    if (queue.length) notify();
+  });
+  const exited = new Promise<void>((resolve) => {
+    child.on("error", (e) => {
+      activeChildren.delete(child);
+      end ??= e;
+      notify();
+      resolve();
+    });
+    child.on("close", (code) => {
+      activeChildren.delete(child);
+      end ??= delivered
+        ? new Error(`The recorder stopped (exit ${code}): ${tail(stderr) || "no output"}`)
+        : new Error(`Recording failed (${describeRecorder(recorder)}, exit ${code}). ${tail(stderr)}`.trim() + (IS_MAC ? `\n${MIC_PERMISSION_HINT}` : ""));
+      notify();
+      resolve();
+    });
+  });
+  const frames: AsyncIterableIterator<Buffer> = {
+    [Symbol.asyncIterator]: () => frames,
+    async next() {
+      for (;;) {
+        const frame = queue.shift();
+        if (frame) {
+          delivered = true;
+          return { value: frame, done: false };
+        }
+        if (end === "done") return { value: undefined, done: true };
+        if (end) throw end;
+        await new Promise<void>((r) => (wake = r));
+      }
+    },
+    async return() {
+      stop();
+      return { value: undefined, done: true };
+    },
+  };
+  return { frames, stop, exited };
+}
+
+// ---------------------------------------------------------------------------
+// Playback
+// ---------------------------------------------------------------------------
 
 /** What a player gets from its Playback. */
 interface Track {

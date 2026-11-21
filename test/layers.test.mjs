@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
 const AUDIO = path.join(SRC, "audio");
-const INTERNAL = ["process.ts"].map((f) => path.join(AUDIO, f));
+const INTERNAL = ["mic.ts", "process.ts"].map((f) => path.join(AUDIO, f));
 
 /** Every file under src/audio/'s internal modules that `file` imports. */
 function internalImports(file) {
@@ -27,3 +27,4 @@ test("nothing outside src/audio/ imports its backends: only audio/device.ts", ()
   const offenders = files.flatMap((f) => internalImports(f).map((p) => `${path.relative(SRC, f)} imports ${path.relative(SRC, p)}`));
   assert.deepEqual(offenders, [], "go through src/audio/device.ts instead");
 });
+

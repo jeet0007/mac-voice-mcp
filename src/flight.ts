@@ -47,7 +47,7 @@ const dayName = (t: number): string => `events-${new Date(t).toISOString().slice
 type Field = number | boolean | string | null | undefined;
 export type FlightFields = Record<string, Field>;
 
-const END_REASONS = ["end-of-turn", "no-speech", "max-duration", "stopped", "typing", "error", "timeout"] as const;
+const END_REASONS = ["end-of-turn", "no-speech", "max-duration", "cut", "stopped", "typing", "error", "timeout"] as const;
 const SPEAK_REASONS = ["done", "stopped", "barge-in", "error", "fallback", "timeout"] as const;
 const FLAG_ID = /^\d{8}-\d{6}-\d{3}$/;
 

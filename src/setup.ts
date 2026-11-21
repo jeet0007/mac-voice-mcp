@@ -8,7 +8,7 @@
  */
 import { statSync } from "node:fs";
 import { buildNative, findSwiftc, nativeBuilding, nativeState } from "./native-build.js";
-import { describeRecorder, findRecorder } from "./audio.js";
+import { describeRecorder, findRecorder } from "./audio/device.js";
 import { CONFIG, IS_MAC, IS_WIN, log } from "./config.js";
 import { installKokoro, isKokoroInstalled, isKokoroModelPresent, KOKORO_SIZES_MB, kokoroVoiceLabel } from "./kokoro.js";
 import { ensureModel, isModelDownloading, locateModel, modelSource, MODEL_SIZES_MB } from "./model.js";

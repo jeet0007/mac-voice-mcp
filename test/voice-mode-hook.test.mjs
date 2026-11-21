@@ -85,7 +85,7 @@ test("the user saying a trigger phrase doesn't end voice mode — only how the r
 });
 
 test("the hook's prefixes match what the server actually says", () => {
-  const src = ["src/voice.ts", "src/lock.ts", "src/server.ts", "src/texts.ts"].map((f) => readFileSync(path.join(ROOT, f), "utf8")).join("\n");
+  const src = ["src/voice.ts", "src/audio/mic.ts", "src/server.ts", "src/texts.ts"].map((f) => readFileSync(path.join(ROOT, f), "utf8")).join("\n");
   for (const p of NOT_HEARD_PREFIXES) assert.ok(src.includes(p), `server source no longer contains: ${p}`);
 });
 

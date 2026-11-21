@@ -36,8 +36,8 @@ Turn the volume up, keep the room quiet, and stop voice mode in other sessions w
 | `config.ts` | Environment settings, logging, the PATH fix-up for GUI apps |
 | `speech-text.ts` | Rewriting screen text for speech, cleaning up transcripts (pure, unit-tested) |
 | `endpointer.ts` | Turn-taking voice-activity detection (pure, unit-tested) |
-| `audio.ts` | Streaming mic capture |
-| `audio/device.ts`, `audio/process.ts` | The audio port's output: `play()` a speech, voice or cue sound and get a `Playback` to duck, stop or wait on. `process.ts` (SoX `play`, `afplay`, the built-in voice with a standby, SIGSTOP for a duck, headphone detection) is internal: a test fails any import of it from outside `src/audio/` |
+| `audio/device.ts`, `audio/process.ts`, `audio/mic.ts` | The audio port. Input: `openAudio(purpose)` takes the mic and gives an `AudioSession` whose `frames()` are 30 ms of 16 kHz PCM, each flagged `echo` when the user can't be heard in it (our reply on speakers, or mute); `close()` resolves once the recorder has exited and the mic is given back. Output: `play()` a speech, voice or cue sound and get a `Playback` to duck, stop or wait on. `process.ts` (the recorder, SoX `play`, `afplay`, the built-in voice with a standby, SIGSTOP for a duck, headphone detection) and `mic.ts` (the mic lock across every session on the Mac, the work listener giving way to a turn or a call, `exclusive()`) are internal: a test fails any import of them from outside `src/audio/` |
+| `listen/utterances.ts` | The one frame loop: frames through the endpointer into onset, utterance (its WAV in memory) and blip events; one turn, or a call's open mic |
 | `speech/synthesize.ts`, `speech/replies.ts` | Text to speech (Kokoro's PCM or the built-in voice), voice choice, speech into a WAV file; `speak()` plays a reply and falls back to the built-in voice for what Kokoro didn't say |
 | `cues.ts` | The sounds for a turn and a call (tick, pop, purr, thud, the mic chime, the thinking tick) and the one-time spoken error lines |
 | `kokoro.ts`, `kokoro-worker.ts` | The optional Kokoro voice: install, a warm worker process, and a background warm-up at the start of a call and a listen |
@@ -48,7 +48,6 @@ Turn the volume up, keep the room quiet, and stop voice mode in other sessions w
 | `setup.ts` | Requirement checks and consent-based background installs |
 | `native-build.ts` | Builds every native binary (`native/*.swift`: the call bubble, the audio worker) with the user's `swiftc` after consent; the source hash is the opt-in |
 | `audio/protocol.ts` | The wire protocol of `native/audio-worker.swift`, defined once: commands, events, parsing. The test stub (`test/stubs/audio-worker.mjs`) imports it and `test/audio-worker-contract.test.mjs` runs the real worker against it. Not used by a call yet |
-| `lock.ts` | One voice turn (or call) at a time across every session on the Mac |
 | `state/voice-mode.ts` | Every file in the voice-mode folder shared with the plugin hook and Voice Buddy (call, phase, inbox, mute, levels, listening, stop); the only importer of `hooks/voice-files.mjs` besides `config.ts` |
 | `worklisten.ts` | Listening for "Claude, …" while Claude works |
 | `call.ts` | A call: one open mic until the user hangs up, utterances into the inbox, hang-up phrases, idle timeout, `say` and `listen` |

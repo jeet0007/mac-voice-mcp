@@ -8,9 +8,8 @@
  * (the "open" tone is the exception: it already waits out the mic warm-up and the echo tail).
  */
 import { existsSync } from "node:fs";
-import { play } from "./audio/device.js";
+import { lockIfFree, play } from "./audio/device.js";
 import { CONFIG, debug, IS_MAC } from "./config.js";
-import { acquireMicLock, MicBusyError } from "./lock.js";
 import { sleep } from "./proc.js";
 import { builtInVoice } from "./speech/synthesize.js";
 
@@ -123,25 +122,12 @@ export async function announceError(kind: SpokenError, opts: { now?: number } = 
 }
 
 /**
- * Take the mic lock without waiting. Held: its release function. Someone else's: null, because anything
- * we said now would be recorded and transcribed as that other session's user.
- */
-async function micIfFree(): Promise<(() => void) | null> {
-  try {
-    return await acquireMicLock({ waitMs: 0 });
-  } catch (err) {
-    if (err instanceof MicBusyError) return null;
-    throw err;
-  }
-}
-
-/**
- * announceError for a moment when we don't hold the mic lock (setup checks before a turn). Another
- * session holds it: no sound at all (not even the tone). Otherwise the line is spoken with the lock held, so no other
- * session can open the mic over it.
+ * announceError for a moment when we don't hold the mic lock (setup checks before a turn, a turn's
+ * error once its mic is closed). Another session holds it: no sound at all (not even the tone).
+ * Otherwise the line is spoken with the lock held, so no other session can open the mic over it.
  */
 export async function announceErrorIfMicFree(kind: SpokenError): Promise<Announced> {
-  const release = await micIfFree();
+  const release = await lockIfFree();
   // Another session's mic is open: stay fully silent, like mic busy. Even the tone would land in its recording.
   if (!release) return { spoken: false, line: SPOKEN_ERRORS[kind], repeat: false, toned: false, micElsewhere: true };
   try {
@@ -153,7 +139,7 @@ export async function announceErrorIfMicFree(kind: SpokenError): Promise<Announc
 
 /** Say one fixed line only if no other session holds the mic (the lock is held while it plays). */
 export async function sayLineIfMicFree(line: string): Promise<boolean> {
-  const release = await micIfFree();
+  const release = await lockIfFree();
   if (!release) return false;
   try {
     return await sayLine(line);

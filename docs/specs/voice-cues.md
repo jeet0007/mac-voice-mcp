@@ -52,11 +52,11 @@ fix goes on screen via Claude).
 | Failure (where it is detected) | Spoken line | Words |
 |---|---|---|
 | Digital silence: mic blocked or wrong device (`heard.digitalSilence`, `src/voice.ts`) | "I only hear silence. Please allow microphone access for this app." | 11 |
-| No recorder (`RECORDER_MISSING`, `src/audio.ts`) | "I can't record yet. Please check the screen for setup." | 10 |
+| No recorder (`RECORDER_MISSING`, `src/audio/process.ts`) | "I can't record yet. Please check the screen for setup." | 10 |
 | No whisper (`STT_MISSING`, `src/stt.ts`) | "I can't understand speech yet. Please check the screen for setup." | 11 |
 | Model missing (preflight finds no model) | "My speech model is missing. Please check the screen for setup." | 11 |
 | Model still downloading (`isModelDownloading`) | "My speech model is still downloading. Try again in a minute." | 11 |
-| Mic busy in another window (`MicBusyError`, `src/lock.ts`) | **none: no tone, no line** | |
+| Mic busy in another window (`MicBusyError`, `src/audio/mic.ts`) | **none: no tone, no line** | |
 
 Rules:
 
