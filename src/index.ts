@@ -35,7 +35,9 @@
  *   setup.ts        requirement checks and consent-based installs
  *   lock.ts         one voice turn at a time across every session on the Mac
  *   state/voice-mode.ts  the voice-mode files shared with the plugin hook and Voice Buddy
- *   bubble.ts       the floating call bubble: build it with swiftc, start and stop it with a call
+ *   native-build.ts build the native binaries (call bubble, audio worker) with the user's swiftc, after consent
+ *   bubble.ts       the floating call bubble: start and stop it with a call
+ *   audio/protocol.ts  the wire protocol of the native audio worker (not used by a call yet)
  *   voice.ts        the speak → listen → transcribe round trip
  *   wer.ts          word error rate (pure)
  *   doctor.ts       objective self-check with PASS / WARN / FAIL

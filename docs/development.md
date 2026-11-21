@@ -46,6 +46,8 @@ Turn the volume up, keep the room quiet, and stop voice mode in other sessions w
 | `stt.ts` | The warm `whisper-server` with orphan guard, and the `whisper-cli` fallback. A turn is transcribed from memory (`transcribeBuffer`); only `whisper-cli` needs a temp file |
 | `flight.ts` | The opt-in flight recorder: event log, flags, audio ring, retention. Off = no-ops; imports no network module (tested) |
 | `setup.ts` | Requirement checks and consent-based background installs |
+| `native-build.ts` | Builds every native binary (`native/*.swift`: the call bubble, the audio worker) with the user's `swiftc` after consent; the source hash is the opt-in |
+| `audio/protocol.ts` | The wire protocol of `native/audio-worker.swift`, defined once: commands, events, parsing. The test stub (`test/stubs/audio-worker.mjs`) imports it and `test/audio-worker-contract.test.mjs` runs the real worker against it. Not used by a call yet |
 | `lock.ts` | One voice turn (or call) at a time across every session on the Mac |
 | `state/voice-mode.ts` | Every file in the voice-mode folder shared with the plugin hook and Voice Buddy (call, phase, inbox, mute, levels, listening, stop); the only importer of `hooks/voice-files.mjs` besides `config.ts` |
 | `worklisten.ts` | Listening for "Claude, …" while Claude works |
