@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
 const AUDIO = path.join(SRC, "audio");
-const INTERNAL = ["mic.ts", "process.ts"].map((f) => path.join(AUDIO, f));
+const INTERNAL = ["mic.ts", "native.ts", "process.ts"].map((f) => path.join(AUDIO, f));
 
 /** Every file under src/audio/'s internal modules that `file` imports. */
 function internalImports(file) {

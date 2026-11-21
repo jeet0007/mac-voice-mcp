@@ -43,12 +43,14 @@ const until = async (fn, ms = 3000) => {
   while (!fn() && Date.now() < end) await new Promise((r) => setTimeout(r, 10));
   return fn();
 };
-/** A "voice" that runs until stopped, and the pid it wrote. */
+/** The built-in voice (the `say` stub) taking 30 s to speak, and its pid. */
 async function longVoice() {
-  const pidFile = path.join(dir, `pid-${Math.random()}`);
-  const playback = play({ kind: "voice", bin: "/bin/sh", args: ["-c", `echo $$ > ${pidFile}; exec sleep 30`], standby: false });
-  assert.ok(await until(() => { try { return readFileSync(pidFile, "utf8").trim() !== ""; } catch { return false; } }), "the voice started");
-  return { playback, pid: Number(readFileSync(pidFile, "utf8")) };
+  writeFileSync(log, "");
+  process.env.STUB_SAY_MS = "30000";
+  const playback = play({ kind: "voice", text: "A long reply." });
+  assert.ok(await until(() => readFileSync(log, "utf8").includes("tts-input")), "the voice started");
+  delete process.env.STUB_SAY_MS;
+  return { playback, pid: Number(readFileSync(log, "utf8").match(/tts-start (\d+)/)[1]) };
 }
 
 test("stop() on a paused player stops it, and done settles as stopped", { skip: process.platform === "win32" }, async () => {

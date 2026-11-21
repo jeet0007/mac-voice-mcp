@@ -7,7 +7,7 @@ import { log } from "../config.js";
 import { flightEvent } from "../flight.js";
 import { kokoroEnabled } from "../kokoro.js";
 import { CancelledError } from "../proc.js";
-import { builtInVoice, kokoroSpeech, type Spoken } from "./synthesize.js";
+import { kokoroSpeech, type Spoken } from "./synthesize.js";
 
 export interface Reply {
   /** How it was spoken, once it has finished. Rejects with CancelledError once stopped, or with why it couldn't be spoken. */
@@ -68,7 +68,7 @@ export function speak(text: string, signal?: AbortSignal): Reply {
 
 async function say(text: string, signal: AbortSignal, playToEnd: (sound: Sound) => Promise<void>): Promise<Spoken> {
   if (!kokoroEnabled()) {
-    await playToEnd(await builtInVoice(text));
+    await playToEnd({ kind: "voice", text });
     return { engine: "built-in" };
   }
   const kokoro = kokoroSpeech(text, signal);
@@ -81,7 +81,7 @@ async function say(text: string, signal: AbortSignal, playToEnd: (sound: Sound) 
     const reason = err instanceof Error ? err.message : String(err);
     log(`The Kokoro voice failed, so the built-in voice is speaking instead: ${reason}`);
     const rest = kokoro.unspoken();
-    if (rest) await playToEnd(await builtInVoice(rest));
+    if (rest) await playToEnd({ kind: "voice", text: rest });
     return { engine: "built-in", fallback: reason };
   }
 }

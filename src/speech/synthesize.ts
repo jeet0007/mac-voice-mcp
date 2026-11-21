@@ -1,7 +1,7 @@
 /**
  * Text → speech, independent of where it plays: the Kokoro voice as 24 kHz PCM sentence by
- * sentence, or the built-in voice (macOS `say`, espeak-ng, Windows SAPI) as a Sound that speaks
- * on its own. Also which built-in voice to use, and speech into a WAV file for doctor and tests.
+ * sentence, or the command line of the built-in voice (macOS `say`, espeak-ng, Windows SAPI) that
+ * the audio backend runs. Also which built-in voice to use, and speech into a WAV file for doctor and tests.
  */
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
@@ -26,7 +26,7 @@ export interface Spoken {
 export function findTts(): string | null {
   if (IS_MAC) return which("say") ?? (existsSync("/usr/bin/say") ? "/usr/bin/say" : null);
   if (IS_WIN) return "powershell.exe";
-  return which("espeak-ng") ?? which("espeak") ?? which("spd-say");
+  return which("espeak-ng") ?? which("espeak");
 }
 
 // --- Which voice (macOS) ---------------------------------------------------------------------
@@ -108,8 +108,11 @@ export function chooseVoice(): Promise<VoiceChoice> {
 
 // --- The built-in voice ----------------------------------------------------------------------
 
-/** The built-in voice saying `text`. Every engine but spd-say reads the text from stdin. */
-export async function builtInVoice(text: string): Promise<Sound> {
+/**
+ * The built-in voice's command, for the audio backend that plays it. Every engine reads the text
+ * from stdin, so one can start ahead of time and wait for it. `standby`: keep one waiting.
+ */
+export async function builtInCommand(): Promise<{ bin: string; args: string[]; standby: boolean }> {
   const bin = findTts();
   if (!bin) throw new SetupError("No text-to-speech engine found. Install espeak-ng (e.g. `sudo apt install espeak-ng`).");
   // With Kokoro in use the built-in voice only fills in, so none is kept waiting for the next reply.
@@ -120,16 +123,15 @@ export async function builtInVoice(text: string): Promise<Sound> {
     if (voice) args.push("-v", voice);
     if (CONFIG.rate) args.push("-r", CONFIG.rate);
     args.push("-f", "-"); // read from stdin: no argv length limits, no flag injection
-    return { kind: "voice", bin, args, input: text, standby };
+    return { bin, args, standby };
   }
   if (IS_WIN) {
     const ps =
       "Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; " +
       "$s.Speak([Console]::In.ReadToEnd())";
-    return { kind: "voice", bin, args: ["-NoProfile", "-NonInteractive", "-Command", ps], input: text, standby };
+    return { bin, args: ["-NoProfile", "-NonInteractive", "-Command", ps], standby };
   }
-  if (bin.endsWith("spd-say")) return { kind: "voice", bin, args: ["-w", ` ${text}`], standby: false };
-  return { kind: "voice", bin, args: ["--stdin"], input: text, standby };
+  return { bin, args: ["--stdin"], standby };
 }
 
 // --- Kokoro ----------------------------------------------------------------------------------

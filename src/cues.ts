@@ -11,7 +11,6 @@ import { existsSync } from "node:fs";
 import { lockIfFree, play } from "./audio/device.js";
 import { CONFIG, debug, IS_MAC } from "./config.js";
 import { sleep } from "./proc.js";
-import { builtInVoice } from "./speech/synthesize.js";
 
 export type Cue = "open" | "close" | "no-speech" | "error";
 
@@ -58,7 +57,7 @@ export async function playSound(name: string, volume: number, signal?: AbortSign
 
 /** One line in the built-in voice. */
 async function sayBuiltIn(line: string): Promise<void> {
-  await play(await builtInVoice(line)).done;
+  await play({ kind: "voice", text: line }).done;
 }
 
 /** One cue's tone. VOICE_MCP_CHIME=0 turns every tone off. Aborting `signal` stops the sound if it is still playing. */

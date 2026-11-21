@@ -1543,6 +1543,31 @@ test("setup offers the call bubble on a Mac with swiftc, and builds it only with
   }
 });
 
+test("setup mentions the audio worker only with VOICE_MCP_AUDIO=native, and builds it only with install=true", { skip: (process.platform !== "darwin" || Number(os.release().split(".")[0]) < 24) && "the worker needs macOS 15" }, async () => {
+  const sb = sandbox();
+  fakeModel(path.join(cacheDir(sb), "models"));
+  const swiftcRuns = () => sb.readLog().split("\n").filter((l) => /^swiftc .*audio-worker/.test(l)).length;
+  let c = await connect(withSwiftc(sb));
+  try {
+    assert.doesNotMatch(text(await c.client.callTool({ name: "voice_setup", arguments: {} })), /Audio worker|audio worker/, "no new prompt by default");
+  } finally {
+    await c.client.close();
+  }
+  c = await connect(withSwiftc(sb, { VOICE_MCP_AUDIO: "native" }));
+  try {
+    const check = text(await c.client.callTool({ name: "voice_setup", arguments: {} }));
+    assert.match(check, /^• Audio worker: echo-cancelled calls on speakers \(VOICE_MCP_AUDIO=native\); built on this Mac in about 10 s$/m);
+    assert.match(check, /Ask the user whether to build it\. Only if they agree, call voice_setup with install=true\./);
+    assert.equal(swiftcRuns(), 0, "nothing built without consent");
+    const built = text(await c.client.callTool({ name: "voice_setup", arguments: { install: true } }));
+    assert.match(built, /^✔ Audio worker: echo-cancelled calls on the Mac's own speakers, built on this Mac$/m);
+    assert.match(built, /Built the audio worker on this Mac in \d+ s\./);
+    assert.equal(swiftcRuns(), 1);
+  } finally {
+    await c.client.close();
+  }
+});
+
 // --- The live transcript on the call bubble (docs/specs/live-transcript.md) ----------------------------
 
 const bubbleStdin = (sb) => {
