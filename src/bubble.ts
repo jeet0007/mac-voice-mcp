@@ -12,10 +12,9 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isAlive } from "../hooks/voice-files.mjs";
 import { CONFIG, log } from "./config.js";
 import { run, tail, which } from "./proc.js";
-import { voiceModeDir } from "./worklisten.js";
+import { isAlive, voiceModeDir } from "./state/voice-mode.js";
 
 const SOURCE = fileURLToPath(new URL("../native/call-bubble.swift", import.meta.url));
 export const bubbleBin = () => path.join(CONFIG.cacheDir, "bin", "call-bubble");

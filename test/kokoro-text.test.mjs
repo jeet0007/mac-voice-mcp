@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chunkForSpeech, FIRST_CHUNK_CHARS, fixPronunciation, MAX_CHUNK_CHARS, prepareForKokoro } from "../dist/kokoro-text.js";
-import { floatToPcm16, resamplePcm16, wavHeaderFor } from "../dist/pcm.js";
+import { floatToPcm16, resamplePcm16 } from "../dist/pcm.js";
+import { wavHeader as wavHeaderFor } from "../dist/endpointer.js";
 
 test("developer words espeak gets wrong are rewritten", () => {
   assert.equal(fixPronunciation("Edit the JSON and YAML files"), "Edit the jay-son and yammel files");

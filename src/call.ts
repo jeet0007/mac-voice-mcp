@@ -20,12 +20,12 @@ import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } f
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import * as files from "../hooks/voice-files.mjs";
 import { flightEvent } from "./flight.js";
-import { listenContinuously, speak, thinkingTick } from "./audio.js";
+import { listenContinuously, speak } from "./audio.js";
 import { BargeIn, type Interruption } from "./barge-in.js";
 import { bubbleTakesText, bubbleWanted, sendToBubble, startBubble, stopBubble } from "./bubble.js";
 import { CONFIG, debug, envNum, log, PKG } from "./config.js";
+import { thinkingTick } from "./cues.js";
 import { acquireMicLock } from "./lock.js";
 import { ensureModel } from "./model.js";
 import { CancelledError, sleep } from "./proc.js";
@@ -34,22 +34,14 @@ import { prewarmKokoro } from "./kokoro.js";
 import { LiveTranscript } from "./live-transcript.js";
 import { partialsAvailable, prewarm, transcribe, transcribePartial } from "./stt.js";
 import { PERMISSION_NOTICE } from "./texts.js";
-import { addToInbox, inboxDir, setOwnSession, showPhase, takeInbox, voiceModeDir, type InboxEntry } from "./worklisten.js";
+import { addToInbox, callFile, inboxDir, levelsFile, muteFile, permissionFile, readJson, setOwnSession, showPhase, takeInbox, voiceModeDir, type InboxEntry } from "./state/voice-mode.js";
 import { trackSpeaking } from "./voice.js";
-
-/** Shared with the plugin hook and Voice Buddy: who is on a call, and which session it belongs to. */
-export const callFile = () => files.callFile(voiceModeDir());
 
 /** Talking over Claude pauses or resumes the reply: the recorder notes when. */
 const pauseForBargeIn = (paused: boolean): void => {
   flightEvent("bargein", { action: paused ? "pause" : "resume" }, null);
   pauseSpeech(paused);
 };
-
-export const muteFile = () => files.muteFile(voiceModeDir());
-
-const permissionFile = () => files.permissionFile(voiceModeDir());
-const levelsFile = () => files.levelsFile(voiceModeDir());
 
 /** The last speech-to-text failure on a call, kept for debugging (and a future /issue). */
 export const sttFailureFile = () => path.join(CONFIG.cacheDir, "last-stt-failure.json");
@@ -361,7 +353,7 @@ export class Call {
       void this.end(`nobody said anything for ${Math.round(IDLE_MS / 60_000)} minutes`);
       return;
     }
-    const mark = files.readJson(callFile()) as { pid?: unknown; session?: unknown } | null;
+    const mark = readJson(callFile()) as { pid?: unknown; session?: unknown } | null;
     if (mark?.pid !== process.pid) {
       void this.end("the session ended");
       return;

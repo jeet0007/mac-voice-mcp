@@ -46,21 +46,3 @@ export function wavSeconds(wav: Buffer): number {
   return 0;
 }
 
-/** A 44-byte WAV header for 16-bit mono PCM. */
-export function wavHeaderFor(dataBytes: number, sampleRate: number): Buffer {
-  const h = Buffer.alloc(44);
-  h.write("RIFF", 0);
-  h.writeUInt32LE(36 + dataBytes, 4);
-  h.write("WAVE", 8);
-  h.write("fmt ", 12);
-  h.writeUInt32LE(16, 16);
-  h.writeUInt16LE(1, 20); // PCM
-  h.writeUInt16LE(1, 22); // mono
-  h.writeUInt32LE(sampleRate, 24);
-  h.writeUInt32LE(sampleRate * 2, 28);
-  h.writeUInt16LE(2, 32);
-  h.writeUInt16LE(16, 34);
-  h.write("data", 36);
-  h.writeUInt32LE(dataBytes, 40);
-  return h;
-}

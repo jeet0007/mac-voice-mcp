@@ -366,7 +366,7 @@ test("the server and hooks draining the inbox at the same time hand each thing t
   const dir = path.join(env.VOICE_MCP_CACHE_DIR, "voice-mode");
   for (let i = 0; i < 2000; i++) leaveInInbox(env, `said ${i}`);
   const lib = path.join(ROOT, "hooks", "voice-mode-lib.mjs");
-  const server = path.join(ROOT, "dist", "worklisten.js");
+  const server = path.join(ROOT, "dist", "state", "voice-mode.js");
   // Paths go in as arguments (process.argv[1], [2]), so the code is constant.
   const drains = [
     [`import(process.argv[1]).then((m) => process.stdout.write(JSON.stringify(m.takeInterjections(process.argv[2], "s1"))))`, lib, dir],

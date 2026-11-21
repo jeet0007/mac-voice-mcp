@@ -12,9 +12,9 @@
 import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { cacheRoot, readJson, voiceModeDir } from "../hooks/voice-files.mjs";
 import { CONFIG, PKG } from "./config.js";
 import { FRAME_BYTES, wavHeader } from "./endpointer.js";
+import { cacheRoot, readJson, stopFile } from "./state/voice-mode.js";
 
 export type FlightMode = "off" | "on" | "audio";
 
@@ -382,6 +382,6 @@ export function flightFlag(noteIn?: string, opts: { withAudio?: boolean } = {}):
 /** `stop.seen`: the user's typing stopped speech or listening (reads the stop file the plugin writes). */
 export function flightStopSeen(ownStartAt: number): void {
   if (!flightEnabled()) return;
-  const stopAt = (readJson(path.join(voiceModeDir(cacheRoot()), "stop")) as { at?: unknown } | null)?.at;
+  const stopAt = (readJson(stopFile(cacheRoot())) as { at?: unknown } | null)?.at;
   flightEvent("stop.seen", { stopAt: num(stopAt), ownStartAt });
 }

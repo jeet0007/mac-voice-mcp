@@ -287,8 +287,8 @@ export class Endpointer {
   }
 }
 
-/** 44-byte header for 16 kHz mono 16-bit PCM WAV. */
-export function wavHeader(dataBytes: number): Buffer {
+/** 44-byte header for mono 16-bit PCM WAV (16 kHz unless given). */
+export function wavHeader(dataBytes: number, sampleRate = SAMPLE_RATE): Buffer {
   const h = Buffer.alloc(44);
   h.write("RIFF", 0, "ascii");
   h.writeUInt32LE(36 + dataBytes, 4);
@@ -297,8 +297,8 @@ export function wavHeader(dataBytes: number): Buffer {
   h.writeUInt32LE(16, 16);
   h.writeUInt16LE(1, 20); // PCM
   h.writeUInt16LE(1, 22); // mono
-  h.writeUInt32LE(SAMPLE_RATE, 24);
-  h.writeUInt32LE(SAMPLE_RATE * 2, 28);
+  h.writeUInt32LE(sampleRate, 24);
+  h.writeUInt32LE(sampleRate * 2, 28);
   h.writeUInt16LE(2, 32);
   h.writeUInt16LE(16, 34);
   h.write("data", 36, "ascii");
