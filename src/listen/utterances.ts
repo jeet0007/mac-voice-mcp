@@ -5,7 +5,7 @@
  * trailing silence cut (keeping a little padding) so whisper gets just the utterance.
  */
 import { MIC_PERMISSION_HINT, type AudioSession, type Frame } from "../audio/device.js";
-import { CONFIG } from "../config.js";
+import { CONFIG, IS_MAC } from "../config.js";
 import { Endpointer, FRAME_MS, wavHeader, type EndReason, type EndpointerDiagnostics } from "../endpointer.js";
 import { flightAudio, flightEvent } from "../flight.js";
 import { utteranceFrames, type LiveTranscript } from "../live-transcript.js";
@@ -189,7 +189,7 @@ export async function listenForTurn(session: AudioSession, maxSeconds: number, o
   }
   if (!cut.frames.length) {
     ended("error");
-    throw failure ?? new Error(`Recording failed: the microphone delivered no audio. ${MIC_PERMISSION_HINT}`);
+    throw failure ?? new Error(`Recording failed: the microphone delivered no audio.${IS_MAC ? ` ${MIC_PERMISSION_HINT}` : ""}`);
   }
   ended(reason ?? "max-duration");
   return {

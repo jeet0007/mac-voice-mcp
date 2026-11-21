@@ -275,7 +275,7 @@ export class Call {
       await listenContinuously(session, {
         onHeard: (heard) => {
           if (heard.kind === "onset") return this.talking(session, true);
-          if (heard.kind !== "ended") return;
+          if (heard.kind !== "ended") return this.talking(session, false); // a blip or no speech: nobody is talking
           const from = this.bargeIn.utterance();
           this.transcribing = this.transcribing
             .then(() => this.heard(heard.wav, model, signal, from))
