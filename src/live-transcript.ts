@@ -84,7 +84,7 @@ export class LiveTranscript {
         if (i < 0) return;
         this.waiting.splice(i, 1);
         resolve(null);
-      }, startMs);
+      }, startMs).unref();
     });
   }
 

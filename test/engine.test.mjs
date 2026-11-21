@@ -201,6 +201,21 @@ test("native: a reply that starts while the user talks isn't ducked; a say asked
   assert.deepEqual(effects, [[], [start(1)], [], []]);
 });
 
+test("native: a ducked reply that ends under the user hands its interruption to the next say", () => {
+  const over = [say(0, 1), say(100, 2), onset(1000), played(1200, 1)];
+  const duck2 = { type: "speech.duck", say: 2 };
+  const words = call(NATIVE, [...over, ended(2000, 7), transcribed(2400, 7)]);
+  assert.deepEqual(words.effects.slice(3), [
+    [start(2), duck2],
+    [],
+    [{ type: "speech.stop", say: 2 }, deliver(7, { interrupted: { say: 2, playedMs: 0 } })],
+  ]);
+  const filler = call(NATIVE, [...over, ended(2000, 7), transcribed(2400, 7, "filler")]);
+  assert.deepEqual(filler.effects.at(-1), [{ type: "speech.restore", say: 2 }], "a filler brings the next say back up");
+  const checking = call(NATIVE, [...over, tick(1900)]);
+  assert.deepEqual(checking.effects.at(-1), [{ type: "words.check", say: 2 }], "the word check carries on for the next say");
+});
+
 test("native: hanging up over a quieter reply stops it", () => {
   const { effects } = call(NATIVE, [say(0, 1), onset(1000), ended(1500, 7), transcribed(1900, 7, "hang-up")]);
   assert.deepEqual(effects.at(-1), [{ type: "speech.stop", say: 1 }, { type: "teardown", reason: "hang-up" }]);

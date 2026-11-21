@@ -10,6 +10,7 @@ import {
   type EndReason,
   type Event,
   type Heard,
+  type Interruption,
   type Ms,
   type OnCall,
   type Policy,
@@ -48,7 +49,7 @@ export function step(state: State, event: Event): Step {
       return say(state, event.say, event.at);
     case "playback.ended":
       return state.claude.kind === "speaking" && state.claude.say === event.say
-        ? next({ ...state, lastActivityAt: event.at }, state.claude.queue, state.claude.owesReply, event.at)
+        ? next({ ...state, lastActivityAt: event.at }, state.claude.queue, state.claude.owesReply, event.at, state.claude.interruption)
         : [state, []];
     case "inbox.drained":
       return drained(state, event.at);
@@ -73,12 +74,18 @@ export function nextWake(state: State): Ms | null {
 }
 
 /** Claude is free to speak: play the next say, hold it while the user talks on speakers, or go back to thinking. */
-function next(s: OnCall, queue: readonly SayId[], owesReply: boolean, at: Ms): Step {
+function next(s: OnCall, queue: readonly SayId[], owesReply: boolean, at: Ms, over: Interruption | null = null): Step {
   const [say, ...rest] = queue;
   if (say === undefined) return [{ ...s, claude: owesReply ? thinking(s, at) : IDLE }, []];
   // On speakers the mic goes deaf while Claude speaks, which would cut the user's sentence short.
   if (s.policy.interrupt === "none" && s.user === "talking") return [{ ...s, claude: { kind: "held", queue: [say, ...rest], owesReply } }, []];
-  return [{ ...s, claude: { kind: "speaking", say, startedAt: at, pausedMs: 0, interruption: null, queue: rest, owesReply } }, [{ type: "speech.start", say }]];
+  const speaking = { kind: "speaking", say, startedAt: at, pausedMs: 0, interruption: null, queue: rest, owesReply } as const;
+  // A ducked reply ended under the user: the next one starts ducked, and the same transcript decides it.
+  if (s.policy.interrupt === "duck" && over && (s.user === "talking" || over.pending.length)) {
+    const reply: TalkedOver = { kind: "ducked", since: at, check: s.user === "talking" ? at + WORD_CHECK_MS : null };
+    return [{ ...s, claude: { ...speaking, interruption: { ...over, at, reply } } }, [{ type: "speech.start", say }, { type: "speech.duck", say }]];
+  }
+  return [{ ...s, claude: speaking }, [{ type: "speech.start", say }]];
 }
 
 const thinking = (s: OnCall, at: Ms): ClaudeTurn => (s.policy.thinkingTick ? { kind: "thinking", since: at, lastTickAt: at } : IDLE);
