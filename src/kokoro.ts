@@ -24,8 +24,6 @@ export const KOKORO_JS_VERSION = "1.2.1";
 export const KOKORO_RATE = 24_000;
 /** Approximate model download sizes. */
 export const KOKORO_SIZES_MB = { fp32: 326, q8: 92 } as const;
-/** A short pause between sentences, so they don't run into each other. */
-const GAP_MS = 120;
 /** Restart the worker once it holds this much memory (onnxruntime can grow over a long session). */
 const RECYCLE_RSS_MB = 1500;
 /** A model already on disk loads in a few seconds; allow for a slow, busy machine. */
