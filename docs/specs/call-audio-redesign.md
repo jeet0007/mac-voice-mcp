@@ -86,6 +86,18 @@ Process backend: headphones → `interrupt: "pause"` (SIGSTOP), today's behaviou
 6. Native worker + shared protocol module + Node stub + contract test + consent build, opt-in `VOICE_MCP_AUDIO=native`.
 7. Native default on allowlisted macOS speaker routes; rewrite the four mechanism tests against the stub's command log; specs; delete the spike.
 
+## Probe results (2026-11-21, MacBook Air built-in speakers and mic, macOS 27)
+
+All gates passed: onset to duck 96 ms (tone) and 99 ms (voice), gate 200; no false onset in the first 5 s of a reply without calibration; echo residue median -100 dB, 95th percentile -69 dB, max -42.5 dB (no false onset; speech needs -48 dB, uncancelled -48.4 dB); mic permission granted to a worker spawned from Node; other-app ducking -5 dB at `min` versus about -30 dB by default; standby `say -o -f -` to the worker 452 ms to first sound versus 448 ms for today's standby `say`.
+
+What it changes in this design:
+- **Whisper serves one request at a time.** A word check queued behind a final waits for it (about 0.9 s for a long utterance). The engine treats a word check that cannot start within 300 ms as `words: null` and decides on the final, keeping the reply ducked; a second whisper server is not worth its memory yet.
+- **A process recorder and the voice-processing unit never overlap.** A `rec` running across the unit's start or stop delivers audio at the wrong rate. The device fully stops one before starting the other (mid-call fallback, work listener, a second session).
+- **Other-app ducking is set to `min` before the unit starts.** The default is severe and a change takes 1 to 2 s to apply.
+- **Built-in speech keeps a standby.** A pre-started `say -o <file> -f -` per reply replaces today's standby `say`.
+- **Worker protocol:** every command carries `seq` and is acknowledged; `play` carries its sample rate; `pause`, `resume` and `duck-others` are commands; `aec`, `agc` and `duck-others` apply while running. The Endpointer's room floor resets when `aec` toggles.
+- Not yet measured: Bluetooth speakers and AirPlay/HDMI routes (stay on the fallback per H2), a host that has never been granted mic permission.
+
 ## Owner decisions (2026-11-21)
 
 - Headphones stay on the process backend.
