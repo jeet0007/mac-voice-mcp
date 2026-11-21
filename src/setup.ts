@@ -7,7 +7,7 @@
  * the result. A slow `brew install` can never time the client out.
  */
 import { statSync } from "node:fs";
-import { bubbleBuilding, bubbleState, buildBubble, findSwiftc } from "./bubble.js";
+import { buildNative, findSwiftc, nativeBuilding, nativeState } from "./native-build.js";
 import { describeRecorder, findRecorder } from "./audio.js";
 import { CONFIG, IS_MAC, IS_WIN, log } from "./config.js";
 import { installKokoro, isKokoroInstalled, isKokoroModelPresent, KOKORO_SIZES_MB, kokoroVoiceLabel } from "./kokoro.js";
@@ -247,8 +247,8 @@ function kokoroCheck(): Check | null {
 function bubbleCheck(): Check | null {
   if (!IS_MAC) return null;
   const label = "Call bubble";
-  if (bubbleBuilding()) return { label, status: "installing", detail: "building with swiftc" };
-  const state = bubbleState();
+  if (nativeBuilding("call-bubble")) return { label, status: "installing", detail: "building with swiftc" };
+  const state = nativeState("call-bubble");
   if (state === "built") {
     return { label, status: "ok", detail: CONFIG.callBubble ? "a floating call window, built on this Mac" : "built, but VOICE_MCP_CALL_BUBBLE=0 turns it off" };
   }
@@ -274,7 +274,7 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
     if (checks.some((c) => c.model && c.status === "missing") && !running(modelJob)) modelJob = startModelDownload();
   }
   // A stale bubble rebuilds without asking again: the user already opted in.
-  if ((opts.bubble || bubbleState() === "stale") && checks.some((c) => c.bubble) && !running(bubbleJob)) bubbleJob = startJob("Building the call bubble", buildBubble);
+  if ((opts.bubble || nativeState("call-bubble") === "stale") && checks.some((c) => c.bubble) && !running(bubbleJob)) bubbleJob = startJob("Building the call bubble", () => buildNative("call-bubble"));
   if (opts.kokoro && !running(kokoroJob) && !(isKokoroInstalled() && isKokoroModelPresent())) kokoroJob = startKokoroInstall();
 
   // Wait (bounded) for anything in flight, with a heartbeat.
