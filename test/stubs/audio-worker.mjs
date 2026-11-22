@@ -28,7 +28,6 @@ if (STUB_WORKER === "fail-start") {
   emit({ ev: "error", stage: "start", code: -10875, message: "starting at 48000 Hz" });
   process.exit(1);
 }
-emit({ ev: "ready", v: PROTOCOL_VERSION, rate: 48000, aec });
 
 /** id → { id, stream, rate, ms (audio received), played, lastPos, paused, ended, stopping } */
 const sounds = new Map();
@@ -47,6 +46,7 @@ function close() {
   process.exit(0);
 }
 process.on("SIGTERM", close);
+emit({ ev: "ready", v: PROTOCOL_VERSION, rate: 48000, aec }); // only once SIGTERM closes cleanly: a test stops it as soon as it is ready
 if (STUB_WORKER === "dies") setTimeout(() => process.exit(1), 1000);
 if (STUB_WORKER === "route") {
   setTimeout(() => {
