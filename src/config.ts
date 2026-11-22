@@ -11,6 +11,8 @@ export const PKG = JSON.parse(readFileSync(new URL("../package.json", import.met
 
 export const IS_MAC = process.platform === "darwin";
 export const IS_WIN = process.platform === "win32";
+/** Darwin 24 is macOS 15, the oldest the native audio worker runs on (Swift's Synchronization atomics). */
+export const IS_MACOS_15 = IS_MAC && Number(os.release().split(".")[0]) >= 24;
 
 /** listen_seconds is an upper bound — listening normally ends when the user stops talking. */
 export const DEFAULT_LISTEN_SECONDS = 30;
@@ -118,6 +120,11 @@ export const CONFIG = {
   callDuplex: (["full", "half"].includes(process.env.VOICE_MCP_CALL_DUPLEX?.trim().toLowerCase() ?? "")
     ? process.env.VOICE_MCP_CALL_DUPLEX!.trim().toLowerCase()
     : "auto") as "auto" | "full" | "half",
+  /**
+   * Opt-in: "native" plays and records a call through the audio worker (echo-cancelled, so the user can talk
+   * over Claude on speakers) once setup has built it, on macOS 15+ and the Mac's own or wired speakers.
+   */
+  audio: (process.env.VOICE_MCP_AUDIO?.trim().toLowerCase() === "native" ? "native" : "process") as "native" | "process",
   /** Opt-in: a soft tick every 1.5 s after the user's words reach Claude, until it speaks (at most 10 s), so a call never goes silent (macOS). */
   callThinkingSound: envBool("VOICE_MCP_CALL_THINKING_SOUND", false),
   /** Show the floating call bubble during a call, once setup has built it (macOS). Off: VOICE_MCP_CALL_BUBBLE=0. */

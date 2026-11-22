@@ -31,18 +31,24 @@ export function resamplePcm16(pcm: Buffer, fromRate: number, toRate: number): Bu
   return out;
 }
 
-/** Seconds of audio in a 16-bit mono WAV file's data chunk (`say` may add chunks before it). 0 if there is none. */
-export function wavSeconds(wav: Buffer): number {
-  if (wav.length < 12 || wav.toString("ascii", 0, 4) !== "RIFF") return 0;
+/** A 16-bit mono WAV file's data chunk and rate (`say` may add chunks before it), or null if it has none. */
+export function wavData(wav: Buffer): { pcm: Buffer; rate: number } | null {
+  if (wav.length < 12 || wav.toString("ascii", 0, 4) !== "RIFF") return null;
   let rate = 16_000;
   let off = 12;
   while (off + 8 <= wav.length) {
     const id = wav.toString("ascii", off, off + 4);
     const size = wav.readUInt32LE(off + 4);
     if (id === "fmt " && off + 16 <= wav.length) rate = wav.readUInt32LE(off + 12) || rate;
-    if (id === "data") return Math.min(size, wav.length - off - 8) / 2 / rate;
+    if (id === "data") return { pcm: wav.subarray(off + 8, Math.min(off + 8 + size, wav.length)), rate };
     off += 8 + size + (size % 2);
   }
-  return 0;
+  return null;
+}
+
+/** Seconds of audio in a 16-bit mono WAV file. 0 if there is none. */
+export function wavSeconds(wav: Buffer): number {
+  const data = wavData(wav);
+  return data ? data.pcm.length / 2 / data.rate : 0;
 }
 

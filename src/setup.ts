@@ -9,7 +9,7 @@
 import { statSync } from "node:fs";
 import { buildNative, findSwiftc, nativeBuilding, nativeState } from "./native-build.js";
 import { describeRecorder, findRecorder } from "./audio/device.js";
-import { CONFIG, IS_MAC, IS_WIN, log } from "./config.js";
+import { CONFIG, IS_MAC, IS_MACOS_15, IS_WIN, log } from "./config.js";
 import { installKokoro, isKokoroInstalled, isKokoroModelPresent, KOKORO_SIZES_MB, kokoroVoiceLabel } from "./kokoro.js";
 import { ensureModel, isModelDownloading, locateModel, modelSource, MODEL_SIZES_MB } from "./model.js";
 import { isExecutable, resetWhichCache, run, sleep, tail, which } from "./proc.js";
@@ -30,6 +30,8 @@ interface Check {
   kokoro?: boolean;
   /** Fixed by building the call bubble (bubble=true). */
   bubble?: boolean;
+  /** Fixed by building the audio worker (install=true). */
+  worker?: boolean;
 }
 
 export interface SetupOptions {
@@ -78,6 +80,7 @@ let brewJob: Job | null = null;
 let modelJob: Job | null = null;
 let kokoroJob: Job | null = null;
 let bubbleJob: Job | null = null;
+let workerJob: Job | null = null;
 /** The Kokoro install's latest progress line. */
 let kokoroProgress = "";
 /** Results of finished jobs not yet shown to the user. */
@@ -155,6 +158,8 @@ async function checkRequirements(): Promise<Check[]> {
   if (kokoro) checks.push(kokoro);
   const bubble = bubbleCheck();
   if (bubble) checks.push(bubble);
+  const worker = workerCheck();
+  if (worker) checks.push(worker);
 
   const rec = findRecorder();
   if (!rec) {
@@ -258,6 +263,18 @@ function bubbleCheck(): Check | null {
   return { label, status: "optional", detail: state === "stale" ? "a new version needs building" : "a floating call window; built on this Mac in about 10 s", bubble: true };
 }
 
+/** The audio worker, only once VOICE_MCP_AUDIO=native asks for it: built on this Mac with swiftc, never downloaded. */
+function workerCheck(): Check | null {
+  if (!IS_MAC || CONFIG.audio !== "native") return null;
+  const label = "Audio worker";
+  if (nativeBuilding("audio-worker")) return { label, status: "installing", detail: "building with swiftc" };
+  if (!IS_MACOS_15) return { label, status: "optional", detail: "VOICE_MCP_AUDIO=native needs macOS 15 or later; calls use the recorder" };
+  const state = nativeState("audio-worker");
+  if (state === "built") return { label, status: "ok", detail: "echo-cancelled calls on the Mac's own speakers, built on this Mac" };
+  if (!findSwiftc()) return { label, status: "optional", detail: "VOICE_MCP_AUDIO=native builds it on this Mac; it needs Xcode's Command Line Tools (`xcode-select --install`)" };
+  return { label, status: "optional", detail: state === "stale" ? "a new version needs building" : "echo-cancelled calls on speakers (VOICE_MCP_AUDIO=native); built on this Mac in about 10 s", worker: true };
+}
+
 // --- The flow ------------------------------------------------------------------------------
 
 export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcome> {
@@ -275,10 +292,11 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
   }
   // A stale bubble rebuilds without asking again: the user already opted in.
   if ((opts.bubble || nativeState("call-bubble") === "stale") && checks.some((c) => c.bubble) && !running(bubbleJob)) bubbleJob = startJob("Building the call bubble", () => buildNative("call-bubble"));
+  if ((install || nativeState("audio-worker") === "stale") && checks.some((c) => c.worker) && !running(workerJob)) workerJob = startJob("Building the audio worker", () => buildNative("audio-worker"));
   if (opts.kokoro && !running(kokoroJob) && !(isKokoroInstalled() && isKokoroModelPresent())) kokoroJob = startKokoroInstall();
 
   // Wait (bounded) for anything in flight, with a heartbeat.
-  const jobs = [brewJob, modelJob, kokoroJob, bubbleJob].filter(running);
+  const jobs = [brewJob, modelJob, kokoroJob, bubbleJob, workerJob].filter(running);
   if (jobs.length) {
     const deadline = Date.now() + INSTALL_WAIT_MS;
     while (jobs.some((j) => !j.done) && Date.now() < deadline) {
@@ -293,7 +311,7 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
     checks = await checkRequirements();
   }
 
-  const installing = running(brewJob) || running(modelJob) || running(kokoroJob) || running(bubbleJob);
+  const installing = running(brewJob) || running(modelJob) || running(kokoroJob) || running(bubbleJob) || running(workerJob);
   const ready = checks.every((c) => c.status === "ok" || c.status === "optional");
   const icon: Record<CheckStatus, string> = { ok: "✔", missing: "✘", optional: "•", installing: "…" };
   const done = finishedMessages.splice(0);
@@ -334,6 +352,12 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
       lines.push(
         "Optional: ask the user whether to build the call bubble, a small floating window during calls with the call's time, mute and hang up " +
           "(built on this Mac from source in about 10 s). Only if they agree, call voice_setup with bubble=true.",
+      );
+    }
+    if (checks.some((c) => c.worker && c.status === "optional") && !install) {
+      lines.push(
+        "Optional: VOICE_MCP_AUDIO=native asks for the audio worker, so the user can talk over Claude on speakers during a call " +
+          "(built on this Mac from source in about 10 s). Ask the user whether to build it. Only if they agree, call voice_setup with install=true.",
       );
     }
     if (checks.some((c) => c.label === "Voice" && c.status === "optional")) {

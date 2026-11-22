@@ -5,10 +5,13 @@
  * (see process.ts and mic.ts).
  */
 import { existsSync } from "node:fs";
+import { CONFIG, IS_MACOS_15, log } from "../config.js";
 import { flightEvent } from "../flight.js";
+import { nativeState } from "../native-build.js";
 import { SetupError } from "../proc.js";
 import { muteFile } from "../state/voice-mode.js";
-import { claim } from "./mic.js";
+import { claim, MicBusyError } from "./mic.js";
+import * as native from "./native.js";
 import * as backend from "./process.js";
 
 export { exclusive, lockIfFree, MicBusyError } from "./mic.js";
@@ -37,8 +40,8 @@ export type Purpose = "turn" | "call" | "worklisten" | "doctor";
 
 /**
  * What a reply can do when the user talks over it: "pause" (headphones: the mic hears the user, not
- * the reply), "duck" (echo cancelled, not on this backend), or "none": its sound reaches the mic, so
- * frames are `echo` while it plays.
+ * the reply), "duck" (the native backend: its sound is cancelled from the mic), or "none": its sound
+ * reaches the mic, so frames are `echo` while it plays.
  */
 export type Interrupt = "duck" | "pause" | "none";
 
@@ -70,19 +73,52 @@ const ECHO_TAIL_MS = 300;
 /** How often a call checks whether the user muted it. */
 const MUTE_POLL_MS = 250;
 
+/** A worker failed in this process: calls stay on the process backend until the server restarts. */
+let nativeBroken = false;
+/** The native session's worker, which plays every sound while it runs. */
+let liveWorker: native.Worker | null = null;
+/** A worker is starting: process recorders wait it out too, or they would span the unit's start. */
+let workerStarting = false;
+/** Process recorders still running, until they exit. */
+const recorders = new Set<Promise<void>>();
+
 /**
- * The one routing rule. Only a call plays replies while its mic is open: on headphones a reply can
- * pause for the user, on speakers its sound reaches the mic.
+ * The one routing rule. Only a call plays replies while its mic is open. "duck" is the native backend:
+ * with VOICE_MCP_AUDIO=native on macOS 15+, once setup built the worker, on the Mac's own or wired
+ * speakers. Otherwise, on headphones a reply can pause for the user, and on speakers its sound reaches the mic.
  */
 async function route(purpose: Purpose): Promise<Interrupt> {
   if (purpose !== "call") return "none";
-  return (await backend.detectDuplex()) === "full" ? "pause" : "none";
+  // Headphones stay on the process backend, so does a VOICE_MCP_CALL_DUPLEX that says what it wants.
+  const useNative = CONFIG.audio === "native" && IS_MACOS_15 && CONFIG.callDuplex === "auto" && !nativeBroken && nativeState("audio-worker") === "built";
+  const output = useNative ? await backend.outputRoute() : undefined;
+  if (output === "speakers") return "duck";
+  return (await backend.detectDuplex(output)) === "full" ? "pause" : "none";
+}
+
+/** The audio worker, once every process recorder has exited; null, with a flight event, if it can't start. */
+async function startWorker(): Promise<native.Worker | null> {
+  workerStarting = true;
+  await Promise.all(recorders); // a recorder running across the unit's start records at the wrong rate
+  const t = Date.now();
+  try {
+    return await native.start();
+  } catch (e) {
+    nativeBroken = true; // a mic prompt left unanswered would otherwise stall every call by the start timeout
+    flightEvent("audio.fallback", { ms: Date.now() - t }, null);
+    log(`The audio worker couldn't start, so the call uses the recorder: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  } finally {
+    workerStarting = false;
+  }
 }
 
 /** Open the mic for `purpose`: waits for it, or takes it from the work listener. */
 export async function openAudio(opts: OpenOptions): Promise<AudioSession> {
-  const interrupt = await route(opts.purpose); // before taking the mic, so a cancel meanwhile still ends the wait
+  const routed = await route(opts.purpose); // before taking the mic, so a cancel meanwhile still ends the wait
   const mic = await claim(opts.purpose, opts);
+  const worker = routed === "duck" ? await startWorker() : null;
+  const interrupt: Interrupt = routed === "duck" && !worker ? "none" : routed; // native runs only on speakers
   const ctl = new AbortController();
   let recording: backend.Recording | null = null;
   let muted = false;
@@ -94,7 +130,8 @@ export async function openAudio(opts: OpenOptions): Promise<AudioSession> {
           muted = now;
         }, MUTE_POLL_MS)
       : undefined;
-  const echo = opts.purpose === "call" ? () => muted || (interrupt === "none" && replyAudible()) : () => false;
+  const echo =
+    opts.purpose === "call" ? () => muted || (worker ? worker.converging() : interrupt === "none" && replyAudible()) : () => false;
 
   let markEnded!: () => void;
   const ended = new Promise<void>((r) => (markEnded = r));
@@ -103,12 +140,26 @@ export async function openAudio(opts: OpenOptions): Promise<AudioSession> {
     (closing ??= (async () => {
       ctl.abort();
       clearInterval(mute);
+      if (liveWorker === worker) liveWorker = null;
       recording?.stop();
       await recording?.exited;
+      await worker?.close();
       mic.release();
       markEnded();
     })());
   mic.preempted.addEventListener("abort", () => void close(), { once: true });
+  if (worker) {
+    liveWorker = worker;
+    // A device change, a stalled mic or a crash ends the session; the caller opens a new one, on the process backend.
+    worker.lost.addEventListener("abort", () => {
+      const why = worker.lost.reason as native.WorkerLost;
+      if (!why.routeChanged) nativeBroken = true;
+      flightEvent("audio.lost", { routeChanged: why.routeChanged }, null);
+      log(`The call's audio worker stopped: ${why.message}`);
+      ctl.abort(why);
+      void close();
+    });
+  }
 
   return {
     interrupt,
@@ -116,9 +167,16 @@ export async function openAudio(opts: OpenOptions): Promise<AudioSession> {
     ended,
     close,
     frames() {
-      const recorder = backend.findRecorder();
-      if (!recorder) throw new SetupError(backend.RECORDER_MISSING);
-      const inner = ctl.signal.aborted ? null : (recording = backend.record(recorder)).frames;
+      const recorder = worker ? null : backend.findRecorder();
+      if (!worker && !recorder) throw new SetupError(backend.RECORDER_MISSING);
+      if (!worker && (liveWorker || workerStarting)) throw new MicBusyError("A call is using the microphone.");
+      if (recorder && !ctl.signal.aborted) {
+        recording = backend.record(recorder);
+        const exited = recording.exited;
+        recorders.add(exited);
+        void exited.then(() => recorders.delete(exited));
+      }
+      const inner = ctl.signal.aborted ? null : worker ? worker.frames : recording!.frames;
       const it: AsyncIterableIterator<Frame> = {
         [Symbol.asyncIterator]: () => it,
         async next() {
@@ -146,13 +204,11 @@ export type Sound =
   /** Speech as PCM, one buffer per sentence, so the first sentence plays while the rest renders. */
   | { kind: "speech"; chunks: AsyncIterable<Buffer> }
   /**
-   * The built-in voice speaking on its own (macOS `say`, espeak-ng, Windows SAPI). Not PCM: this
-   * backend lets `say` play directly, so a voice started ahead of time keeps its first-sound latency.
-   * `input` goes on stdin; without it the text is already in `args`.
-   * shortcut: a process launcher in the port, which the native backend can't honour; replace with
-   * `{ kind: "voice"; text }` (the backend owning command and standby) before the native backend plays speech.
+   * The built-in voice (macOS `say`, espeak-ng, Windows SAPI), each backend with one started ahead of
+   * time: the process backend lets it play directly, which keeps its first sound quick; the native
+   * backend has `say -o` render it to PCM.
    */
-  | { kind: "voice"; bin: string; args: string[]; input?: string; standby: boolean }
+  | { kind: "voice"; text: string }
   /** A short sound file (a cue). */
   | { kind: "cue"; file: string; volume: number };
 
@@ -164,11 +220,11 @@ export interface Playback {
    * died or failed (or a speech source threw: the player is stopped at once).
    */
   readonly done: Promise<PlayEnd>;
-  /** 1 = full volume. This backend can't ramp gain, so below 1 it pauses and at 1 resumes (not on Windows). Idempotent. */
+  /** 1 = full volume. The native backend ramps to it over 10 ms; the process backend pauses below 1 and resumes at 1 (not on Windows). Idempotent. */
   duck(gain: number): void;
   /** Stop now, also while paused. Idempotent. */
   stop(): void;
-  /** Milliseconds played so far (wall clock minus time paused). */
+  /** Milliseconds played so far: wall clock minus time paused, or what the native worker reports. */
   playedMs(): number;
 }
 
@@ -179,7 +235,7 @@ const replyAudible = () => replies > 0 || Date.now() - replyStoppedAt < ECHO_TAI
 
 /** Play a sound. Returns at once. */
 export function play(sound: Sound): Playback {
-  const playback = backend.play(sound);
+  const playback = (liveWorker ?? backend).play(sound);
   // A cue is too short to count as speech (the thinking tick plays while the call listens).
   if (sound.kind !== "cue") {
     replies++;

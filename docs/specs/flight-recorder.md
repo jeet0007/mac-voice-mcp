@@ -61,6 +61,8 @@ Every line: `t` (ms since epoch), `ev`, `pid`, and `turn` (a per-process counter
 | `call.effect` | one thing the engine decided to do about the `call.event` before it (`Effect`) | `type` (speech.start, speech.pause, speech.resume, speech.stop, speech.drop, deliver, cue, teardown), `say`, `utterance`, `interrupted.say`, `interrupted.playedMs`, `missed`, `sound`, `reason` |
 | `listen.cut` | the call mic stopped hearing the user (Claude speaking on speakers, or mute) before they had talked for 250 ms, dropping it | `speechMs` |
 | `stop.seen` | a stop request ends speech or listening | `stopAt`, `ownStartAt` |
+| `audio.fallback` | the native audio worker couldn't start, so the call uses the recorder | `ms` |
+| `audio.lost` | the native audio worker ended mid-call (a device changed, the mic stalled, or it died) | `routeChanged` |
 | `flag` | user flagged a moment | `id`, `hasNote` |
 
 String fields are an allowlist per event (reasons, engine, mode, why, the flag id); any other string is dropped, so even a one-word transcript can't land in a field. The allowlist of `call.event` and `call.effect` is built from the engine's own type tables (`EVENT_STRINGS`, `EFFECT_STRINGS`), which don't compile unless they list every event, effect and string field. Every decision of a call is in the log: talking over Claude is `speech.pause`, then `speech.resume` or `speech.stop`; a reply that waited for the user on speakers is a `say.requested` whose `speech.start` comes with a later event. No event carries transcript text, spoken text, file paths of audio, or tool arguments.

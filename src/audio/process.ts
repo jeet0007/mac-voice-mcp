@@ -11,6 +11,7 @@ import path from "node:path";
 import { CONFIG, debug, IS_MAC, IS_WIN, log } from "../config.js";
 import { FRAME_BYTES, wavHeader } from "../endpointer.js";
 import { activeChildren, CancelledError, isExecutable, run, SetupError, startWaiting, tail, which, type Waiting } from "../proc.js";
+import { builtInCommand } from "../speech/synthesize.js";
 import { SPEECH_RATE, type Playback, type PlayEnd, type Sound } from "./device.js";
 
 // ---------------------------------------------------------------------------
@@ -166,7 +167,7 @@ export function play(sound: Sound): Playback {
       return playback(() => Promise.reject(new SetupError("The Kokoro voice needs SoX's `play` to play audio (`brew install sox`).")));
     }
     case "voice":
-      return playback((t) => voice(sound, t));
+      return playback((t) => voice(sound.text, t));
     case "cue":
       return playback((t) => cue(sound.file, sound.volume, t));
   }
@@ -329,11 +330,12 @@ function prepareStandby(bin: string, args: string[]): void {
   standbyTimer.unref();
 }
 
-async function voice(sound: Extract<Sound, { kind: "voice" }>, t: Track): Promise<void> {
+async function voice(text: string, t: Track): Promise<void> {
+  const { bin, args, standby } = await builtInCommand();
   const opts = { signal: t.signal, timeoutMs: 180_000, onProcess: (child: ChildProcess) => t.add(child) };
-  const ready = sound.input !== undefined ? takeStandby([sound.bin, ...sound.args].join("\0")) : null;
-  const result = ready ? await ready.send(sound.input!, opts) : await run(sound.bin, sound.args, { ...opts, input: sound.input });
-  if (sound.standby) prepareStandby(sound.bin, sound.args); // for the next reply
+  const ready = takeStandby([bin, ...args].join("\0"));
+  const result = ready ? await ready.send(text, opts) : await run(bin, args, { ...opts, input: text });
+  if (standby) prepareStandby(bin, args); // for the next reply
   if (result.code !== 0) throw new Error(`Text-to-speech failed (exit ${result.code}): ${tail(result.stderr) || "no output"}`);
 }
 
@@ -342,34 +344,59 @@ async function cue(file: string, volume: number, t: Track): Promise<void> {
   if (r.code !== 0) throw new Error(`afplay failed (exit ${r.code}): ${tail(r.stderr) || "no output"}`);
 }
 
+type ProfileItem = { _name?: string; coreaudio_default_audio_output_device?: string; coreaudio_device_transport?: string; coreaudio_output_source?: string };
+/** The default output in `system_profiler SPAudioDataType -json`. */
+function defaultOutput(json: unknown): ProfileItem | undefined {
+  const groups = (json as { SPAudioDataType?: { _items?: ProfileItem[] }[] } | null)?.SPAudioDataType ?? [];
+  return groups.flatMap((g) => g._items ?? []).find((i) => i.coreaudio_default_audio_output_device === "spaudio_yes");
+}
+
 /**
- * Does `system_profiler SPAudioDataType -json` say the default output is headphones? The built-in
- * jack's headphones, or Bluetooth unless its name says speaker (AirPods yes, a Bluetooth speaker no).
+ * Does the profile say the default output is headphones? The built-in jack's headphones, or
+ * Bluetooth unless its name says speaker (AirPods yes, a Bluetooth speaker no).
  */
 export function headphonesFromProfile(json: unknown): boolean {
-  type Item = { _name?: string; coreaudio_default_audio_output_device?: string; coreaudio_device_transport?: string; coreaudio_output_source?: string };
-  const groups = (json as { SPAudioDataType?: { _items?: Item[] }[] } | null)?.SPAudioDataType ?? [];
-  const out = groups.flatMap((g) => g._items ?? []).find((i) => i.coreaudio_default_audio_output_device === "spaudio_yes");
+  const out = defaultOutput(json);
   if (!out) return false;
   if (/headphone/i.test(out.coreaudio_output_source ?? "")) return true;
   return out.coreaudio_device_transport === "coreaudio_device_type_bluetooth" && !/speaker/i.test(out._name ?? "");
 }
 
 /**
- * Can a call keep the mic open while Claude speaks? VOICE_MCP_CALL_DUPLEX, or for auto: full on
- * headphones (no echo to hear back), half otherwise. Never full where speech can't be paused (Windows).
+ * Speakers whose echo the native backend may cancel (H2's allowlist): the Mac's own, or wired ones
+ * (the built-in line out, or USB that says speaker). AirPlay, HDMI and Bluetooth speakers aren't measured yet.
  */
-export async function detectDuplex(): Promise<"full" | "half"> {
-  if (IS_WIN) return "half";
-  if (CONFIG.callDuplex !== "auto") return CONFIG.callDuplex;
-  if (!IS_MAC) return "half";
+export function speakersFromProfile(json: unknown): boolean {
+  const out = defaultOutput(json);
+  if (!out || headphonesFromProfile(json)) return false;
+  const transport = out.coreaudio_device_transport;
+  return transport === "coreaudio_device_type_builtin" || (transport === "coreaudio_device_type_usb" && /speaker/i.test(out._name ?? ""));
+}
+
+export type Output = "headphones" | "speakers" | "other";
+
+/** Where the Mac's sound goes now ("speakers": allowlisted ones), or null when that can't be told. */
+export async function outputRoute(): Promise<Output | null> {
+  if (!IS_MAC) return null;
   try {
     const bin = which("system_profiler") ?? "/usr/sbin/system_profiler";
     const r = await run(bin, ["SPAudioDataType", "-json"], { timeoutMs: 5000 });
     if (r.code !== 0) throw new Error(`exit ${r.code}: ${tail(r.stderr) || "no output"}`);
-    return headphonesFromProfile(JSON.parse(r.stdout)) ? "full" : "half";
+    const profile: unknown = JSON.parse(r.stdout);
+    return headphonesFromProfile(profile) ? "headphones" : speakersFromProfile(profile) ? "speakers" : "other";
   } catch (e) {
     log(`Couldn't tell whether headphones are on, so the call mutes the mic while Claude speaks: ${e instanceof Error ? e.message : String(e)}`);
-    return "half";
+    return null;
   }
+}
+
+/**
+ * Can a call keep the mic open while Claude speaks? VOICE_MCP_CALL_DUPLEX, or for auto: full on
+ * headphones (no echo to hear back), half otherwise. Never full where speech can't be paused (Windows).
+ * `output`: the route, when the caller already has it.
+ */
+export async function detectDuplex(output?: Output | null): Promise<"full" | "half"> {
+  if (IS_WIN) return "half";
+  if (CONFIG.callDuplex !== "auto") return CONFIG.callDuplex;
+  return (output === undefined ? await outputRoute() : output) === "headphones" ? "full" : "half";
 }
