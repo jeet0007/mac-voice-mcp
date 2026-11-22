@@ -51,6 +51,8 @@ function sandbox({ installed = true } = {}) {
       VOICE_MCP_WHISPER_MODEL: "tiny.en",
       VOICE_MCP_RECORDER: "sox",
       VOICE_MCP_CHIME: "0",
+      // No test downloads from the internet: a refused port stands in for the model mirror.
+      VOICE_MCP_MODEL_BASE_URL: "http://127.0.0.1:9",
       // Don't add Homebrew's folders to PATH: on a real Mac they contain the real tools,
       // and these tests must only ever see the stubs.
       VOICE_MCP_EXTRA_PATH: "",
@@ -168,6 +170,7 @@ test("talking past listen_seconds is flagged as possibly cut off", async () => {
 test("setup: check, install only what's missing (with consent), reuse the model, never redo", async () => {
   const sb = sandbox({ installed: false });
   const existing = fakeModel(path.join(sb.dir, "elsewhere")); // the model already exists somewhere else
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"), "ggml-silero-v5.1.2.bin"); // so is the silence filter
   const { client } = await connect(sb.env({ VOICE_MCP_MODEL_SEARCH_PATHS: path.dirname(existing) }));
   try {
     // Before setup, speaking points Claude at voice_setup.
@@ -592,7 +595,7 @@ test("setup: Kokoro is offered only when asked for, and an installed one is repo
 
 test("whisper gets the developer hint by default in English; none turns it off; your own replaces it", async () => {
   const cases = [
-    [{}, /--prompt A software developer talks to a coding assistant/],
+    [{}, /--prompt npm, JSON, TypeScript, git, main, rebase, pull request, CI, macOS\.$/],
     [{ VOICE_MCP_WHISPER_PROMPT: "none" }, null],
     [{ VOICE_MCP_WHISPER_PROMPT: "Priya, Postgres" }, /--prompt Priya, Postgres/],
     [{ VOICE_MCP_WHISPER_MODEL: "tiny", VOICE_MCP_LANGUAGE: "th" }, null], // English hint only for English
@@ -610,6 +613,56 @@ test("whisper gets the developer hint by default in English; none turns it off; 
     } finally {
       await client.close();
     }
+  }
+});
+
+test("whisper skips silence with the Silero VAD only once its model is in the cache, warm server and CLI alike", async () => {
+  for (const server of ["1", "0"]) {
+    for (const withVad of [false, true]) {
+      const sb = sandbox();
+      const models = path.join(sb.home, ".cache", "mac-voice-mcp", "models");
+      fakeModel(models);
+      const vad = withVad ? fakeModel(models, "ggml-silero-v5.1.2.bin") : null;
+      const { client } = await connect(sb.env({ VOICE_MCP_WHISPER_SERVER: server }));
+      try {
+        await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Ready?" } });
+        const start = sb.readLog().split("\n").find((l) => l.startsWith(server === "1" ? "whisper-server start" : "whisper-cli "));
+        assert.ok(start, `server=${server}`);
+        if (vad) assert.ok(start.includes(` --vad -vm ${vad} -vp 400 `), start);
+        else assert.doesNotMatch(start, /--vad/);
+      } finally {
+        await client.close();
+      }
+    }
+  }
+});
+
+test("setup downloads the silence filter only with install=true, and keeps no file that fails its checksum", async () => {
+  const { createServer } = await import("node:http");
+  const requests = [];
+  const mirror = createServer((req, res) => {
+    requests.push(req.url);
+    res.end("not the Silero model");
+  });
+  await new Promise((r) => mirror.listen(0, "127.0.0.1", r));
+  const sb = sandbox();
+  const models = path.join(sb.home, ".cache", "mac-voice-mcp", "models");
+  fakeModel(models);
+  const { client } = await connect(sb.env({ VOICE_MCP_MODEL_BASE_URL: `http://127.0.0.1:${mirror.address().port}` }));
+  try {
+    const check = text(await client.callTool({ name: "voice_setup", arguments: {} }));
+    assert.match(check, /— READY/);
+    assert.match(check, /^• Silence filter: Silero VAD stops whisper inventing words in silence/m);
+    assert.match(check, /ask the user whether to download the silence filter \(under 1 MB\).*call voice_setup with install=true\./);
+    assert.deepEqual(requests, [], "nothing downloaded without consent");
+
+    const installed = text(await client.callTool({ name: "voice_setup", arguments: { install: true } }));
+    assert.deepEqual(requests, ["/ggml-silero-v5.1.2.bin"]);
+    assert.match(installed, /Downloading the silence filter failed: .* is not the expected file \(20 bytes, sha256 /);
+    assert.deepEqual(readdirSync(models), ["ggml-tiny.en.bin"], "no model and no partial file left behind");
+  } finally {
+    await client.close();
+    mirror.close();
   }
 });
 

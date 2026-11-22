@@ -5,6 +5,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- **whisper no longer invents words in silence.** In a quiet room it sometimes heard "Thank you." or repeated its hint. Setup now offers a silence filter (Silero VAD, under 1 MB, downloaded only when you agree), and whisper then skips the stretches without speech. See [The silence filter](docs/configuration.md#the-silence-filter).
+
+### Changed
+- **The default whisper hint is a word list.** `npm, JSON, TypeScript, git, main, rebase, pull request, CI, macOS.` replaces the sentence about a developer: on 60 jargon clips it got 11.3% of words wrong instead of 13.2%.
+
 ## [0.10.0] - 2026-11-14
 
 ### Added

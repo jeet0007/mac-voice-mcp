@@ -36,15 +36,14 @@ const modelName = (process.env.VOICE_MCP_WHISPER_MODEL ?? "base.en").trim();
 const language = process.env.VOICE_MCP_LANGUAGE?.trim() || (modelName.endsWith(".en") ? "en" : "auto");
 
 /**
- * The default hint for English: telling whisper what the conversation is about makes it hear
- * developer words better ("rebase", "backend", "passed"). Measured: 60 clips, 3 voices, word errors
- * 3.4% → 2.3% on everyday sentences and 3.8% → 3.1% on jargon, with no words invented in silence.
- * A plain word list did worse than no hint, so it's a sentence.
+ * The default hint for English: a list of the developer words whisper mishears ("rebase", "JSON").
+ * Measured with the silence filter on, 60 jargon clips: word errors 14.5% with no hint, 13.2% with
+ * a sentence, 11.3% with this list. The sentence also turned foreign background talk into
+ * "The code is used to make the code work.", where the list gave two short words.
  */
-export const DEVELOPER_PROMPT =
-  "A software developer talks to a coding assistant about the repo: the build, tests, commits, branches, pull requests, npm, JSON, TypeScript, the API and CI.";
+export const DEVELOPER_PROMPT = "npm, JSON, TypeScript, git, main, rebase, pull request, CI, macOS.";
 
-/** VOICE_MCP_WHISPER_PROMPT: unset = the developer hint (English only), "none" = no hint, anything else = that text. */
+/** VOICE_MCP_WHISPER_PROMPT: unset = the developer word list (English only), "none" = no hint, anything else = that text. */
 function whisperPrompt(): string | undefined {
   const raw = process.env.VOICE_MCP_WHISPER_PROMPT?.trim();
   if (raw && ["none", "off", "0", "false"].includes(raw.toLowerCase())) return undefined;
@@ -158,7 +157,7 @@ export const CONFIG = {
   serverIdleMinutes: Math.max(1, envNum("VOICE_MCP_SERVER_IDLE_MINUTES", 15)),
   /** Spoken language code ("en", "th", "de", ...) or "auto". Defaults to "en" for *.en models, else "auto". */
   language,
-  /** Initial prompt that biases vocabulary: the developer hint by default (English), or your own (names, jargon). */
+  /** Initial prompt that biases vocabulary: the developer word list by default (English), or your own (names, jargon). */
   prompt: whisperPrompt(),
   threads: Math.max(1, Math.floor(envNum("VOICE_MCP_THREADS", Math.min(8, os.cpus().length || 4)))),
 

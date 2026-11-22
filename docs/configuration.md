@@ -42,12 +42,13 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 |---|---|---|
 | `VOICE_MCP_WHISPER_MODEL` | `base.en` | Which model to use (see the table below). |
 | `VOICE_MCP_LANGUAGE` | `en` for `*.en` models, otherwise `auto` | `en`, `th`, `ja`, `de`, … |
-| `VOICE_MCP_WHISPER_PROMPT` | a developer hint (English) | Tells whisper what the conversation is about, so it hears those words better. By default, in English: a short sentence about a developer talking to a coding assistant (builds, commits, pull requests, npm, JSON…). Write your own as a sentence, e.g. `A call with Priya about the Postgres and Kubernetes migration.`, or set `none` for no hint. A plain word list works worse than a sentence. |
+| `VOICE_MCP_WHISPER_PROMPT` | a developer word list (English) | Tells whisper which words to expect, so it hears them better. By default, in English: `npm, JSON, TypeScript, git, main, rebase, pull request, CI, macOS.` Write your own list of names and terms, e.g. `Priya, Postgres, Kubernetes, migration.`, or set `none` for no hint. With the silence filter on, on 60 jargon clips, this list got 11.3% of words wrong, a sentence about a developer 13.2%, and no hint 14.5%. A sentence also turned foreign background talk into a sentence about code. |
 | `VOICE_MCP_WHISPER_MODEL_PATH` | — | Use this exact `ggml-*.bin` file. |
 | `VOICE_MCP_MODEL_SEARCH_PATHS` | — | Extra folders to check for an existing model (`:`-separated). |
 | `VOICE_MCP_WHISPER_SERVER` | `1` | Set to `0` to always use `whisper-cli`, with no warm server. |
 | `VOICE_MCP_SERVER_IDLE_MINUTES` | `15` | How long the warm server stays up without use. |
 | `VOICE_MCP_THREADS` | min(8, cores) | Number of whisper.cpp threads. |
+| `VOICE_MCP_MODEL_BASE_URL` | Hugging Face | A mirror that serves the `ggml-*.bin` models, and the silence filter `ggml-silero-v5.1.2.bin`. |
 | `VOICE_MCP_CACHE_DIR` | `~/.cache/mac-voice-mcp` | Where models are downloaded or symlinked. |
 | `VOICE_MCP_DEBUG` | `0` | Verbose logs with per-turn timings, written to stderr. |
 
@@ -91,5 +92,9 @@ whisper.cpp model names:
 | `base.en` | 142 MB | **Default.** English conversation. |
 | `small.en` | 466 MB | **Noisy rooms.** On real recordings with background noise: 8% of words wrong instead of 12% with `base.en`; the same in a quiet room. About 0.3 s per reply instead of 0.1 s on Apple Silicon. |
 | `large-v3-turbo-q5_0` | 547 MB | Other languages, e.g. Thai with `VOICE_MCP_LANGUAGE=th` |
+
+### The silence filter
+
+whisper invents words for near-silent audio: in a quiet room `small.en` heard "Thank you." and repeated its hint. Setup offers to download the Silero VAD model (`ggml-silero-v5.1.2.bin`, under 1 MB, checked against its SHA-256) into the models folder, and only downloads it with your consent (`voice_setup` with `install=true`). Once it is there, whisper-server and whisper-cli run with `--vad -vm <model> -vp 400`, so whisper only hears the stretches with speech. On recorded room audio it blanked every silent stretch. The 400 ms padding keeps short replies whole: with 30 to 300 ms, "Flag that." came back as "Like that." or "It's like that.". Delete the file to turn the filter off.
 
 **Plugin users:** the plugin's MCP server has no config block of its own. Set these in the `env` block of `~/.claude/settings.json` instead, then restart Claude Code.

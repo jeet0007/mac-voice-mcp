@@ -54,6 +54,8 @@ function sandbox({ tools = ["rec", "whisper-cli", "whisper-server"] } = {}) {
       VOICE_MCP_RECORDER: "sox",
       VOICE_MCP_VOICE_STANDBY: "0",
       VOICE_MCP_EXTRA_PATH: "",
+      // No test downloads from the internet: a refused port stands in for the model mirror.
+      VOICE_MCP_MODEL_BASE_URL: "http://127.0.0.1:9",
       ...extra,
     }),
   };

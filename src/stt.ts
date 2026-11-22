@@ -16,11 +16,23 @@ import path from "node:path";
 import { CONFIG, debug, IS_WIN, log } from "./config.js";
 import { CancelledError, isExecutable, run, SetupError, sleep, tail, which } from "./proc.js";
 import { flightEvent } from "./flight.js";
+import { locateVadModel } from "./model.js";
 import { cleanTranscript as cleanText } from "./speech-text.js";
 
 export const STT_MISSING =
   "whisper.cpp (speech-to-text) is not installed. Call the voice_setup tool to check and install what's missing " +
   "(or run `brew install whisper-cpp`, or set VOICE_MCP_WHISPER_BIN to an existing `whisper-cli`).";
+
+/**
+ * Speech the VAD keeps on each side of what it detects. On whole recorded utterances, 30-300 ms turned
+ * "Flag that." into "Like that." or "It's like that."; 350 ms and up kept it, and silences stayed empty up to 1000 ms.
+ */
+const VAD_PAD_MS = 400;
+
+function vadArgs(): string[] {
+  const vad = locateVadModel();
+  return vad ? ["--vad", "-vm", vad, "-vp", String(VAD_PAD_MS)] : [];
+}
 
 /** Where people usually clone and build whisper.cpp themselves. */
 function sourceBuildDirs(): string[] {
@@ -133,7 +145,7 @@ class WarmWhisperServer {
 
   private async start(bin: string, model: string): Promise<string> {
     const port = await freePort();
-    const args = ["-m", model, "--host", "127.0.0.1", "--port", String(port), "-t", String(CONFIG.threads), "-l", CONFIG.language, "-nt"];
+    const args = ["-m", model, "--host", "127.0.0.1", "--port", String(port), "-t", String(CONFIG.threads), "-l", CONFIG.language, "-nt", ...vadArgs()];
     if (CONFIG.prompt) args.push("--prompt", CONFIG.prompt);
     debug("starting whisper-server:", bin, args.join(" "));
 
@@ -267,11 +279,12 @@ export function describeStt(): string {
   const server = findWhisperServer();
   const parts = [cli ? `whisper-cli (${cli})` : "", server ? "fast mode via whisper-server" : ""].filter(Boolean);
   if (server && !CONFIG.useWhisperServer) parts[parts.length - 1] = "whisper-server disabled by VOICE_MCP_WHISPER_SERVER=0";
+  if (locateVadModel()) parts.push("silence filter (Silero VAD)");
   return parts.join("; ");
 }
 
 async function transcribeCli(bin: string, wavFile: string, model: string, signal?: AbortSignal, dropped?: string[]): Promise<string> {
-  const args = ["-m", model, "-f", wavFile, "-l", CONFIG.language, "-t", String(CONFIG.threads), "-nt", "-np"];
+  const args = ["-m", model, "-f", wavFile, "-l", CONFIG.language, "-t", String(CONFIG.threads), "-nt", "-np", ...vadArgs()];
   if (CONFIG.prompt) args.push("--prompt", CONFIG.prompt);
   const result = await run(bin, args, { signal, timeoutMs: 180_000 });
   if (result.code !== 0) {
