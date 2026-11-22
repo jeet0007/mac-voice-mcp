@@ -184,7 +184,7 @@ test("setup: check, install only what's missing (with consent), reuse the model,
     assert.match(check, /✘ Recorder: .*brew install sox/);
     assert.match(check, /✘ Speech-to-text: .*brew install whisper-cpp/);
     assert.match(check, /✔ Speech model: .*reused/);
-    assert.match(check, /ask the user whether to brew install sox whisper-cpp/);
+    assert.match(check, /ask the user whether to brew install sox whisper-cpp\./);
     assert.doesNotMatch(sb.readLog(), /brew install/);
 
     // With consent: exactly one brew call for exactly the missing formulae; no model download.

@@ -393,7 +393,7 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
   } else if (installing) {
     lines.push("Next: installation is still running in the background. Tell the user, wait about a minute, then call voice_setup again (install=false) to check.");
   } else if (!install && (toInstall.length || needsModel) && (findBrew() || !toInstall.length)) {
-    const steps = [toInstall.length ? `brew install ${toInstall.join(" ")}` : "", needsModel ? `download the ${CONFIG.modelName} model` : ""]
+    const steps = [toInstall.length ? `brew install ${toInstall.join(" ")}` : "", needsModel ? `download the ${CONFIG.modelName} model` : "", checks.some((c) => c.vad) ? "download the silence filter (under 1 MB)" : ""]
       .filter(Boolean)
       .join(" and ");
     lines.push(`Next: ask the user whether to ${steps}. Only if they agree, call voice_setup with install=true.`);
