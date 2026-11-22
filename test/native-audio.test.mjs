@@ -1,6 +1,6 @@
 // The native backend behind the audio port (src/audio/native.ts), against the worker stub
-// (test/stubs/audio-worker.mjs): VOICE_MCP_AUDIO=native, the stub installed as the built worker,
-// and the Mac's speakers as the output (the system_profiler stub).
+// (test/stubs/audio-worker.mjs): VOICE_MCP_AUDIO unset (native is the default), the stub installed
+// as the built worker, and the Mac's speakers as the output (the system_profiler stub).
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -17,7 +17,6 @@ writeFileSync(log, "");
 Object.assign(process.env, {
   STUB_LOG: log,
   STUB_SCENARIO: "silent",
-  VOICE_MCP_AUDIO: "native",
   VOICE_MCP_CACHE_DIR: cache,
   VOICE_MCP_RECORDER: "sox",
   VOICE_MCP_VOICE: "",
@@ -29,6 +28,7 @@ Object.assign(process.env, {
   VOICE_MCP_END_SILENCE_MS: "10000",
   PATH: [path.join(ROOT, "test", "fixtures", "bin"), path.join(ROOT, "test", "fixtures", "installable"), path.dirname(process.execPath), "/usr/bin", "/bin"].join(path.delimiter),
 });
+delete process.env.VOICE_MCP_AUDIO;
 delete process.env.VOICE_MCP_CALL_DUPLEX;
 delete process.env.VOICE_MCP_TTS;
 
@@ -235,6 +235,29 @@ test("a call on the native backend: a blip over a reply ducks it, and the word c
     ["worker gain 1 0.3", "worker gain 1 1", "worker done 1 finished"],
   );
   assert.deepEqual(effects(), ["speech.start", "speech.duck", "words.check", "speech.restore", "teardown"]);
+});
+
+test("a call on the native backend: a filler over a reply doesn't stop it, the reply finishes and nothing reaches Claude", darwin, async () => {
+  startedAt = Date.now();
+  await talkedOver("Mm-hmm.", 1);
+  for (let t = Date.now(); !workerLines().includes("worker done 1 finished") && Date.now() - t < 10_000; ) await sleep(20);
+  const heard = await call.listen(1000);
+  await call.end("test over");
+  assert.deepEqual(heard, []);
+  assert.ok(workerLines().includes("worker gain 1 0.3"), "ducked");
+  assert.ok(workerLines().includes("worker done 1 finished"), "the reply finished");
+  assert.ok(!effects().includes("speech.stop"));
+});
+
+test("with the worker built, a call on headphones stays on the process backend", darwin, async () => {
+  fresh({ STUB_HEADPHONES: "1" });
+  const session = await openAudio({ purpose: "call" });
+  assert.equal(session.interrupt, "pause");
+  await session.frames().next();
+  await session.close();
+  delete process.env.STUB_HEADPHONES;
+  assert.deepEqual(workerLines(), []);
+  assert.ok(lines().some((l) => l.startsWith("rec ")));
 });
 
 test("the worker dying settles every playback and ends the session; later calls use the process backend", darwin, async () => {

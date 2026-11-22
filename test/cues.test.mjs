@@ -56,6 +56,8 @@ function sandbox({ tools = ["rec", "whisper-cli", "whisper-server"] } = {}) {
       VOICE_MCP_EXTRA_PATH: "",
       // No test downloads from the internet: a refused port stands in for the model mirror.
       VOICE_MCP_MODEL_BASE_URL: "http://127.0.0.1:9",
+      // The cues as the process backend plays them; install=true never runs the real swiftc for the worker.
+      VOICE_MCP_AUDIO: "process",
       ...extra,
     }),
   };

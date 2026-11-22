@@ -47,7 +47,7 @@ Turn the volume up, keep the room quiet, and stop voice mode in other sessions w
 | `flight.ts` | The opt-in flight recorder: event log, flags, audio ring, retention. Off = no-ops; imports no network module (tested) |
 | `setup.ts` | Requirement checks and consent-based background installs |
 | `native-build.ts` | Builds every native binary (`native/*.swift`: the call bubble, the audio worker) with the user's `swiftc` after consent; the source hash is the opt-in |
-| `audio/protocol.ts` | The wire protocol of `native/audio-worker.swift`, defined once: commands, events, parsing. The test stub (`test/stubs/audio-worker.mjs`) imports it and `test/audio-worker-contract.test.mjs` runs the real worker against it. Not used by a call yet |
+| `audio/protocol.ts` | The wire protocol of `native/audio-worker.swift`, defined once: commands, events, parsing. The test stub (`test/stubs/audio-worker.mjs`) imports it and `test/audio-worker-contract.test.mjs` runs the real worker against it |
 | `state/voice-mode.ts` | Every file in the voice-mode folder shared with the plugin hook and Voice Buddy (call, phase, inbox, mute, levels, listening, stop); the only importer of `hooks/voice-files.mjs` besides `config.ts` |
 | `worklisten.ts` | Listening for "Claude, …" while Claude works |
 | `call/engine/` | Every rule of a call, pure: `step(state, event)` returns the next state and the effects to run, `nextWake(state)` the next deadline. When a reply plays, waits, pauses or stops, the thinking ticks, hang-up phrases and fillers (`words.ts`), the idle limit. No text or audio in its state, events or effects, so each step goes to the flight recorder as it is. Imports nothing outside the directory (tested) |

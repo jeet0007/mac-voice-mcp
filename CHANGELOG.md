@@ -6,7 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [Unreleased]
 
 ### Added
-- **Talk over Claude on the Mac's speakers (experimental).** On macOS 15 or later, set `VOICE_MCP_AUDIO=native` and run `voice_setup` with install to build the audio worker on your Mac. Calls on the built-in or wired speakers then play and record through one echo-cancelled unit, so Claude doesn't hear itself. When you start talking, its reply drops to a quieter volume. Once you've said words it pauses where it is, and when your sentence is transcribed, real words stop it and a cough or "mm-hmm" lets it carry on. Headphones and other outputs keep today's behaviour. If the worker can't start, the call falls back to the recorder.
+- **Talk over Claude on the Mac's speakers.** On by default on macOS 15 or later: `voice_setup` offers to build the audio worker on your Mac, and with your agreement builds it. Calls on the built-in or wired speakers then play and record through one echo-cancelled unit, so Claude doesn't hear itself. When you start talking, its reply drops to a quieter volume. Once you've said words it pauses where it is, and when your sentence is transcribed, real words stop it and a cough or "mm-hmm" lets it carry on. Headphones, AirPlay, HDMI and Bluetooth speakers keep today's behaviour. If the worker can't start, the call falls back to the recorder. `VOICE_MCP_AUDIO=process` turns it off.
 - **whisper no longer invents words in silence.** In a quiet room it sometimes heard "Thank you." or repeated its hint. Setup now offers a silence filter (Silero VAD, under 1 MB, downloaded only when you agree), and whisper then skips the stretches without speech. See [The silence filter](docs/configuration.md#the-silence-filter).
 
 ### Changed

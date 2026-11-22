@@ -35,7 +35,7 @@ the engine holds `say.requested` while `user.kind === "talking"` and starts it o
 | `src/listen/utterances.ts` | The one frame loop: frames → Endpointer → onset/blip/ended events + utterance audio in memory | A (B's ear.ts) |
 | `src/endpointer.ts` | unchanged | |
 | `src/stt.ts` | Transcription (final + partial), unchanged surface | |
-| `src/words.ts` | One classifier: words / filler / hang-up / empty (merges isFiller, isHangUp, cleanTranscript, spike realWords) | B |
+| `src/words.ts` | One classifier: words / filler / hang-up / empty (merges isFiller, isHangUp, cleanTranscript, realWords) | B |
 | `src/speech/synthesize.ts` | Text → PCM stream (Kokoro; built-in `say -o` per sentence as fallback mid-reply) | A |
 | `src/speech/replies.ts` | Stateless `speak(text): Reply` (synthesize + play + exact heard words). No queue: the engine is the only say queue; the one-shot path just awaits | A, fixed per H5 |
 | `src/call/engine/{types,step}.ts` | Every call rule, pure, no imports outside itself (a test fails the build otherwise) | B |
@@ -46,7 +46,7 @@ the engine holds `say.requested` while `user.kind === "talking"` and starts it o
 | `src/bubble.ts`, `native/call-bubble.swift` | UI only; reads state files; never touches audio | unchanged |
 
 Deleted: `speakers.ts`, `barge-in.ts`, the three recorder loops in `audio.ts`, Kokoro's players, the call's echo gate
-and per-utterance WAVs, PR #52's `waitForQuiet`/`heardWhileSaying`, `scripts/bargein-spike.swift`.
+and per-utterance WAVs, PR #52's `waitForQuiet`/`heardWhileSaying`.
 
 ## Changes from the adversarial review 
 
@@ -96,13 +96,13 @@ Process backend: headphones → `interrupt: "pause"` (SIGSTOP), today's behaviou
 ## Migration (each PR green on its own)
 
 0. Land PR #52 (the hold on speakers) as is; it is today's behaviour the engine must keep.
-1. **Probe first** (scripts, not shipped): a protocol-true worker prototype from the spike, run against the real Endpointer through Node. Gates with numbers: onset-to-duck under 200 ms, AEC convergence time, echo residue on each output route, music ducking (macOS 14+ setting), Bluetooth profile, mic permission under Claude Code, whisper-server concurrency, `say -o` first-sentence latency. If a gate fails, we stop and rethink before moving any code.
+1. **Probe first** (scripts, not shipped): a protocol-true worker prototype (`scripts/probe/`), run against the real Endpointer through Node. Gates with numbers: onset-to-duck under 200 ms, AEC convergence time, echo residue on each output route, music ducking (macOS 14+ setting), Bluetooth profile, mic permission under Claude Code, whisper-server concurrency, `say -o` first-sentence latency. If a gate fails, we stop and rethink before moving any code.
 2. Subtract and move, zero behaviour change, zero test edits: voice-mode files, cues home (import cycle gone), one WAV header.
 3. Output port + PCM synthesis + stateless `replies`; cues through `play()`; every playback settles.
 4. Input port with the process adapter + `utterances`; three loops deleted; echo/muted frames end utterances.
 5. Call engine with today's policy (hold included); `barge-in.ts` and PR #52's poller folded in; e2e unchanged + engine unit tests + flight `recordStep`.
 6. Native worker + shared protocol module + Node stub + contract test + consent build, opt-in `VOICE_MCP_AUDIO=native`.
-7. Native default on allowlisted macOS speaker routes; rewrite the four mechanism tests against the stub's command log; specs; delete the spike.
+7. Native default on allowlisted macOS speaker routes; `VOICE_MCP_AUDIO=process` opts out; setup recommends the worker; specs. Done (2026-11-22), after the live results below. The four process mechanism tests (mic muted while a call speaks, speakers don't pause, headphones pause, a filler resumes) stay on the process backend: the speaker two now run with the worker built and `VOICE_MCP_AUDIO=process`, and assert it never ran. Their native counterparts run against the stub's command log in `test/native-audio.test.mjs`, which no longer sets `VOICE_MCP_AUDIO`.
 
 ## Probe results (2026-11-21, MacBook Air built-in speakers and mic, macOS 27)
 
@@ -119,6 +119,14 @@ What it changes in this design:
 - **The "echo until converged" flag (H2) is Node's job** in the native adapter; the worker knows nothing about convergence.
 - **Built-in speech on the process backend stays direct `say`** (step 3): converting it to PCM there would slow its first sound. The native backend uses the standby `say -o <file> -f -` above.
 - Not yet measured: Bluetooth speakers and AirPlay/HDMI routes (stay on the fallback per H2), a host that has never been granted mic permission.
+
+## Live results (2026-11-22, built-in speakers, native backend)
+
+- Barge-in on real words ducked, paused and stopped the reply.
+- A cough and an "mm-hmm" ducked the reply, which then came back up and finished.
+- About 47 s of reply with the user silent produced no onset: no self-interruption.
+- Gate e (`say -o` first sound) at load 4 to 6: standby `say` 293 ms, native standby `say -o` 451 ms, +158 ms against a gate of 200 ms. Passed.
+- Not measured: Kokoro on the native backend.
 
 ## Owner decisions (2026-11-21)
 

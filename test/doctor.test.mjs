@@ -48,6 +48,7 @@ test("doctor passes when the transcript matches what was spoken, and saves a JSO
   const report = JSON.parse(r.stdout);
   assert.deepEqual(report.checks.map((c) => [c.name, c.status]), [["Setup", "PASS"], ["Speech → text", "PASS"], ["Speaker → mic", "SKIP"]]);
   assert.equal(report.checks[1].metrics.wer, 0);
+  assert.equal(report.machine.callAudio, "process: the recorder, with the mic muted while Claude speaks", "the audio worker isn't built");
   assert.ok(report.reportFile.startsWith(path.join(sb.home, ".cache", "mac-voice-mcp", "doctor")));
   assert.ok(existsSync(report.reportFile));
   assert.match(readFileSync(sb.log, "utf8"), /^speak-to-file "The build passed/m);

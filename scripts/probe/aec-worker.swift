@@ -19,8 +19,8 @@
 //           (stderr when fd 3 isn't open, so it can be run by hand)
 //   stdin EOF: stop the unit, emit mic-closed, exit 0.
 //
-// shortcut: the audio callbacks take an NSLock and signal a semaphore, as the spike did (measured fine
-// there). Move to lock-free rings if the shipped worker ever shows dropouts.
+// shortcut: the audio callbacks take an NSLock and signal a semaphore (fine for the probe's gates);
+// the shipped worker (native/audio-worker.swift) uses lock-free rings.
 import AVFoundation
 import AudioToolbox
 import CoreAudio
@@ -243,7 +243,7 @@ func micWriter() {
   }
 }
 
-// --- The voice-processing unit (set up as in the spike) ---
+// --- The voice-processing unit ---
 // BitwiseCopyable: the unit copies raw bytes, so T must hold no object references.
 func set<T: BitwiseCopyable>(_ unit: AudioUnit, _ property: AudioUnitPropertyID, _ scope: AudioUnitScope, _ element: AudioUnitElement, _ value: T) -> OSStatus {
   withUnsafePointer(to: value) { AudioUnitSetProperty(unit, property, scope, element, $0, UInt32(MemoryLayout<T>.size)) }
