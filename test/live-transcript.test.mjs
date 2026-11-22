@@ -4,12 +4,13 @@ import assert from "node:assert/strict";
 import { LiveTranscript, utteranceFrames } from "../dist/live-transcript.js";
 
 /** A LiveTranscript whose requests the test answers by hand. */
-function live({ enabled = true, everyMs = 700 } = {}) {
+function live({ enabled = true, everyMs = 700, ready = () => true } = {}) {
   const asked = [];
   const shown = [];
   const l = new LiveTranscript({
     everyMs,
     enabled: () => enabled,
+    ready,
     request: (wav, signal) => new Promise((resolve) => asked.push({ wav, signal, resolve })),
     emit: (t) => shown.push(t),
   });
@@ -108,4 +109,46 @@ test("whisper repeating the same words for a long stretch is shown once", async 
     await tick();
   }
   assert.deepEqual(shown, ["the same words"]);
+});
+
+test("a word check sends the next frame's request at once, or rides the one in flight; its answer goes to the panel too", async () => {
+  const { l, asked, shown, frames } = live();
+  frames(300, 0.3);
+  const first = l.check(300);
+  assert.equal(asked.length, 0, "not before the next frame");
+  frames(30, 0.3, 60);
+  assert.equal(asked.length, 1, "below half a second of speech: a check doesn't wait for the panel's rules");
+  asked[0].resolve("wait");
+  assert.equal(await first, "wait");
+  assert.equal(l.quietMs, 60);
+  assert.deepEqual(shown, ["wait"]);
+
+  frames(700, 1);
+  assert.equal(asked.length, 2);
+  const riding = l.check(300);
+  frames(90, 1);
+  assert.equal(asked.length, 2, "whisper serves one at a time");
+  asked[1].resolve("");
+  assert.equal(await riding, "");
+});
+
+test("a word check that can't start within its deadline, or whose utterance ends, answers null", async () => {
+  let ready = false;
+  const { l, asked, frames } = live({ ready: () => ready });
+  const late = l.check(50);
+  frames(300, 0.3);
+  await new Promise((r) => setTimeout(r, 80));
+  ready = true;
+  frames(30, 0.3);
+  assert.equal(await late, null);
+  assert.equal(asked.length, 0, "a check that gave up sends nothing; the panel's own time hasn't come");
+
+  const cut = l.check(300);
+  l.end();
+  assert.equal(await cut, null);
+  const out = l.check(300);
+  frames(30, 1);
+  assert.equal(asked.length, 1);
+  l.end();
+  assert.equal(await out, null);
 });

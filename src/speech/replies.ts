@@ -14,6 +14,9 @@ export interface Reply {
   readonly done: Promise<Spoken>;
   /** Below 1 quieter (paused, on the process backend), 1 back to normal. Also reaches the built-in voice finishing for Kokoro. */
   duck(gain: number): void;
+  /** Hold it where it is, and go on from there; this too reaches the built-in voice finishing for Kokoro. */
+  pause(): void;
+  resume(): void;
   stop(): void;
 }
 
@@ -25,6 +28,7 @@ export interface Reply {
 export function speak(text: string, signal?: AbortSignal): Reply {
   const ctl = new AbortController();
   let gain = 1;
+  let paused = false;
   let current: Playback | null = null;
   const stop = () => {
     ctl.abort();
@@ -38,6 +42,7 @@ export function speak(text: string, signal?: AbortSignal): Reply {
     const playback = play(sound);
     current = playback;
     playback.duck(gain);
+    if (paused) playback.pause();
     if ((await playback.done) === "stopped") throw new CancelledError();
   };
 
@@ -61,6 +66,14 @@ export function speak(text: string, signal?: AbortSignal): Reply {
     duck(g) {
       gain = g;
       current?.duck(g);
+    },
+    pause() {
+      paused = true;
+      current?.pause();
+    },
+    resume() {
+      paused = false;
+      current?.resume();
     },
     stop,
   };

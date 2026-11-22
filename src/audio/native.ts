@@ -177,9 +177,15 @@ export function start(): Promise<Worker> {
       ctl.abort();
       void command({ op: "stop", id });
     };
+    let paused = false;
+    const hold = (pause: boolean) => {
+      if (ctl.signal.aborted || paused === pause) return;
+      paused = pause;
+      void command({ op: pause ? "pause" : "resume", id });
+    };
     if (gone || closing) {
       fail(failure ?? new Error("The audio worker has stopped."));
-      return { done, duck: () => {}, stop: () => {}, playedMs: () => 0 };
+      return { done, duck: () => {}, pause: () => {}, resume: () => {}, stop: () => {}, playedMs: () => 0 };
     }
     sounds.set(id, settle);
     void command(sound.kind === "cue" ? { op: "play", id, file: sound.file, gain: sound.volume } : { op: "play", id, rate: SPEECH_RATE }).then((ack) => {
@@ -206,6 +212,8 @@ export function start(): Promise<Worker> {
         gain = g;
         void command({ op: "gain", id, value: g, rampMs: 10 });
       },
+      pause: () => hold(true),
+      resume: () => hold(false),
       stop,
       playedMs: () => played,
     };

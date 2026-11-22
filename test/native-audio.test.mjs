@@ -23,6 +23,10 @@ Object.assign(process.env, {
   VOICE_MCP_VOICE: "",
   VOICE_MCP_EXTRA_PATH: "",
   VOICE_MCP_FLIGHT_RECORDER: "on",
+  VOICE_MCP_WHISPER_MODEL: "tiny.en",
+  VOICE_MCP_CALL_BUBBLE: "0",
+  // 10 s of audio, 1 s at the stubs' 10x pace: a blip's utterance is still open when the word check comes.
+  VOICE_MCP_END_SILENCE_MS: "10000",
   PATH: [path.join(ROOT, "test", "fixtures", "bin"), path.join(ROOT, "test", "fixtures", "installable"), path.dirname(process.execPath), "/usr/bin", "/bin"].join(path.delimiter),
 });
 delete process.env.VOICE_MCP_CALL_DUPLEX;
@@ -35,9 +39,19 @@ symlinkSync(path.join(ROOT, "test", "stubs", "audio-worker.mjs"), bin);
 const built = () => writeFileSync(`${bin}.hash`, createHash("sha256").update(readFileSync(path.join(ROOT, "native", "audio-worker.swift"))).digest("hex"));
 built();
 
+const model = Buffer.alloc(1_100_000);
+model.writeUInt32LE(0x67676d6c, 0);
+mkdirSync(path.join(cache, "models"), { recursive: true });
+writeFileSync(path.join(cache, "models", "ggml-tiny.en.bin"), model);
+
 const { openAudio, play, MicBusyError } = await import("../dist/audio/device.js");
+const { call } = await import("../dist/call/session.js");
+const { partialsAvailable, stopWhisperServer } = await import("../dist/stt.js");
 const { terminateChildren } = await import("../dist/proc.js");
-after(() => terminateChildren()); // the standby `say` the process backend keeps for the next reply
+after(() => {
+  stopWhisperServer();
+  terminateChildren();
+}); // the standby `say` the process backend keeps for the next reply
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const lines = () => readFileSync(log, "utf8").split("\n").filter(Boolean).map((l) => l.replace(/ @\d+$/, ""));
@@ -184,6 +198,43 @@ test("an output device change ends the session cleanly: playbacks done stopped, 
   const again = await openAudio({ purpose: "call" });
   assert.equal(again.interrupt, "duck", "a route change doesn't rule the worker out");
   await again.close();
+});
+
+const REPLY = "Sure, I can do that. The build finished without any errors, and every test passed. I also updated the readme.";
+/** A call talked over by the stub worker's user once the reply has played 500 ms; the warm whisper-server answers `transcript`. */
+async function talkedOver(transcript, speechSeconds) {
+  fresh({ STUB_SCENARIO: "bargein", STUB_SPEECH_S: String(speechSeconds), STUB_TRANSCRIPT: transcript });
+  stopWhisperServer(); // a server started with the last test's transcript
+  await call.start();
+  for (let t = Date.now(); !partialsAvailable() && Date.now() - t < 5000; ) await sleep(20);
+  await call.say(REPLY);
+}
+const effects = () => flight().filter((e) => e.ev === "call.effect" && e.t >= startedAt).map((e) => e.type);
+let startedAt = 0;
+
+test("a call on the native backend: talking over a reply ducks it, words in the check pause it, and the transcript stops it", darwin, async () => {
+  startedAt = Date.now();
+  await talkedOver("Wait, use the other file.", 12);
+  const [heard] = await call.listen(8000);
+  await call.end("test over");
+  assert.match(heard?.text ?? "", /^\(You interrupted Claude after: '[^']+'\) Wait, use the other file\.$/);
+  assert.deepEqual(
+    workerLines().filter((l) => / 1( |$)/.test(l) && !l.includes("speech") && !l.includes("end 1")),
+    ["worker gain 1 0.3", "worker pause 1", "worker stop 1", "worker done 1 stopped"],
+  );
+  assert.deepEqual(effects(), ["speech.start", "speech.duck", "words.check", "speech.pause", "speech.stop", "deliver", "teardown"]);
+});
+
+test("a call on the native backend: a blip over a reply ducks it, and the word check finding nothing brings it straight back", darwin, async () => {
+  startedAt = Date.now();
+  await talkedOver("", 0.3);
+  for (let t = Date.now(); !workerLines().includes("worker done 1 finished") && Date.now() - t < 10_000; ) await sleep(20);
+  await call.end("test over");
+  assert.deepEqual(
+    workerLines().filter((l) => / 1( |$)/.test(l) && !l.includes("speech") && !l.includes("end 1")),
+    ["worker gain 1 0.3", "worker gain 1 1", "worker done 1 finished"],
+  );
+  assert.deepEqual(effects(), ["speech.start", "speech.duck", "words.check", "speech.restore", "teardown"]);
 });
 
 test("the worker dying settles every playback and ends the session; later calls use the process backend", darwin, async () => {

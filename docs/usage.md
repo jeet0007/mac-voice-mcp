@@ -28,7 +28,7 @@ A call keeps the line open, like a phone call: the mic stays on until you hang u
 - **Typing doesn't end the call or cut Claude off.** Type whenever you want; the call stays on.
 - **Permission prompts:** when Claude Code shows one, Claude says "Claude needs your OK on screen", so you know why it went quiet. If you'd like a soft tick while Claude thinks, set `VOICE_MCP_CALL_THINKING_SOUND=1`.
 
-**Talking over Claude needs headphones.** On speakers the mic is muted while Claude speaks, so it doesn't hear itself. With headphones (the headphone jack, or Bluetooth headphones such as AirPods), the mic stays open: a quarter second of your voice pauses Claude. Say something real and it stops and answers you; a quick "mm-hmm" or a cough lets it carry on. voice-mcp checks for headphones when the call starts; `VOICE_MCP_CALL_DUPLEX` overrides it ([Configuration](configuration.md#calls)).
+**Talking over Claude needs headphones.** On speakers the mic is muted while Claude speaks, so it doesn't hear itself. With headphones (the headphone jack, or Bluetooth headphones such as AirPods), the mic stays open: a quarter second of your voice pauses Claude. Say something real and it stops and answers you; a quick "mm-hmm" or a cough lets it carry on. voice-mcp checks for headphones when the call starts; `VOICE_MCP_CALL_DUPLEX` overrides it ([Configuration](configuration.md#calls)). On macOS 15 or later you can try talking over Claude on the Mac's own speakers too: set `VOICE_MCP_AUDIO=native` (experimental). Claude's voice goes quieter as you start, pauses once you've said words, and stops when you've said something real.
 
 ### The call bubble (macOS)
 

@@ -222,6 +222,9 @@ export interface Playback {
   readonly done: Promise<PlayEnd>;
   /** 1 = full volume. The native backend ramps to it over 10 ms; the process backend pauses below 1 and resumes at 1 (not on Windows). Idempotent. */
   duck(gain: number): void;
+  /** Hold the sound at its position, and go on from there. Idempotent. */
+  pause(): void;
+  resume(): void;
   /** Stop now, also while paused. Idempotent. */
   stop(): void;
   /** Milliseconds played so far: wall clock minus time paused, or what the native worker reports. */

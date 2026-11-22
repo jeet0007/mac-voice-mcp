@@ -196,6 +196,12 @@ function playback(player: (t: Track) => Promise<void>): Playback {
       if (paused()) child.kill("SIGSTOP");
     },
   };
+  const pause = () => {
+    // No SIGSTOP on Windows: it would kill the voice (detectDuplex keeps calls there half duplex).
+    if (IS_WIN || ctl.signal.aborted || paused()) return;
+    pausedAt = Date.now();
+    signalAll("SIGSTOP");
+  };
   const resume = () => {
     if (!paused()) return;
     pausedMs += Date.now() - pausedAt;
@@ -212,14 +218,9 @@ function playback(player: (t: Track) => Promise<void>): Playback {
   done.catch(() => {}); // the caller handles it; don't crash on an unobserved rejection
   return {
     done,
-    duck(gain) {
-      // No SIGSTOP on Windows: it would kill the voice (detectDuplex keeps calls there half duplex).
-      if (IS_WIN || ctl.signal.aborted) return;
-      if (gain >= 1) return resume();
-      if (paused()) return;
-      pausedAt = Date.now();
-      signalAll("SIGSTOP");
-    },
+    duck: (gain) => (gain >= 1 ? resume() : pause()),
+    pause,
+    resume,
     stop() {
       if (ctl.signal.aborted) return;
       resume();
