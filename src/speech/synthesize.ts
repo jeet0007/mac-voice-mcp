@@ -1,8 +1,4 @@
-/**
- * Text → speech, independent of where it plays: the Kokoro voice as 24 kHz PCM sentence by
- * sentence, or the command line of the built-in voice (macOS `say`, espeak-ng, Windows SAPI) that
- * the audio backend runs. Also which built-in voice to use, and speech into a WAV file for doctor and tests.
- */
+// Text to speech independent of where it plays: Kokoro PCM, the built-in voice's command, and speech into a WAV. See docs/specs/speech-output.md.
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import type { Sound } from "../audio/device.js";
@@ -15,11 +11,9 @@ import { CancelledError, run, SetupError, tail, which, type RunResult } from "..
 
 export interface Spoken {
   engine: "kokoro" | "built-in";
-  /** Kokoro: from the call to the first sound. */
   firstAudioMs?: number;
-  /** Kokoro: the model was loaded for this turn. */
   coldStart?: boolean;
-  /** Kokoro was wanted but failed, so the built-in voice spoke instead (why). */
+  // Why Kokoro failed, when the built-in voice spoke instead.
   fallback?: string;
 }
 
@@ -29,16 +23,14 @@ export function findTts(): string | null {
   return which("espeak-ng") ?? which("espeak");
 }
 
-// --- Which voice (macOS) ---------------------------------------------------------------------
-
 export interface SayVoice {
   name: string;
   locale: string;
-  /** 3 = Premium, 2 = Enhanced, 1 = standard. */
+  // 3 = Premium, 2 = Enhanced, 1 = standard.
   quality: number;
 }
 
-/** Parse `say -v '?'` lines such as "Ava (Premium)       en_US    # Hello! My name is Ava." */
+// Parses `say -v '?'` lines such as "Ava (Premium)       en_US    # Hello! My name is Ava."
 export function parseSayVoices(output: string): SayVoice[] {
   const voices: SayVoice[] = [];
   for (const line of output.split("\n")) {
@@ -51,10 +43,6 @@ export function parseSayVoices(output: string): SayVoice[] {
   return voices;
 }
 
-/**
- * The most natural installed voice for the language: Premium first, then Enhanced, preferring
- * the system's region (en_US over en_GB on a US Mac). null = none installed; keep the system voice.
- */
 export function pickVoice(voices: SayVoice[], language: string, systemLocale: string): SayVoice | null {
   const lang = (language && language !== "auto" ? language : systemLocale).toLowerCase().split(/[-_]/)[0] ?? "en";
   const region = (systemLocale.split(/[-_]/)[1] ?? "").toUpperCase();
@@ -65,11 +53,9 @@ export function pickVoice(voices: SayVoice[], language: string, systemLocale: st
 }
 
 export interface VoiceChoice {
-  /** Passed to `say -v`; undefined = the system voice. */
+  // undefined: the system voice
   voice?: string;
-  /** For voice_setup's report. */
   label: string;
-  /** No Premium/Enhanced voice is installed, so a download would sound much better. */
   canUpgrade: boolean;
 }
 
@@ -80,14 +66,12 @@ export const VOICE_UPGRADE_HINT =
 
 let voiceChoice: Promise<VoiceChoice> | undefined;
 
-/** Forget the choice, so a voice downloaded meanwhile is picked up (voice_setup calls this). */
 export function resetVoiceChoice(): void {
   voiceChoice = undefined;
 }
 
 export function chooseVoice(): Promise<VoiceChoice> {
   voiceChoice ??= (async (): Promise<VoiceChoice> => {
-    // Unset or "default": the voice chosen in System Settings (say without -v). "best": the most natural one installed.
     const wanted = CONFIG.voice?.toLowerCase();
     if (!wanted || wanted === "default") return { label: "the system voice (System Settings → Spoken Content)", canUpgrade: IS_MAC };
     if (wanted !== "best") return { voice: CONFIG.voice, label: `${CONFIG.voice} (set by VOICE_MCP_VOICE)`, canUpgrade: false };
@@ -99,30 +83,23 @@ export function chooseVoice(): Promise<VoiceChoice> {
       const best = pickVoice(parseSayVoices(r.stdout), CONFIG.language, locale);
       if (best) return { voice: best.name, label: `${best.name} — the most natural voice installed`, canUpgrade: false };
     } catch {
-      /* fall back to the system voice */
+      // keep the system voice
     }
     return { label: "the system voice", canUpgrade: true };
   })();
   return voiceChoice;
 }
 
-// --- The built-in voice ----------------------------------------------------------------------
-
-/**
- * The built-in voice's command, for the audio backend that plays it. Every engine reads the text
- * from stdin, so one can start ahead of time and wait for it. `standby`: keep one waiting.
- */
 export async function builtInCommand(): Promise<{ bin: string; args: string[]; standby: boolean }> {
   const bin = findTts();
   if (!bin) throw new SetupError("No text-to-speech engine found. Install espeak-ng (e.g. `sudo apt install espeak-ng`).");
-  // With Kokoro in use the built-in voice only fills in, so none is kept waiting for the next reply.
   const standby = CONFIG.voiceStandby && !kokoroEnabled();
   if (IS_MAC) {
     const args: string[] = [];
     const { voice } = await chooseVoice();
     if (voice) args.push("-v", voice);
     if (CONFIG.rate) args.push("-r", CONFIG.rate);
-    args.push("-f", "-"); // read from stdin: no argv length limits, no flag injection
+    args.push("-f", "-"); // stdin: no argv length limit, no flag injection
     return { bin, args, standby };
   }
   if (IS_WIN) {
@@ -134,18 +111,13 @@ export async function builtInCommand(): Promise<{ bin: string; args: string[]; s
   return { bin, args: ["--stdin"], standby };
 }
 
-// --- Kokoro ----------------------------------------------------------------------------------
-
-/** Kokoro pads each chunk with ~0.3 s of near-silence before and ~0.5 s after; this much of it is kept. */
 const LEAD_MS = 30;
 const TAIL_MS = 50;
-const QUIET = 0.01 * 32768; // a 16-bit sample below this (-40 dBFS) is edge silence
-// The pause after a chunk, by how it ends: placeholders until the owner's listening test.
+const QUIET = 0.01 * 32768; // -40 dBFS
 const SENTENCE_PAUSE_MS = 350;
 const CLAUSE_PAUSE_MS = 200;
 const samples = (ms: number) => Math.round((KOKORO_RATE * ms) / 1000);
 
-/** A chunk's PCM with its edge silence trimmed and, unless it's the last, the pause its ending calls for. */
 function withPause(pcm: Buffer, chunk: string, last: boolean): Buffer {
   const n = pcm.length / 2;
   const loud = (i: number) => Math.abs(pcm.readInt16LE(i * 2)) >= QUIET;
@@ -160,15 +132,12 @@ function withPause(pcm: Buffer, chunk: string, last: boolean): Buffer {
 }
 
 export interface KokoroSpeech {
-  /** Loads the model, then the sound to play (null: nothing to say). Throws if Kokoro can't start. */
+  /** null: nothing to say. Throws if Kokoro can't start. */
   load(): Promise<Sound | null>;
-  /** The sentences not yet handed to the player, for the built-in voice to finish if Kokoro fails. */
   unspoken(): string;
-  /** Filled in as it plays. */
   readonly stats: { firstAudioMs: number; coldStart: boolean };
 }
 
-/** `text` in the Kokoro voice: 24 kHz PCM, one buffer per sentence as soon as it's generated. */
 export function kokoroSpeech(text: string, signal: AbortSignal): KokoroSpeech {
   const chunks = prepareForKokoro(text);
   const t0 = Date.now();
@@ -178,7 +147,7 @@ export function kokoroSpeech(text: string, signal: AbortSignal): KokoroSpeech {
   async function* pcm(): AsyncGenerator<Buffer> {
     const ready: Buffer[] = [];
     const s: { end?: { error?: unknown }; wake?: () => void } = {};
-    const cancel = new AbortController(); // the caller stopped, or the player stopped reading
+    const cancel = new AbortController();
     const onAbort = () => cancel.abort();
     signal.addEventListener("abort", onAbort, { once: true });
     kokoroWorker
@@ -230,12 +199,6 @@ export function kokoroSpeech(text: string, signal: AbortSignal): KokoroSpeech {
   };
 }
 
-// --- Into a file -----------------------------------------------------------------------------
-
-/**
- * Speak `text` into a 16 kHz mono 16-bit WAV instead of the speakers, with the same voice
- * replies use. For `doctor` and the round-trip tests. A Kokoro failure is an error here, not a fallback.
- */
 export async function synthesizeToFile(text: string, outFile: string): Promise<Spoken> {
   if (kokoroEnabled()) return { engine: "kokoro", ...(await kokoroToFile(text, outFile)) };
   const bin = findTts();
@@ -254,8 +217,7 @@ export async function synthesizeToFile(text: string, outFile: string): Promise<S
     if (result.code !== 0) throw new Error(`Text-to-speech to file failed (exit ${result.code}): ${tail(result.stderr) || "no output"}`);
     return wavSeconds(await readFile(outFile));
   };
-  // Sometimes `say` exits fine but writes (almost) no audio, e.g. when the voice's speech data
-  // isn't available. Try once more, then say so plainly instead of handing silence to whisper.
+  // `say` can exit fine yet write almost no audio when the voice's speech data is missing.
   const expected = text.trim().split(/\s+/).length > 2;
   let seconds = await once();
   if (expected && seconds < 0.3) seconds = await once();

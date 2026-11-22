@@ -1,15 +1,4 @@
-/**
- * The optional Kokoro voice: a natural-sounding, on-device neural voice (Kokoro-82M, Apache-2.0).
- *
- * Off until the user installs it (voice_setup with kokoro=true): that installs kokoro-js with npm
- * into ~/.cache/mac-voice-mcp/kokoro and downloads the model once. Nothing is bundled with this
- * package, and nothing is ever downloaded without that consent.
- *
- * The model runs in a separate worker process (kokoro-worker.ts), kept warm between turns and
- * stopped after VOICE_MCP_SERVER_IDLE_MINUTES. speech/synthesize.ts turns its output into speech
- * sentence by sentence, and any failure falls back to the built-in voice (speech/replies.ts), so a
- * broken Kokoro install can never make the server mute.
- */
+// The optional Kokoro voice: its worker process, warm-up and install. See docs/specs/speech-output.md.
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -19,16 +8,11 @@ import { fileURLToPath } from "node:url";
 import { CONFIG, debug, envNum, log } from "./config.js";
 import { isExecutable, run, SetupError, tail, which } from "./proc.js";
 
-/** The kokoro-js release we install and test against. */
 export const KOKORO_JS_VERSION = "1.2.1";
 export const KOKORO_RATE = 24_000;
-/** Approximate model download sizes. */
 export const KOKORO_SIZES_MB = { fp32: 326, q8: 92 } as const;
-/** Restart the worker once it holds this much memory (onnxruntime can grow over a long session). */
 const RECYCLE_RSS_MB = 1500;
-/** A model already on disk loads in a few seconds; allow for a slow, busy machine. */
 const LOAD_TIMEOUT_MS = 120_000;
-/** First install: the download may be slow. */
 const INSTALL_LOAD_TIMEOUT_MS = 30 * 60_000;
 
 const ENTRY_MJS =
@@ -47,27 +31,20 @@ export function kokoroFiles() {
   };
 }
 
-/** kokoro-js is installed (the model may still be missing). */
 export function isKokoroInstalled(): boolean {
   const f = kokoroFiles();
   return existsSync(f.entry) && existsSync(f.pkg);
 }
 
-/** The model for the configured precision is on disk. */
 export function isKokoroModelPresent(): boolean {
   return existsSync(kokoroFiles().model);
 }
 
-/** Speak with Kokoro? Yes when the user installed it (VOICE_MCP_TTS=auto) or asked for it (=kokoro). */
 export function kokoroEnabled(): boolean {
   if (CONFIG.tts === "say") return false;
   if (CONFIG.tts === "kokoro") return true;
   return isKokoroInstalled() && isKokoroModelPresent();
 }
-
-// ---------------------------------------------------------------------------
-// The worker process
-// ---------------------------------------------------------------------------
 
 interface Ready {
   voice: string;
@@ -81,11 +58,6 @@ interface Request {
   reject: (e: Error) => void;
 }
 
-/**
- * How long the worker may go without producing the next chunk of audio before it counts as stuck
- * (it is then killed and the built-in voice finishes). A chunk is one sentence, which Kokoro
- * generates in a second or two; this is generous so a busy Mac doesn't trigger it.
- */
 const stallMs = () => Math.max(0.05, envNum("VOICE_MCP_KOKORO_STALL_SECONDS", 30)) * 1000;
 
 class KokoroWorker {
@@ -102,7 +74,6 @@ class KokoroWorker {
     return !!this.child && this.child.exitCode === null && this.child.signalCode === null;
   }
 
-  /** Start (or reuse) the worker; resolves once the model is loaded. */
   start(opts: { allowDownload?: boolean } = {}): Promise<Ready> {
     this.touch();
     if (this.ready && this.running) return this.ready;
@@ -198,14 +169,12 @@ class KokoroWorker {
     return this.ready;
   }
 
-  /** Generate `chunks` in order; onAudio receives each chunk's 24 kHz PCM as soon as it's ready. */
   speak(chunks: string[], onAudio: Request["onAudio"], signal?: AbortSignal): Promise<{ rssMb: number; cancelled: boolean }> {
     const child = this.child;
     if (!child || !this.running) return Promise.reject(new Error("the Kokoro worker is not running"));
     const id = String(this.nextId++);
     this.touch();
     return new Promise((resolve, reject) => {
-      // Cancel: stop waiting right away; the worker drops the rest at its next sentence.
       const onAbort = () => {
         child.stdin!.write(JSON.stringify({ type: "cancel", id }) + "\n");
         const req = this.requests.get(id);
@@ -213,7 +182,6 @@ class KokoroWorker {
         req?.resolve({ rssMb: 0, cancelled: true });
       };
       signal?.addEventListener("abort", onAbort, { once: true });
-      // A worker that stops answering would mean silence for good: give up on it, and let the caller fall back.
       let stall: NodeJS.Timeout | undefined;
       const watchStall = () => {
         clearTimeout(stall);
@@ -278,40 +246,27 @@ class KokoroWorker {
   }
 }
 
-/** The one worker; synthesize.ts generates speech with it. */
 export const kokoroWorker = new KokoroWorker();
 
 export function stopKokoro(): void {
   kokoroWorker.stop();
 }
 
-/**
- * Load the Kokoro model in the background, so the next reply isn't a cold start (the worker may have
- * been idle-stopped or recycled). Only when Kokoro is in use and its files are already there: never
- * downloads. A worker that's already running is left alone, so its idle timer isn't extended.
- */
 export function prewarmKokoro(): void {
   if (!kokoroEnabled() || !isKokoroInstalled() || !isKokoroModelPresent() || kokoroWorker.running) return;
   kokoroWorker.start().catch((e: unknown) => debug("kokoro: warm-up failed:", e instanceof Error ? e.message : e));
 }
 
-/** The voice actually in use, once the worker has loaded (for reports). */
 export function kokoroVoiceLabel(): string {
   const voice = kokoroWorker.info?.voice ?? CONFIG.kokoroVoice;
   return `Kokoro ${voice} (${CONFIG.kokoroDtype})`;
 }
 
-// ---------------------------------------------------------------------------
-// Installing (only from voice_setup with kokoro=true, after the user agreed)
-// ---------------------------------------------------------------------------
-
-/** npm from the same Node installation that runs this server, else from PATH. */
 function findNpm(): string | null {
   const sibling = path.join(path.dirname(process.execPath), process.platform === "win32" ? "npm.cmd" : "npm");
   return isExecutable(sibling) ? sibling : which("npm");
 }
 
-/** Install kokoro-js and download the model. Returns a one-line summary. */
 export async function installKokoro(onProgress?: (message: string) => void): Promise<string> {
   const f = kokoroFiles();
   await mkdir(f.dir, { recursive: true });
@@ -320,7 +275,6 @@ export async function installKokoro(onProgress?: (message: string) => void): Pro
     const npm = findNpm();
     if (!npm) throw new SetupError("npm was not found, so kokoro-js can't be installed. Install Node.js from https://nodejs.org (it includes npm).");
     const pkgJson = path.join(f.dir, "package.json");
-    // "wx": create it only if it isn't there yet, in one step (no check-then-write race).
     await writeFile(
       pkgJson,
       JSON.stringify({ name: "mac-voice-mcp-kokoro", private: true, type: "module", description: "The optional Kokoro voice for mac-voice-mcp." }, null, 2) + "\n",
@@ -333,20 +287,19 @@ export async function installKokoro(onProgress?: (message: string) => void): Pro
     const r = await run(npm, ["install", "--no-audit", "--no-fund", "--loglevel=error", `kokoro-js@${KOKORO_JS_VERSION}`], {
       timeoutMs: 20 * 60_000,
       cwd: f.dir,
-      // npm is a Node script: make sure it finds this Node, even from a GUI app's minimal PATH.
+      // npm is a Node script: it must find this Node, even from a GUI app's minimal PATH.
       env: { PATH: [path.dirname(process.execPath), process.env.PATH ?? ""].join(path.delimiter) },
     });
     if (r.code !== 0) throw new Error(`npm install kokoro-js failed (exit ${r.code}): ${tail(r.stderr, 4)}`);
   }
-  await writeFile(f.entry, ENTRY_MJS); // always (re)written: tiny, and it repairs an edited or stale one
+  await writeFile(f.entry, ENTRY_MJS);
 
-  // Load it once, downloading the model if it isn't there yet. This is also the install's self-test.
   const hadModel = isKokoroModelPresent();
   kokoroWorker.stop();
   kokoroWorker.onProgress = onProgress;
   try {
     const info = await kokoroWorker.start({ allowDownload: true });
-    kokoroWorker.stop(); // the next turn starts it normally (downloads off)
+    kokoroWorker.stop(); // the next turn starts it with downloads off
     return (
       `Installed the Kokoro voice (${info.voice}${hadModel ? "" : `, downloaded the ~${KOKORO_SIZES_MB[CONFIG.kokoroDtype]} MB model`}). ` +
       "It's used from the next turn on."

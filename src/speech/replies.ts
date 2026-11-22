@@ -1,7 +1,4 @@
-/**
- * A reply out loud: synthesize, then play. Stateless, with no queue: each caller orders its own
- * replies (the call plays its `say`s one after another; a turn speaks, then listens).
- */
+// A reply out loud: synthesize, then play, falling back from Kokoro to the built-in voice. See docs/specs/speech-output.md.
 import { play, type Playback, type Sound } from "../audio/device.js";
 import { log } from "../config.js";
 import { flightEvent } from "../flight.js";
@@ -10,21 +7,15 @@ import { CancelledError } from "../proc.js";
 import { kokoroSpeech, type Spoken } from "./synthesize.js";
 
 export interface Reply {
-  /** How it was spoken, once it has finished. Rejects with CancelledError once stopped, or with why it couldn't be spoken. */
+  /** Rejects with CancelledError once stopped, or with why it couldn't be spoken. */
   readonly done: Promise<Spoken>;
-  /** Below 1 quieter (paused, on the process backend), 1 back to normal. Also reaches the built-in voice finishing for Kokoro. */
+  /** Below 1 quieter (paused, on the process backend), 1 back to normal. */
   duck(gain: number): void;
-  /** Hold it where it is, and go on from there; this too reaches the built-in voice finishing for Kokoro. */
   pause(): void;
   resume(): void;
   stop(): void;
 }
 
-/**
- * Speak `text` with the Kokoro voice when it's installed (or VOICE_MCP_TTS=kokoro), otherwise the
- * built-in voice. If Kokoro fails, the built-in voice says whatever it hadn't said yet. Aborting
- * `signal` is stop().
- */
 export function speak(text: string, signal?: AbortSignal): Reply {
   const ctl = new AbortController();
   let gain = 1;

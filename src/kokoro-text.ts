@@ -1,22 +1,12 @@
-/**
- * Text preparation for the Kokoro voice (pure, unit-tested).
- *
- * Kokoro reads text through espeak-ng, which trips over some developer jargon, silently stops at
- * newlines, and truncates anything past ~510 tokens. So before speaking we fix the known
- * mispronunciations and cut the text into sentence-sized chunks that can be generated one at a
- * time — the first chunk starts playing while the next is being generated.
- */
+// Pure text preparation for the Kokoro voice: pronunciation fixes and chunking. See docs/specs/speech-output.md.
 
-/** Words and patterns espeak gets wrong, with what to say instead. Applied in order. */
 export const PRONUNCIATIONS: Array<[RegExp, string]> = [
   [/\bJSON\b/g, "jay-son"],
   [/\bYAML\b/g, "yammel"],
   [/\bSQLite\b/gi, "S Q lite"],
   [/\bRAM\b/g, "ram"],
   [/\bGIFs?\b/g, (m: string) => (m.endsWith("s") ? "gifs" : "gif")] as unknown as [RegExp, string],
-  // file.ext → "file dot ext", spelling short extensions: index.ts → "index dot T S"
   [/\b([A-Za-z][\w-]*)\.(ts|js|tsx|jsx|py|rb|go|rs|md|sh|css|html|json|yml|yaml|toml)\b/g, "$1 dot $2"],
-  // version numbers: 1.2.3 → "1 point 2 point 3" (espeak reads them as decimals)
   [/\bv?(\d+)\.(\d+)\.(\d+)\b/g, "$1 point $2 point $3"],
 ];
 
@@ -26,7 +16,6 @@ const SAY_AS: Record<string, string> = { json: "jay-son", yaml: "yammel" };
 export function fixPronunciation(text: string): string {
   let out = text;
   for (const [pattern, replacement] of PRONUNCIATIONS) out = out.replace(pattern, replacement as string);
-  // file extensions: spell the short ones letter by letter ("dot ts" → "dot T S")
   return out.replace(/\bdot (\w+)\b/g, (m, ext: string) => {
     const lower = ext.toLowerCase();
     if (SAY_AS[lower]) return `dot ${SAY_AS[lower]}`;
@@ -34,20 +23,9 @@ export function fixPronunciation(text: string): string {
   });
 }
 
-/** Longest chunk handed to Kokoro at once, by weight (well under its ~510-token limit). */
 export const MAX_CHUNK_CHARS = 250;
-/**
- * Nothing plays until the first chunk is generated, so it's short: the first sentence, else its first
- * clauses, else its first words, up to this weight.
- */
 export const FIRST_CHUNK_CHARS = 60;
-/**
- * Each later chunk is generated while the one before it plays, so it may be at most this many times
- * longer. On an M-series Mac Kokoro makes speech about 2.8x faster than it plays (19 ms per character
- * for 59 ms of audio, plus ~290 ms per chunk), and trimming the edge silence leaves less to play.
- */
 const GROWTH = 2;
-/** A sentence or clause shorter than this rides with its neighbour: "not me." is never spoken alone. */
 const MIN_PIECE_CHARS = 18;
 
 const ABBREVIATION = /\b(?:Dr|Mr|Mrs|Ms|Prof|Sr|Jr|St|vs|etc|e\.g|i\.e|approx|No|Fig)\.$/;
@@ -55,7 +33,6 @@ const FUNCTION_WORDS = new Set(
   "and but so or that which because when while if then with to of for in on at as than before after until since where who whose whom".split(" "),
 );
 
-/** Digits and capitals are read out one by one, so they cost Kokoro about twice the tokens. */
 const weight = (s: string) => s.length + (s.match(/[\p{N}\p{Lu}]/gu)?.length ?? 0);
 
 const merged = (pieces: string[]) =>
@@ -76,7 +53,6 @@ function sentences(text: string): string[] {
   return merged(out);
 }
 
-/** Cut a clause between words within `limit`, preferring just before a function word past half-way. */
 function wordCut(clause: string, limit: number): [string, string] {
   const words = clause.split(" ");
   if (weight(words[0]!) > limit) {
@@ -99,12 +75,6 @@ function wordCut(clause: string, limit: number): [string, string] {
   return [words.slice(0, cut).join(" "), words.slice(cut).join(" ")];
 }
 
-/**
- * Split text into speakable chunks that grow: the first is short, so speech starts quickly, and each
- * later one is ready before the previous one has finished playing. Whole sentences, else whole
- * clauses (one over the growth budget is taken whole, as a pause at a bare space sounds broken);
- * only a clause over `maxChars`, or the first chunk, is cut between words. Nothing is lost or reordered.
- */
 export function chunkForSpeech(text: string, maxChars = MAX_CHUNK_CHARS): string[] {
   const clean = text
     .replace(/\s*\n+\s*/g, ". ") // Kokoro stops at a newline
@@ -112,8 +82,7 @@ export function chunkForSpeech(text: string, maxChars = MAX_CHUNK_CHARS): string
     .replace(/\.(\s*\.)+/g, ".")
     .replace(/\s+/g, " ")
     .trim();
-  if (!/[\p{L}\p{N}]/u.test(clean)) return []; // nothing to say (blank, or only punctuation)
-  // Clause breaks need a space after them, so "1,000" and "12:30" stay whole.
+  if (!/[\p{L}\p{N}]/u.test(clean)) return [];
   const units = sentences(clean).map((s) => merged(s.split(/(?<=[,;:—–])\s+/)));
 
   const chunks: string[] = [];
@@ -147,7 +116,6 @@ export function chunkForSpeech(text: string, maxChars = MAX_CHUNK_CHARS): string
   return chunks;
 }
 
-/** The text Kokoro should speak, as chunks. */
 export function prepareForKokoro(text: string): string[] {
   return chunkForSpeech(fixPronunciation(text));
 }
