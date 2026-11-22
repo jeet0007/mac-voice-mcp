@@ -14,7 +14,7 @@ npm run dev:plugin     # try this checkout in Claude Code as the "mac-voice-mcp-
 npm run inspect        # MCP Inspector
 ```
 
-`npm install` also turns on a pre-push hook (`.githooks/pre-push`) that runs `npm test` before every push. It includes the timing limits that CI skips, because shared CI runners are too uneven for them. Skip it once with `git push --no-verify`.
+`npm install` also turns on a pre-push hook (`.githooks/pre-push`) that runs `npm test` before every push that sends commits (a push that only deletes branches skips it). It includes the timing limits that CI skips, because shared CI runners are too uneven for them. Skip it once with `git push --no-verify`.
 
 ## Testing on your Mac before a merge
 
