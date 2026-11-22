@@ -2,6 +2,8 @@
 
 Status: planned · Owner: Jeet · Target: 0.8.0 (Mac, headphones first); speakers 0.9.0; Windows after.
 
+Source: `src/call/engine/types.ts`, `src/call/engine/step.ts`, `src/call/engine/words.ts`, `src/call/session.ts`.
+
 ## Goal
 
 > "I start a call. Claude listens, works and answers out loud, like we're on a phone call, until I hang up."
@@ -48,12 +50,12 @@ Claude is still writing (MCP only sees finished tool calls), telephony, cloud sp
 
 - **Start:** `/mac-voice-mcp:call` (Claude Code skill) or the `call` MCP prompt (Desktop/Cursor). Claude calls
   `call { action: "start" }`; the server takes the mic lock, starts the mic engine, writes
-  `voice-mode/call.json` `{ session, startedAt, duplex }`, and says nothing aloud. Claude's `CALL_RULES` tell it to greet once, in a few words, with `say`, then `listen`; the server's own greeting was dropped so the user doesn't hear two.
+  `voice-mode/call.json` `{ pid, startedAt, duplex }` (the plugin hook adds `session`), and says nothing aloud. Claude's `CALL_RULES` tell it to greet once, in a few words, with `say`, then `listen`; the server's own greeting was dropped so the user doesn't hear two.
 - **During:** the mic stays open. Silence never ends the call.
 - **End:** the user says a hang-up phrase ("hang up", "bye Claude", "end the call"), types `/mac-voice-mcp:hangup`,
   or Claude calls `call { action: "end" }`. Also ends on session end, or after `VOICE_MCP_CALL_IDLE_MINUTES`
-  (default 30) with nobody speaking. Ending stops the recorder within 1 s, releases the lock, deletes the
-  inbox, says "Bye".
+  (default 30) with nobody speaking. Ending stops the recorder within 1 s, releases the lock and empties the
+  inbox. Nothing is spoken. Claude notes the end on screen.
 - **One call per Mac:** another window's `speak_and_listen` returns "on a call in another window".
 
 ### Tools (MCP)
@@ -109,12 +111,249 @@ preview, so they're an opt-in extra, not the default.
 ### No dead air
 
 After delivering an utterance, play a soft tick every ~1.5 s until Claude's next `say` or 10 s pass
-(`VOICE_MCP_CALL_THINKING_SOUND=0` turns it off). Permission prompts: a Notification hook says "Claude needs
+(off by default; `VOICE_MCP_CALL_THINKING_SOUND=1` turns it on). Permission prompts: a Notification hook says "Claude needs
 your OK on screen" so the call doesn't silently stall.
 
 ### Voice Buddy
 
 New mood "on a call" (with duration) for the calling window; speaking/listening colours as today.
+
+## Engine
+
+Every rule of a call lives in one pure function, `step(state, event)` in `src/call/engine/step.ts`. It
+returns the next state and a list of effects. The engine reads no clock, plays no audio and does no I/O.
+The engine directory imports nothing outside itself, and `test/engine.test.mjs` fails if it does or if it
+reads the clock. The reasons for this shape, and the barge-in rules on the native backend as a table, are in
+[the call audio redesign](call-audio-redesign.md#synthesis-decision). This section covers the rest.
+
+### Privacy and ids
+
+No state, event or effect field carries text or audio. Fields hold only ids, numbers, booleans and the
+string enums in `types.ts`. The shell keeps the words. A `SayId` names one `say` and the shell holds its
+text. An `UtteranceId` names one thing the user said and the shell holds its transcript. Because nothing
+private is in them, the shell sends every (event, effects) pair to the flight recorder as it is
+(`recordStep`, see [the flight recorder](flight-recorder.md)), and a flight log replays through `step`.
+
+The flight recorder's allowlist is built from `EVENT_STRINGS` and `EFFECT_STRINGS`. They list every event
+and effect type with the values each string field may take. The `StringTable` type makes a missing variant
+or a missing string field a compile error, so the allowlist cannot fall behind the types.
+
+### Policy
+
+The shell fixes a `Policy` at call start.
+
+- `interrupt` says what talking over a reply does. It comes from the audio session
+  ([audio](audio.md)).
+  - `"duck"` (native backend, speakers): the reply goes quieter. Words in what the user has said so far
+    pause it, and the final transcript decides whether it stops.
+  - `"pause"` (headphones): the reply pauses at once, and the transcript decides.
+  - `"none"` (process backend, speakers): the mic cannot hear the user while a reply plays, so a reply waits
+    for the user to finish their sentence.
+- `thinkingTick`: tick while Claude thinks (`VOICE_MCP_CALL_THINKING_SOUND`).
+- `idleMs`: the call ends after this long without a word either way (`VOICE_MCP_CALL_IDLE_MINUTES`).
+
+Knobs and defaults are in [configuration](../configuration.md).
+
+### Timings
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `GIVE_UP_MS` | 2000 ms | After the user talks over Claude, nothing real said within this long resumes the reply. LiveKit's 2 s. |
+| `WORD_CHECK_MS` | 700 ms | Interrupt `"duck"`: look for words this long after the user starts talking over a reply, and again as often while there are none. |
+| `BLIP_QUIET_MS` | 300 ms | Interrupt `"duck"`: no words and quiet this long means a clap or a cough. The reply comes back up without waiting for the utterance to end. |
+| `THINKING_EVERY_MS` | 1500 ms | While Claude thinks, a tick this often. |
+| `THINKING_MAX_MS` | 10 000 ms | Ticks stop this long after Claude started thinking. |
+
+`speech.onset` fires once the user has talked for `BARGE_IN_MS` (250 ms, `src/listen/utterances.ts`).
+
+### State
+
+`State` is `{ phase: "off" }` or `OnCall`. `OnCall` holds:
+
+- `lastActivityAt`: when a reply last ended or the user's words last arrived. The idle timeout counts from it.
+- `user`: `"talking"` from the onset of speech until the utterance ends, else `"quiet"`.
+- `claude`: one of four turns.
+  - `idle`.
+  - `thinking`: the user's words reached Claude, and Claude has not spoken since. `since` and `lastTickAt`
+    drive the tick.
+  - `held`: says waiting for the user to finish their sentence (interrupt `"none"`), oldest first.
+  - `speaking`: one say playing, with `startedAt`, `pausedMs` (how long earlier interruptions paused it),
+    the `queue` of says after it (oldest first) and the current `interruption`, if any.
+- `held` and `speaking` carry `owesReply`: the user's words reached Claude meanwhile, so Claude is thinking
+  once the says have played.
+- `missed`: things the user said that speech to text failed on, since the last one it heard.
+- `undelivered`: words are in the inbox that nobody has handed to Claude yet.
+
+An `Interruption` is the user talking over a reply, until their words stop it or it plays on as before. It
+holds `at` (when it began), `pending` (its utterances still being transcribed), `filler` (one of them was
+only a filler or nothing, so the reply resumes once the user is done) and `reply`, what the talked-over reply
+does meanwhile.
+
+- `ducked`: quieter since `since`. `check` is when to look for words next, `"asked"` while the shell looks,
+  or null for no more checks.
+- `paused`: paused since `since`.
+- `playing`: back at full volume. There are no words yet, but the transcript still decides.
+
+Whichever it is, words in the final transcript stop the reply.
+
+### Events
+
+Every event carries `at`, wall-clock ms stamped by the shell.
+
+| Event | Meaning |
+|---|---|
+| `speech.onset` | The user has talked for `BARGE_IN_MS`. |
+| `speech.dropped` | Sound that came to nothing: `blip` (speech too short to count) or `no-speech`. |
+| `utterance.ended` | An utterance ended: `end-of-turn`, `max-duration`, or `cut` (the mic stopped hearing the user mid-sentence, because of our reply on speakers or mute). |
+| `transcribed` | The final transcript's verdict from `classify`: `words`, `filler`, `hang-up` or `empty`. |
+| `transcribe.failed` | Speech to text failed on that utterance. |
+| `words.checked` | The answer to `words.check`: `words` true or false, or null when whisper could not take the request in time; `quietMs`, how long the user has been quiet. |
+| `say.requested` | Claude called `say`. |
+| `playback.ended` | The say finished, was stopped or failed. |
+| `inbox.drained` | `listen`, the plugin hook or Voice Buddy took the user's words. |
+| `end.requested` | An end asked for from outside: `requested` (Claude or a shutdown), `session-ended` (call.json gone), `mic-lost` (the recorder failed). |
+| `tick` | The wake `nextWake` asked for. Harmless at any other time. |
+
+### Effects
+
+| Effect | Meaning |
+|---|---|
+| `speech.start` | Play the say. |
+| `speech.duck` / `speech.restore` | Quieter while the user talks over it (interrupt `"duck"`); back to full volume. |
+| `speech.pause` / `speech.resume` | Pause at the exact position; resume from it. |
+| `speech.stop` | Stop a playing say. |
+| `speech.drop` | A queued say that never plays. |
+| `deliver` | Put the utterance in the inbox. `interrupted` names the reply its words stopped and `playedMs` of it played; `missed` is how many things said before it were lost. |
+| `words.check` | Look for words in what the user has said so far over `say`. The answer comes back as `words.checked`. |
+| `cue` | Play `thinking-tick`. |
+| `teardown` | End the call for an `EndReason`: an end request, `hang-up` or `idle`. |
+
+### Rules
+
+`step` is total. An event that means nothing in the current state (a late `playback.ended`, a stray `tick`,
+anything after the call ended) returns the state unchanged and no effects. `nextWake(state)` returns the
+earliest deadline in the state, so the shell needs one timer. It returns null once the call is over.
+
+- **Next say.** When a reply ends, the next queued say plays. With nothing queued, Claude is thinking if
+  it owes a reply, else idle. On interrupt `"none"` a say waits (`held`) while the user talks, because on
+  speakers the mic goes deaf while Claude speaks and would cut the user's sentence short. It starts when the
+  user goes quiet. There is no timer on the hold; the recorder's 60 s sentence limit ends any utterance.
+- **A say ends thinking.** `say.requested` clears `undelivered` and `owesReply`. Claude is talking, so words
+  taken before the say, or returned with its result, need no ticks.
+- **A ducked reply that ends under the user.** The next say starts ducked, and the same transcript decides it.
+- **Thinking tick.** While thinking, a `cue` every `THINKING_EVERY_MS` until `THINKING_MAX_MS`. No tick while
+  the user talks, but the 10 s limit still runs out.
+- **Talking over a reply.** Onset during a reply pauses it (interrupt `"pause"`) or ducks it and schedules a
+  word check (interrupt `"duck"`). A reply already paused or ducked is left alone, and the transcript still out
+  decides. Onset does nothing on interrupt `"none"`.
+- **Word check.** See the redesign's table. A late `words.checked` (the transcript decided first, or a newer
+  check is due) changes nothing. Words pause the reply; nothing is ever dropped on a partial. A null answer
+  means whisper was busy or cold, so the reply stays ducked and the final decides.
+- **Final transcript.** `hang-up` ends the call from any state. For an utterance said over a reply, real words
+  stop the reply, drop its queue and deliver with `interrupted`. `playedMs` is the time from `startedAt` to
+  the interruption, minus `pausedMs`. A filler, a cough or empty means nothing for Claude, and the reply
+  resumes. Any other utterance that is not empty is delivered.
+- **Settling.** Once the user has stopped and no transcript is out, a ducked reply comes back up at once. A
+  paused one resumes after a filler, or `GIVE_UP_MS` after it paused. On interrupt `"duck"` a resume also
+  restores the volume. The time paused is added to `pausedMs`.
+- **Missed words.** Each `transcribe.failed` adds one to `missed`. The next delivery carries the count and
+  resets it.
+- **Handed over.** `inbox.drained` with words undelivered makes Claude thinking, or sets `owesReply` while
+  it speaks.
+- **Idle.** A tick `idleMs` after `lastActivityAt` ends the call with `idle`.
+- **Ending.** A paused or ducked reply is stopped so it does not stay that way. A reply that is playing
+  finishes, because it is Claude's goodbye. Queued says are dropped. Then `teardown`.
+
+### What a transcript means
+
+`src/call/engine/words.ts` reads the words so the engine gets only the verdict.
+
+- `classify` returns `hang-up` first, then `empty` for no text, then `filler` or `words`.
+- **Hang-up** must be the whole transcript: "hang up", "hangup", "end call", "end the call", "bye Claude" or
+  "goodbye Claude". Politeness and the name around it are fine ("Okay, hang up now.", "Bye, Claude."). Any
+  negation ("don't", "do not", "not", "never") rules it out ("Don't hang up yet.").
+- **Filler** is backchannel only ("Mm-hmm.", "Yeah, okay."): mm, mmm, hmm, mhm, mm-hmm, mm-hm, uh-huh, uh,
+  um, ah, oh, okay, ok, yeah, yep, right, sure. Talking over Claude with a filler does not cut its reply.
+  Sound tags whisper adds ("[BLANK_AUDIO]", "(coughs)") are not words.
+- `heardSoFar(text, playedMs)` estimates the words of a reply the user heard, at 2.7 words per second (about
+  how fast the voices speak), at least one word. It is off by a few words; word timings from the voices
+  would fix it.
+- `echoes(heard, reply)` is true when what was heard is only a stretch of the reply, two words or more. That
+  is our own reply let through by the echo canceller, so the word check ignores it.
+
+## Call session shell
+
+`src/call/session.ts` is the shell around the engine. It owns what the engine cannot touch: the audio
+session, the transcripts and reply texts (the engine knows them by id), the voice-mode files and the timers.
+It turns what happens into events and performs the effects. There is one `Call`, exported as `call`.
+
+### Audio and transcription
+
+One audio session runs for the whole call (`listenContinuously` in `src/listen/utterances.ts`). The session
+holds the mic lock throughout, so other windows' voice turns give up at once. On speakers with the process
+backend the mic cannot hear the user while `say` plays (`src/audio/device.ts`). On headphones and on the
+native backend it can, so the user can talk over Claude.
+
+Each utterance is transcribed on the Mac and left in the inbox for `listen`, `say`, the plugin hook or Voice
+Buddy to hand to Claude. Utterances are transcribed in the order they were said, one chain. A failure in
+the chain is logged and does not stop the rest of the call being heard. The shell counts finals queued or
+running, because a word check would wait behind them in whisper. The live transcript only asks for a
+partial when none are. The call's `LiveTranscript` serves both the bubble's live words and the word check
+(see [the live transcript](live-transcript.md)). Mic levels go to the levels file every other 30 ms frame,
+as `<dB> <threshold dB>`. That is plenty for the bubble's glow, which smooths it anyway.
+
+At start the shell prewarms whisper and Kokoro, so the first words of the call do not wait for the voice to
+load. The caller of `start` runs the preflight and has Claude speak the greeting.
+
+### Dispatch and timers
+
+`dispatch` stamps each event with `Date.now()` and drains a queue. An event sent from inside an effect waits
+its turn, so the engine never sees an event before it has finished with the previous one. One timer covers
+every engine deadline (`arm`). A tick that comes early changes nothing and arms the timer again. The delay is
+capped at 2^31 - 1 ms, because `setTimeout` fires at once past that.
+
+A poll every 250 ms (`WATCH_MS`) checks the world outside the engine.
+
+- **call.json.** If it is gone or names another pid, the session ended (the plugin hook removes it), and the
+  call ends with `session-ended`. The `session` the hook adds is recorded as this window's own, so another
+  window's typing cannot stop the call.
+- **Permission notice.** If the permission file exists, the shell removes it and says `PERMISSION_NOTICE`.
+- **Inbox.** Voice Buddy blanks an inbox entry once it has handed it to Claude, so the shell deletes empty
+  files and nothing is kept. When no `.json` entry is left and the engine has words undelivered, it sends
+  `inbox.drained`.
+
+### Say
+
+`say` queues the text and returns once it has started, or after `EARLY_FAILURE_MS` (300 ms). A say that fails
+in that window (no voice installed) throws from that call. A later failure becomes a note in the next `say`
+result. On interrupt `"none"` a say first waits for the user to finish their sentence. Typing does not stop
+it. `speech.duck` sets the reply's gain to 0.3 (`DUCK_GAIN`). `words.check` asks the live transcript for a
+partial that can start within 300 ms (`CHECK_START_MS`), since whisper serves one request at a time. A
+partial counts as words when `classify` says `words` or `hang-up` and it does not echo the reply.
+
+The shell chains every say into one promise for the next voice turn to wait on. A dropped say settles at
+once, while the one before it may still play (a goodbye).
+
+### Delivery
+
+`deliver` adds the transcript to the inbox and wakes any waiting `listen`. An interrupted utterance is
+prefixed with `(You interrupted Claude after: '<words heard so far>')`. When speech to text failed on earlier
+utterances, a `voice-mcp note` tells Claude how many and why, asks it to tell the user what it did hear, and
+names the failure file. The bubble gets only the transcript; the notes are for Claude.
+
+On each speech-to-text failure the shell writes `last-stt-failure.json` in the cache dir, for debugging and a
+future `/issue`: `{ at, error, failures, model, version, platform }`.
+
+### Ending
+
+The call ends when the user says a hang-up phrase, when Claude calls `call end`, after
+`VOICE_MCP_CALL_IDLE_MINUTES` without a word either way (fractions work; the tests use seconds), when
+call.json disappears, when the recorder fails, or at shutdown. Teardown runs synchronously, so a shutdown
+that exits right after leaves nothing behind. It aborts the loop, empties the inbox, removes call.json and
+the mute and levels files, stops the bubble and clears the phase. It stops the recorder at once; the mic is
+given back once the recorder has exited, and the next `start` waits for that. `endedBecause` tells a later
+`listen` or `say` why: "the user hung up", "nobody said anything for N minutes", or the reason given to
+`end`.
 
 ## Phase 0 results (2026-10-29, Claude Code 2.1.312, Jeet's Mac)
 

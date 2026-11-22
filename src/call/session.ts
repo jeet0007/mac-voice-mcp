@@ -1,30 +1,4 @@
-/**
- * A call: the mic stays open from `call start` until the user hangs up, like a phone call, instead
- * of one turn at a time (docs/specs/call-mode.md).
- *
- * This is the shell around the call engine (engine/step.ts), which holds every rule: when a reply
- * plays, waits, pauses or stops, when Claude is thinking, when the call ends. The shell owns what
- * the engine can't touch: the audio session, the transcripts and the texts of the replies (the
- * engine knows them by id), the voice-mode files and the timers. It turns what happens into events,
- * and does what the engine decides.
- *
- * One audio session runs for the whole call (src/listen/utterances.ts listenContinuously). Each
- * utterance is transcribed on this Mac and left in the inbox for `listen`, `say`, the plugin hook or
- * Voice Buddy to hand to Claude. The session holds the mic lock throughout, so other windows' voice
- * turns give up at once. On speakers the mic can't hear the user while `say` plays
- * (src/audio/device.ts), so a reply waits for them to finish their sentence; on headphones it stays
- * open, so the user can talk over Claude: speech pauses the reply, real words drop the rest of it,
- * and a filler ("mm-hm") or a cough resumes it. On the native backend the mic hears the user over
- * the reply too: speech makes it quieter, words in a partial transcript pause it, and the final
- * transcript stops or resumes it.
- *
- * It ends when the user says "hang up", when Claude calls `call end`, after
- * VOICE_MCP_CALL_IDLE_MINUTES (default 30) without a word either way, when call.json disappears
- * (the plugin hook removes it when the session ends), when the recorder fails, or at shutdown.
- * After the user's words reach Claude a soft tick plays every 1.5 s until Claude speaks (10 s at most),
- * and a permission prompt on screen is said out loud, so the line never goes quiet while Claude waits.
- * Ending stops the recorder within a second and empties the inbox. Nothing is spoken: Claude notes it on screen.
- */
+// The call session shell: audio, transcripts, files and timers around the pure call engine. See docs/specs/call-mode.md.
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -47,70 +21,53 @@ import { initial, nextWake, step } from "./engine/step.js";
 import type { Effect, EndReason, Event, SayId, State, UtteranceId } from "./engine/types.js";
 import { classify, echoes, heardSoFar } from "./engine/words.js";
 
-/** The last speech-to-text failure on a call, kept for debugging (and a future /issue). */
 const sttFailureFile = () => path.join(CONFIG.cacheDir, "last-stt-failure.json");
 
 const missedNote = (count: number, error: string) =>
   `(voice-mcp note: speech to text failed on ${count === 1 ? "something" : `${count} things`} the user said just before this (${error}), ` +
   `so you may have missed words. Tell them, say what you did hear, and that the failure is recorded in ${sttFailureFile()}.)`;
 
-/** How often the call checks call.json, the permission notice and the inbox. */
 const WATCH_MS = 250;
-/** A `say` that fails right away (no voice installed) is reported by that call; later failures by the next one. */
 const EARLY_FAILURE_MS = 300;
-/** The call ends after this long without a word either way. Fractions are fine (the tests use seconds). */
+// Fractions are fine: the tests use seconds.
 const IDLE_MS = Math.max(0.01, envNum("VOICE_MCP_CALL_IDLE_MINUTES", 30)) * 60_000;
-/** A talked-over reply's volume while the word check decides (interrupt "duck"). */
 const DUCK_GAIN = 0.3;
-/** Whisper serves one request at a time: a word check that can't start this soon is decided by the final transcript. */
 const CHECK_START_MS = 300;
-/** The longest setTimeout takes: a longer one fires at once. */
+// setTimeout fires at once past this.
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
 
-/** An engine event, before the shell stamps it with the time. */
 type Happened = Event extends infer E ? (E extends unknown ? Omit<E, "at"> : never) : never;
 
-/** One `say`: what the engine knows by id. */
 interface Say {
   text: string;
   reply: Reply | null;
-  /** Why it couldn't be spoken, if that was known before `say` returned. */
   failure: unknown;
   returned: boolean;
-  /** It has played, failed, or was dropped. */
   settle: () => void;
 }
 
 export class Call {
-  /** Why the last call ended, for a `listen` or `say` that comes after. */
   endedBecause = "";
   private engine: State = { phase: "off" };
   private events: Event[] = [];
   private draining = false;
-  /** The engine's next deadline. */
   private wake: NodeJS.Timeout | undefined;
   private watch: NodeJS.Timeout | undefined;
   private session: AudioSession | null = null;
   private ctl: AbortController | null = null;
   private loop: Promise<void> | null = null;
-  /** The last call giving the mic back. */
   private closing: Promise<void> = Promise.resolve();
-  /** Why `end.requested` was sent. */
   private requested = "";
-  /** Says and utterances take their ids from one counter. */
   private ids = 0;
   private says = new Map<SayId, Say>();
-  /** Each transcript, while the engine decides what to do with it. */
   private transcripts = new Map<UtteranceId, string>();
-  /** Utterances are transcribed in the order they were said. */
+  // Utterances are transcribed one at a time, in the order they were said.
   private transcribing: Promise<void> = Promise.resolve();
-  /** Final transcripts queued or running: a word check would wait behind them. */
+  // Finals queued or running; a word check would wait behind them in whisper.
   private finals = 0;
-  /** The partial transcripts of the utterance being said, shared by the bubble and the word check. */
   private live: LiveTranscript | null = null;
-  /** Every `say` so far, for the next voice turn to wait on: a dropped say settles at once, while the one before it may still play (a goodbye). */
+  // A dropped say settles at once while the one before it may still play (a goodbye), so chain them all.
   private spoken: Promise<unknown> = Promise.resolve();
-  /** Problems with earlier speech, reported in the next result. */
   private laterNotes: string[] = [];
   private sttError = "";
   private wakers = new Set<() => void>();
@@ -119,7 +76,7 @@ export class Call {
     return this.engine.phase === "on";
   }
 
-  /** Take the mic for the call. Resolves "already" when one is on. The caller preflights and speaks the greeting. */
+  // The caller preflights and speaks the greeting.
   async start(signal?: AbortSignal): Promise<"started" | "already"> {
     if (this.on) return "already";
     await this.closing;
@@ -145,16 +102,12 @@ export class Call {
     return "started";
   }
 
-  /** End the call for `reason`, whatever state it's in; harmless when it's already over. */
   async end(reason: string): Promise<void> {
     this.finish("requested", reason);
     await this.closing;
   }
 
-  /**
-   * Queue `text` for the speaker and return once it has started (or failed at once). While it
-   * plays on speakers the mic can't hear the user, so there it first waits for them to finish their sentence; typing doesn't stop it. Returns notes about earlier speech that failed.
-   */
+  // Returns once speech has started or failed at once, with notes about earlier speech that failed.
   async say(text: string): Promise<string[]> {
     if (!this.on) return this.laterNotes.splice(0);
     const id = ++this.ids as SayId;
@@ -171,7 +124,6 @@ export class Call {
     return this.laterNotes.splice(0);
   }
 
-  /** What the user has said so far, oldest first; waits up to `ms` for the first word. */
   async listen(ms: number, signal?: AbortSignal): Promise<InboxEntry[]> {
     const deadline = Date.now() + ms;
     for (;;) {
@@ -193,10 +145,7 @@ export class Call {
     }
   }
 
-  /**
-   * Hand the engine what happened, and do what it decides. An event sent from inside an effect
-   * waits its turn, so the engine never sees one before it has finished with the one before.
-   */
+  // An event sent from inside an effect waits its turn, so the engine finishes one before the next.
   private dispatch(event: Happened): void {
     this.events.push({ ...event, at: Date.now() } as Event);
     if (this.draining) return;
@@ -214,7 +163,7 @@ export class Call {
     }
   }
 
-  /** One timer for every deadline of the engine. A tick that comes early changes nothing and arms the timer again. */
+  // A tick that comes early changes nothing and arms the timer again.
   private arm(): void {
     clearTimeout(this.wake);
     const at = nextWake(this.engine);
@@ -280,7 +229,6 @@ export class Call {
     })();
   }
 
-  /** Are there words in what the user has said so far over `id`? Our own reply heard back doesn't count. */
   private checkWords(id: SayId): void {
     const live = this.live;
     const reply = this.says.get(id)?.text ?? "";
@@ -290,7 +238,7 @@ export class Call {
     });
   }
 
-  /** Everything that must not outlive the call, done at once: a shutdown that exits right after leaves nothing behind. */
+  // Synchronous, so a shutdown that exits right after leaves nothing behind.
   private teardown(reason: EndReason): void {
     this.endedBecause = reason === "hang-up" ? "the user hung up" : reason === "idle" ? `nobody said anything for ${Math.round(IDLE_MS / 60_000)} minutes` : this.requested;
     log(`call ended: ${this.endedBecause}`);
@@ -311,7 +259,6 @@ export class Call {
     this.closing = Promise.all([loop, closed]).then(() => {});
   }
 
-  /** Ask the engine to end the call; `because` is what a later `listen` or `say` is told. */
   private finish(reason: (Event & { type: "end.requested" })["reason"], because: string): void {
     if (!this.on) return;
     this.requested = because;
@@ -323,7 +270,6 @@ export class Call {
     prewarm(model);
     prewarmKokoro(); // the first words of the call shouldn't wait for the voice to load
     let levelFrames = 0;
-    // Rough words while the user talks, for the bubble's panel and the word check (docs/specs/live-transcript.md).
     const live = (this.live = new LiveTranscript({
       everyMs: CONFIG.liveTranscriptMs,
       enabled: () => bubbleTakesText() && partialsAvailable(),
@@ -362,7 +308,7 @@ export class Call {
     try {
       const transcript = await transcribeBuffer(wav, model, signal);
       debug(`call heard: ${JSON.stringify(transcript)}`);
-      if (signal.aborted) return; // the call ended meanwhile
+      if (signal.aborted) return;
       this.transcripts.set(utterance, transcript);
       this.dispatch({ type: "transcribed", utterance, heard: classify(transcript) });
     } catch (err) {
@@ -372,7 +318,6 @@ export class Call {
     }
   }
 
-  /** Speech to text failed on something the user said: record it, and tell Claude with the next thing heard. */
   private notHeard(utterance: UtteranceId, err: unknown, model: string): void {
     const error = err instanceof Error ? err.message : String(err);
     log(`call: speech to text failed: ${error}`);
@@ -389,7 +334,6 @@ export class Call {
     }
   }
 
-  /** The world outside the engine: call.json, the permission notice, the inbox. */
   private poll(): void {
     if (this.engine.phase !== "on") return;
     const mark = readJson(callFile()) as { pid?: unknown; session?: unknown } | null;
@@ -411,7 +355,7 @@ export class Call {
         else if (name.endsWith(".json")) waiting = true;
       }
     } catch {
-      /* no inbox yet */
+      // no inbox yet
     }
     if (this.engine.undelivered && !waiting) this.dispatch({ type: "inbox.drained" });
   }

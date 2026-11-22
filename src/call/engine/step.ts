@@ -1,4 +1,4 @@
-/** Every rule of a call, as one pure function: no audio, no clock, no I/O (docs/specs/call-audio-redesign.md). */
+// Every rule of a call as one pure function, with no audio, clock or I/O. See docs/specs/call-mode.md.
 import {
   BLIP_QUIET_MS,
   GIVE_UP_MS,
@@ -26,10 +26,7 @@ const IDLE: ClaudeTurn = { kind: "idle" };
 
 export const initial = (policy: Policy, at: Ms): OnCall => ({ phase: "on", policy, lastActivityAt: at, user: "quiet", claude: IDLE, missed: 0, undelivered: false });
 
-/**
- * What the call does about `event`. Total: an event that means nothing in this state (a late
- * playback.ended, a stray tick, anything after the call ended) returns the state and no effects.
- */
+// Total: an event that means nothing in this state returns the state and no effects.
 export function step(state: State, event: Event): Step {
   if (state.phase === "off") return [state, []];
   switch (event.type) {
@@ -60,7 +57,6 @@ export function step(state: State, event: Event): Step {
   }
 }
 
-/** When the shell must send the next `tick`: the earliest deadline in the state. null once the call is over. */
 export function nextWake(state: State): Ms | null {
   if (state.phase === "off") return null;
   const { claude, user, policy, lastActivityAt } = state;
@@ -73,7 +69,6 @@ export function nextWake(state: State): Ms | null {
   return Math.min(...wakes);
 }
 
-/** Claude is free to speak: play the next say, hold it while the user talks on speakers, or go back to thinking. */
 function next(s: OnCall, queue: readonly SayId[], owesReply: boolean, at: Ms, over: Interruption | null = null): Step {
   const [say, ...rest] = queue;
   if (say === undefined) return [{ ...s, claude: owesReply ? thinking(s, at) : IDLE }, []];
@@ -91,7 +86,7 @@ function next(s: OnCall, queue: readonly SayId[], owesReply: boolean, at: Ms, ov
 const thinking = (s: OnCall, at: Ms): ClaudeTurn => (s.policy.thinkingTick ? { kind: "thinking", since: at, lastTickAt: at } : IDLE);
 
 function say(s: OnCall, id: SayId, at: Ms): Step {
-  // Claude is talking: words taken before this, or with this say's result, need no ticks.
+  // Words taken before this say, or with its result, need no ticks.
   const answered = { ...s, undelivered: false };
   const c = s.claude;
   if (c.kind === "speaking") return [{ ...answered, claude: { ...c, queue: [...c.queue, id], owesReply: false } }, []];
@@ -110,7 +105,6 @@ function onset(s: OnCall, at: Ms): Step {
   return [{ ...talking, claude: { ...c, interruption: { ...i, reply } } }, [{ type: reply.kind === "paused" ? "speech.pause" : "speech.duck", say: c.say }]];
 }
 
-/** The reply quieter and a word check due: ask the shell to look. */
 function check(s: OnCall, at: Ms): Step | null {
   const c = s.claude;
   if (c.kind !== "speaking" || s.user !== "talking") return null;
@@ -119,7 +113,6 @@ function check(s: OnCall, at: Ms): Step | null {
   return [talkedOver(s, { ...reply, check: "asked" }), [{ type: "words.check", say: c.say }]];
 }
 
-/** What the word check found decides how the reply sounds until the transcript comes. */
 function checked(s: OnCall, words: boolean | null, quietMs: number, at: Ms): Step {
   const c = s.claude;
   if (c.kind !== "speaking") return [s, []];
@@ -134,34 +127,29 @@ function checked(s: OnCall, words: boolean | null, quietMs: number, at: Ms): Ste
   return [talkedOver(s, { kind: "playing" }), [{ type: "speech.restore", say: c.say }]];
 }
 
-/** `s` with the talked-over reply now doing `reply`. */
 function talkedOver(s: OnCall, reply: TalkedOver): OnCall {
   const c = s.claude;
   if (c.kind !== "speaking" || !c.interruption) return s;
   return { ...s, claude: { ...c, interruption: { ...c.interruption, reply } } };
 }
 
-/** The user stopped talking, however it ended: a held say starts, a paused reply may resume. */
 function quiet(s: OnCall, at: Ms): Step {
   const q = { ...s, user: "quiet" as const };
   return q.claude.kind === "held" ? next(q, q.claude.queue, q.claude.owesReply, at) : settle(q, at);
 }
 
-/** An utterance said over a reply decides, once transcribed, whether the reply stops. */
 function awaitTranscript(s: OnCall, utterance: UtteranceId): OnCall {
   const c = s.claude;
   if (c.kind !== "speaking" || !c.interruption) return s;
   return { ...s, claude: { ...c, interruption: { ...c.interruption, pending: [...c.interruption.pending, utterance] } } };
 }
 
-/** The reply `utterance` was said over, while that is still undecided. */
 function interrupted(s: OnCall, utterance: UtteranceId) {
   const c = s.claude;
   if (c.kind !== "speaking" || !c.interruption?.pending.includes(utterance)) return null;
   return { ...c, interruption: c.interruption };
 }
 
-/** `utterance` is transcribed, or failed: its interruption, if any, no longer waits for it. */
 function forget(s: OnCall, utterance: UtteranceId, filler: boolean): OnCall {
   const c = interrupted(s, utterance);
   if (!c) return s;
@@ -173,7 +161,6 @@ function transcribed(s: OnCall, utterance: UtteranceId, heard: Heard, at: Ms): S
   if (heard === "hang-up") return end(s, "hang-up");
   const over = interrupted(s, utterance);
   if (!over) return heard === "empty" ? [s, []] : deliver(s, utterance, [], null, at);
-  // A filler ("mm-hm") or a cough over Claude: nothing for Claude, and its reply resumes.
   if (heard !== "words") return settle(forget(s, utterance, true), at);
   const playedMs = over.interruption.at - over.startedAt - over.pausedMs;
   const stopped: Effect[] = [{ type: "speech.stop", say: over.say }, ...drop(over.queue)];
@@ -189,10 +176,6 @@ function deliver(s: OnCall, utterance: UtteranceId, before: readonly Effect[], c
   ];
 }
 
-/**
- * Back to normal once the user has stopped and said nothing real. A paused reply resumes after a
- * filler, or nothing within GIVE_UP_MS of being paused; a quieter one comes back up at once.
- */
 function settle(s: OnCall, at: Ms): Step {
   const c = s.claude;
   if (c.kind !== "speaking" || !c.interruption || s.user === "talking" || c.interruption.pending.length) return [s, []];
@@ -206,7 +189,6 @@ function settle(s: OnCall, at: Ms): Step {
   return [{ ...s, claude: { ...c, interruption: null, pausedMs: c.pausedMs + (at - reply.since) } }, resume];
 }
 
-/** Whoever handed the words over (listen, the plugin hook, Voice Buddy), Claude has them now. */
 function drained(s: OnCall, at: Ms): Step {
   if (!s.undelivered) return [s, []];
   const c = s.claude;
