@@ -1,5 +1,9 @@
 #!/bin/sh
 # Runs the full test suite before every push, including the timing limits CI skips
 # (shared CI runners are too uneven for them). Skip once with: git push --no-verify
+while read -r _ local_sha _ _; do
+  case "$local_sha" in *[!0]*) pushes_commits=1 ;; esac
+done
+[ -n "$pushes_commits" ] || exit 0  # only branch deletions: nothing to test
 echo "pre-push: running npm test (skip with --no-verify)…"
 exec npm test --silent
