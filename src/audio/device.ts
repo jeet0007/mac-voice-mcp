@@ -84,7 +84,7 @@ const recorders = new Set<Promise<void>>();
 
 /**
  * The one routing rule. Only a call plays replies while its mic is open. "duck" is the native backend:
- * with VOICE_MCP_AUDIO=native on macOS 15+, once setup built the worker, on the Mac's own or wired
+ * on macOS 15+ unless VOICE_MCP_AUDIO=process, once setup built the worker, on the Mac's own or wired
  * speakers. Otherwise, on headphones a reply can pause for the user, and on speakers its sound reaches the mic.
  */
 async function route(purpose: Purpose): Promise<Interrupt> {
@@ -94,6 +94,13 @@ async function route(purpose: Purpose): Promise<Interrupt> {
   const output = useNative ? await backend.outputRoute() : undefined;
   if (output === "speakers") return "duck";
   return (await backend.detectDuplex(output)) === "full" ? "pause" : "none";
+}
+
+/** The backend a call would use now, in words (doctor). */
+export async function describeCallAudio(): Promise<string> {
+  const interrupt = await route("call");
+  if (interrupt === "duck") return "native: the echo-cancelled audio worker, so the user can talk over Claude";
+  return `process: the recorder, ${interrupt === "pause" ? "and a reply pauses when the user talks (headphones)" : "with the mic muted while Claude speaks"}`;
 }
 
 /** The audio worker, once every process recorder has exited; null, with a flight event, if it can't start. */

@@ -56,9 +56,20 @@ function sandbox({ installed = true } = {}) {
       // Don't add Homebrew's folders to PATH: on a real Mac they contain the real tools,
       // and these tests must only ever see the stubs.
       VOICE_MCP_EXTRA_PATH: "",
+      // These calls test the process backend (test/native-audio.test.mjs has the native one), and
+      // install=true never runs the real swiftc for the worker.
+      VOICE_MCP_AUDIO: "process",
       ...extra,
     }),
   };
+}
+
+/** The worker stub (test/stubs/audio-worker.mjs) installed as the worker setup built. */
+function withWorker(sb) {
+  const bin = path.join(sb.home, ".cache", "mac-voice-mcp", "bin", "audio-worker");
+  mkdirSync(path.dirname(bin), { recursive: true });
+  symlinkSync(path.join(ROOT, "test", "stubs", "audio-worker.mjs"), bin);
+  writeFileSync(`${bin}.hash`, createHash("sha256").update(readFileSync(path.join(ROOT, "native", "audio-worker.swift"))).digest("hex"));
 }
 
 async function connect(env) {
@@ -1286,6 +1297,7 @@ test("call start speaks nothing; only Claude's first say is heard, and the rules
 test("while the call speaks, the mic is muted: what plays isn't transcribed back", async () => {
   const sb = sandbox();
   fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  withWorker(sb); // VOICE_MCP_AUDIO=process keeps the call off it
   // Claude's first say plays for 4 s, over both of the recorder's utterances (at about 0.5 s and 2.7 s).
   const { client } = await connect(sb.env({ STUB_SCENARIO: "call", STUB_SAY_MS: "4000" }));
   try {
@@ -1293,6 +1305,7 @@ test("while the call speaks, the mic is muted: what plays isn't transcribed back
     await client.callTool({ name: "say", arguments: { text: "Hi there." } });
     assert.ok(await waitFor(() => /^speak-end "Hi there\."/m.test(sb.readLog()), 6000));
     assert.doesNotMatch(sb.readLog(), /whisper-server inference|whisper-cli wav/, "nothing was transcribed");
+    assert.doesNotMatch(sb.readLog(), /^worker /m, "the worker never ran");
   } finally {
     await client.close();
   }
@@ -1359,9 +1372,10 @@ test("a filler like 'mm-hmm' over Claude only pauses it: the reply resumes and f
   }
 });
 
-test("on speakers (half duplex) talking over Claude doesn't pause it", { skip: process.platform === "win32" }, async () => {
+test("on speakers with VOICE_MCP_AUDIO=process (half duplex) talking over Claude doesn't pause it", { skip: process.platform === "win32" }, async () => {
   const sb = sandbox();
   fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  withWorker(sb);
   const { client } = await connect(sb.env({ STUB_SCENARIO: "bargein", STUB_SAY_MS: "4000", STUB_TRANSCRIPT: "Wait, use the other file." }));
   try {
     await client.callTool({ name: "call", arguments: { action: "start" } });
@@ -1370,6 +1384,7 @@ test("on speakers (half duplex) talking over Claude doesn't pause it", { skip: p
     assert.equal(await waitForStat(pid, (s) => s.startsWith("T"), 1000), false, "never paused");
     assert.ok(await waitFor(() => new RegExp(`^speak-end ${JSON.stringify(LONG_REPLY)}`, "m").test(sb.readLog()), 6000), "the reply finished");
     assert.doesNotMatch(sb.readLog(), /whisper-server inference/, "the mic was muted, so nothing was transcribed");
+    assert.doesNotMatch(sb.readLog(), /^worker /m, "the worker never ran");
   } finally {
     await client.close();
   }
@@ -1620,21 +1635,22 @@ test("setup offers the call bubble on a Mac with swiftc, and builds it only with
   }
 });
 
-test("setup mentions the audio worker only with VOICE_MCP_AUDIO=native, and builds it only with install=true", { skip: (process.platform !== "darwin" || Number(os.release().split(".")[0]) < 24) && "the worker needs macOS 15" }, async () => {
+test("setup recommends the audio worker by default (not with VOICE_MCP_AUDIO=process), without it READY, and builds it only with install=true", { skip: (process.platform !== "darwin" || Number(os.release().split(".")[0]) < 24) && "the worker needs macOS 15" }, async () => {
   const sb = sandbox();
   fakeModel(path.join(cacheDir(sb), "models"));
   const swiftcRuns = () => sb.readLog().split("\n").filter((l) => /^swiftc .*audio-worker/.test(l)).length;
   let c = await connect(withSwiftc(sb));
   try {
-    assert.doesNotMatch(text(await c.client.callTool({ name: "voice_setup", arguments: {} })), /Audio worker|audio worker/, "no new prompt by default");
+    assert.doesNotMatch(text(await c.client.callTool({ name: "voice_setup", arguments: {} })), /Audio worker|audio worker/, "opted out");
   } finally {
     await c.client.close();
   }
-  c = await connect(withSwiftc(sb, { VOICE_MCP_AUDIO: "native" }));
+  c = await connect(withSwiftc(sb, { VOICE_MCP_AUDIO: undefined }));
   try {
     const check = text(await c.client.callTool({ name: "voice_setup", arguments: {} }));
-    assert.match(check, /^• Audio worker: echo-cancelled calls on speakers \(VOICE_MCP_AUDIO=native\); built on this Mac in about 10 s$/m);
-    assert.match(check, /Ask the user whether to build it\. Only if they agree, call voice_setup with install=true\./);
+    assert.match(check, /^voice-mcp setup — READY$/m);
+    assert.match(check, /^• Audio worker: lets the user talk over Claude on the Mac's own speakers during a call; built on this Mac in about 10 s$/m);
+    assert.match(check, /Recommended: ask the user whether to build the audio worker, .* Only if they agree, call voice_setup with install=true\./);
     assert.equal(swiftcRuns(), 0, "nothing built without consent");
     const built = text(await c.client.callTool({ name: "voice_setup", arguments: { install: true } }));
     assert.match(built, /^✔ Audio worker: echo-cancelled calls on the Mac's own speakers, built on this Mac$/m);

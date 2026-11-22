@@ -276,16 +276,16 @@ function bubbleCheck(): Check | null {
   return { label, status: "optional", detail: state === "stale" ? "a new version needs building" : "a floating call window; built on this Mac in about 10 s", bubble: true };
 }
 
-/** The audio worker, only once VOICE_MCP_AUDIO=native asks for it: built on this Mac with swiftc, never downloaded. */
+/** The audio worker (macOS 15+; VOICE_MCP_AUDIO=process turns it off): built on this Mac with swiftc, never downloaded. */
 function workerCheck(): Check | null {
-  if (!IS_MAC || CONFIG.audio !== "native") return null;
+  if (!IS_MACOS_15 || CONFIG.audio !== "native") return null;
   const label = "Audio worker";
   if (nativeBuilding("audio-worker")) return { label, status: "installing", detail: "building with swiftc" };
-  if (!IS_MACOS_15) return { label, status: "optional", detail: "VOICE_MCP_AUDIO=native needs macOS 15 or later; calls use the recorder" };
   const state = nativeState("audio-worker");
   if (state === "built") return { label, status: "ok", detail: "echo-cancelled calls on the Mac's own speakers, built on this Mac" };
-  if (!findSwiftc()) return { label, status: "optional", detail: "VOICE_MCP_AUDIO=native builds it on this Mac; it needs Xcode's Command Line Tools (`xcode-select --install`)" };
-  return { label, status: "optional", detail: state === "stale" ? "a new version needs building" : "echo-cancelled calls on speakers (VOICE_MCP_AUDIO=native); built on this Mac in about 10 s", worker: true };
+  const what = "lets the user talk over Claude on the Mac's own speakers during a call";
+  if (!findSwiftc()) return { label, status: "optional", detail: `${what}; it needs Xcode's Command Line Tools (\`xcode-select --install\`)` };
+  return { label, status: "optional", detail: state === "stale" ? "a new version needs building" : `${what}; built on this Mac in about 10 s`, worker: true };
 }
 
 // --- The flow ------------------------------------------------------------------------------
@@ -376,8 +376,8 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
     }
     if (checks.some((c) => c.worker && c.status === "optional") && !install) {
       lines.push(
-        "Optional: VOICE_MCP_AUDIO=native asks for the audio worker, so the user can talk over Claude on speakers during a call " +
-          "(built on this Mac from source in about 10 s). Ask the user whether to build it. Only if they agree, call voice_setup with install=true.",
+        "Recommended: ask the user whether to build the audio worker, so they can talk over Claude on the Mac's speakers during a call " +
+          "(built on this Mac from source in about 10 s). Only if they agree, call voice_setup with install=true.",
       );
     }
     if (checks.some((c) => c.vad) && !install) {
@@ -395,7 +395,7 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
   } else if (installing) {
     lines.push("Next: installation is still running in the background. Tell the user, wait about a minute, then call voice_setup again (install=false) to check.");
   } else if (!install && (toInstall.length || needsModel) && (findBrew() || !toInstall.length)) {
-    const steps = [toInstall.length ? `brew install ${toInstall.join(" ")}` : "", needsModel ? `download the ${CONFIG.modelName} model` : "", checks.some((c) => c.vad) ? "download the silence filter (under 1 MB)" : ""]
+    const steps = [toInstall.length ? `brew install ${toInstall.join(" ")}` : "", needsModel ? `download the ${CONFIG.modelName} model` : "", checks.some((c) => c.vad) ? "download the silence filter (under 1 MB)" : "", checks.some((c) => c.worker) ? "build the audio worker (about 10 s)" : ""]
       .filter(Boolean)
       .join(" and ");
     lines.push(`Next: ask the user whether to ${steps}. Only if they agree, call voice_setup with install=true.`);

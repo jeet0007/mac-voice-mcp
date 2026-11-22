@@ -15,7 +15,7 @@
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describeRecorder, findRecorder, openAudio } from "./audio/device.js";
+import { describeCallAudio, describeRecorder, findRecorder, openAudio } from "./audio/device.js";
 import { CONFIG, IS_MAC, PKG } from "./config.js";
 import { FRAME_MS, wavHeader } from "./endpointer.js";
 import { flightDir, flightEnabled, flightMode } from "./flight.js";
@@ -148,6 +148,7 @@ export async function runDoctor(opts: { loopback?: boolean; reportDir?: string; 
     Object.assign(report.machine, {
       voice: kokoro ? `${kokoroVoiceLabel()}, built-in fallback: ${voice.label}` : voice.label,
       recorder: recorder ? describeRecorder(recorder) : "none",
+      callAudio: await describeCallAudio(),
       stt: await describeStt(),
       model: CONFIG.modelPath ?? CONFIG.modelName,
     });
