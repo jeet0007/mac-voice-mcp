@@ -6,10 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [Unreleased]
 
 ### Added
+- **Talk over Claude on the Mac's speakers (experimental).** On macOS 15 or later, set `VOICE_MCP_AUDIO=native` and run `voice_setup` with install to build the audio worker on your Mac. Calls on the built-in or wired speakers then play and record through one echo-cancelled unit, so Claude doesn't hear itself. When you start talking, its reply drops to a quieter volume. Once you've said words it pauses where it is, and when your sentence is transcribed, real words stop it and a cough or "mm-hmm" lets it carry on. Headphones and other outputs keep today's behaviour. If the worker can't start, the call falls back to the recorder.
 - **whisper no longer invents words in silence.** In a quiet room it sometimes heard "Thank you." or repeated its hint. Setup now offers a silence filter (Silero VAD, under 1 MB, downloaded only when you agree), and whisper then skips the stretches without speech. See [The silence filter](docs/configuration.md#the-silence-filter).
 
 ### Changed
+- **On speakers, Claude's reply waits until you finish your sentence.** It used to start while you were still talking and cut off what you were saying. Now the reply waits as long as you keep talking, with no time limit.
+- **Kokoro replies flow without odd pauses.** Every break between chunks used to go silent for about 0.9 s, sometimes in the middle of a clause ("…the next sentence is" … "ready"). Chunks now break only at sentences and clauses, with a short pause that fits the punctuation: about 0.35 s after a sentence and 0.2 s after a comma. First sound also comes about a quarter of a second sooner.
+- **The call bubble has no dark outline,** and the live transcript stays up longer, so the last words you said are still showing when your final transcript arrives.
+- **The flight recorder logs more of a call:** when a reply waited for you, when muting cut off a sentence, every decision about talking over Claude, and when the audio worker fell back or stopped.
 - **The default whisper hint is a word list.** `npm, JSON, TypeScript, git, main, rebase, pull request, CI, macOS.` replaces the sentence about a developer: on 60 jargon clips it got 11.3% of words wrong instead of 13.2%.
+
+### Fixed
+- **Muting mid-sentence keeps what you'd said so far** instead of dropping it.
+- **A failed transcription no longer stops the rest of a call being heard.**
+- **A whisper-server that fails at start-up no longer stalls the first transcription for 3 minutes.** The call switches to whisper-cli at once.
 
 ## [0.10.0] - 2026-11-14
 
