@@ -122,9 +122,9 @@ export const CONFIG = {
   /**
    * "native" (default) plays and records a call through the audio worker (echo-cancelled, so the user can talk
    * over Claude on speakers) once setup has built it, on macOS 15+ and the Mac's own or wired speakers.
-   * "process" opts out: calls use the recorder and player programs.
+   * "process" (or 0, off, false, like the other switches) opts out: calls use the recorder and player programs.
    */
-  audio: (process.env.VOICE_MCP_AUDIO?.trim().toLowerCase() === "process" ? "process" : "native") as "native" | "process",
+  audio: (["process", "0", "off", "false"].includes(process.env.VOICE_MCP_AUDIO?.trim().toLowerCase() ?? "") ? "process" : "native") as "native" | "process",
   /** Opt-in: a soft tick every 1.5 s after the user's words reach Claude, until it speaks (at most 10 s), so a call never goes silent (macOS). */
   callThinkingSound: envBool("VOICE_MCP_CALL_THINKING_SOUND", false),
   /** Show the floating call bubble during a call, once setup has built it (macOS). Off: VOICE_MCP_CALL_BUBBLE=0. */
