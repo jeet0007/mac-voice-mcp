@@ -1,6 +1,6 @@
 # Call bubble (0.9.0)
 
-Status: implemented (Unreleased) · Builds on: call mode (0.8.0) · Source: `native/call-bubble.swift`
+Status: shipped in 0.9.0 · Builds on: call mode (0.8.0) · Source: `native/call-bubble.swift`, `src/bubble.ts`
 
 ## Goal
 
@@ -47,6 +47,55 @@ focus from what you're typing.
 - It shows the call's duration from `call.json`'s `startedAt`.
 - Remembers where it was dragged (a small `voice-mode/bubble.json`), on the screen it was on;
   falls back to top-right of the main screen if that screen is gone.
+
+### How the server runs it
+
+`src/bubble.ts` owns the bubble's process. Native builds and their hashes live in `src/native-build.ts`.
+
+- `startBubble()` runs at call start. It does nothing when `VOICE_MCP_CALL_BUBBLE` is `0` or the user never
+  built the bubble. If the build is stale, it rebuilds first and launches when the build finishes, but
+  only if the call is still on (the `wanted` flag). A failed rebuild is logged. It never fails the call.
+- One bubble per Mac, whichever server started it. `launch()` skips when this server already has a child
+  or when the pid in `voice-mode/bubble.pid` is alive. On exit the server removes the pid file, but only
+  if it still holds that bubble's pid.
+- The bubble gets `VOICE_MCP_CACHE_DIR` set to the server's cache folder, so both sides read the same
+  `voice-mode/` files.
+- `bubbleWanted()` is true while a call is on and the bubble is (or will be) showing. The call reads it
+  to decide whether to write `voice-mode/levels` for the glow.
+- `stopBubble()` runs at call end and at shutdown. It sends `clear`, kills the bubble with `SIGTERM` and
+  removes the pid file. It is synchronous, so a shutdown that exits right after still stops the bubble.
+
+### Live transcript pipe
+
+The bubble's stdin is a pipe from the server that launched it. `sendToBubble()` writes one JSON line per
+message (`partial`, `final` or `clear`; see [live transcript](live-transcript.md)). The rules:
+
+- `bubbleTakesText()` is true only when `VOICE_MCP_LIVE_TRANSCRIPT` is on and this server's child has a
+  writable stdin. A bubble that another server started has no pipe from this one, so it gets no text.
+- When more than 16 KB is already waiting in the pipe, the bubble has stalled, and a `partial` is dropped
+  rather than queued. A `final` or `clear` is still written.
+- The text is never logged. `sendToBubble()` returns `false` when it wrote nothing.
+- An error on the pipe (the bubble closed stdin or died) is swallowed, so it can't crash the server.
+
+### Inside the Swift app
+
+- It is an accessory app: no Dock icon and no menu bar.
+- The cache folder must match `cacheRoot()` in `hooks/voice-files.mjs`. The bubble takes
+  `VOICE_MCP_CACHE_DIR`, else `$XDG_CACHE_HOME/mac-voice-mcp`, else `~/.cache/mac-voice-mcp`.
+- `callStart()` returns `nil`, and the bubble exits, once `call.json` is gone or the process whose pid it
+  holds has died. A missing `startedAt` counts from now.
+- The start frame is the saved origin when the pill's centre is still on some screen's visible frame;
+  otherwise the top right of the main screen, 16 pt in from each edge.
+- The blob wobbles more while Claude talks. Clicking it walks up the process tree from `call.json`'s pid
+  (with `sysctl`) to the first regular app, the terminal or editor hosting the call, and activates it.
+- Mute looks like FaceTime's: frosted grey, or white with a dark slashed mic while muted. Hang up is red.
+- The glass is shaped into the capsule with a mask image, not a layer corner radius, because the mask
+  shapes the blurred glass itself.
+- The glow and the pill's shadow are drawn only outside the pill, so the glass never shows them through.
+  The glow redraws only when its level or colour would look different.
+- `call-bubble --demo` runs with no call and plays a scripted transcript, so the panel can be reviewed
+  with no mic. Add `--no-script` to feed it by stdin yourself. See `docs/development.md`.
+- The build command is `swiftc -O native/call-bubble.swift -o <cache>/bin/call-bubble`.
 
 ### Controls
 

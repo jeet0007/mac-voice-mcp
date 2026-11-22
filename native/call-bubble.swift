@@ -1,30 +1,9 @@
-// The floating call bubble for mac-voice-mcp (docs/specs/call-bubble.md).
-//
-// A small always-on-top call pill, like FaceTime's: a frosted dark capsule with Claude's animated
-// blob, the call's duration and two round buttons, mute and hang up. It shows on every desktop,
-// whatever app is in front, and never takes focus. voice-mcp's setup builds it on this Mac with
-// swiftc (after asking), and the server starts it at call start. It reads the same files as Voice
-// Buddy: voice-mode/call.json (the call, while it's on) and voice-mode/phase.json ("speaking").
-// A soft glow around the pill follows the mic's level from voice-mode/levels ("<dB> <threshold dB>"):
-// blue when the server counts it as speech, grey below that, none while muted, while Claude talks,
-// or when the file is stale.
-// - Click the blob: brings the window running the call (terminal or IDE) to the front.
-// - Mute: creates voice-mode/mute; the server's mic hears nothing while it exists.
-// - Hang up: removes call.json, which the server treats as an end.
-// - Drag anywhere else to move it; where it was left (the pill's origin) is kept in voice-mode/bubble.json.
-// It exits once call.json is gone or the server that wrote it has died.
-// Live transcript (docs/specs/live-transcript.md): the server that started it writes one JSON line per
-// event to stdin ({"type":"partial"|"final","text":"…"} or {"type":"clear"}), and a small click-through
-// panel under (or over) the pill shows the words, only while there are some. A bubble whose stdin is
-// empty or closed works as before. `call-bubble --demo` runs without a call and plays a scripted
-// transcript (add `--no-script` to feed it by stdin yourself); see docs/development.md.
-//
-// voice-mcp builds it with: swiftc -O native/call-bubble.swift -o <cache>/bin/call-bubble
+// The floating call pill and its live transcript panel, built on the user's Mac with swiftc. See docs/specs/call-bubble.md.
 import AppKit
 
 extension String { var nilIfEmpty: String? { isEmpty ? nil : self } }
 
-// The same folder as cacheRoot() in hooks/voice-files.mjs, so run it with the server's VOICE_MCP_CACHE_DIR or XDG_CACHE_HOME.
+// Must match cacheRoot() in hooks/voice-files.mjs.
 let demo = CommandLine.arguments.contains("--demo")
 let env = ProcessInfo.processInfo.environment
 let cacheDir = env["VOICE_MCP_CACHE_DIR"]?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
@@ -37,7 +16,6 @@ let placeFile = dir.appendingPathComponent("bubble.json")
 let muteFile = dir.appendingPathComponent("mute")
 let levelsPath = dir.appendingPathComponent("levels").path
 
-// Claude's colours: orange while it speaks, blue while it listens.
 let speaking = NSColor(red: 0xd9 / 255.0, green: 0x77 / 255.0, blue: 0x57 / 255.0, alpha: 1)
 let listening = NSColor(red: 0x4f / 255.0, green: 0x9d / 255.0, blue: 0xde / 255.0, alpha: 1)
 let mutedGrey = NSColor(white: 0.55, alpha: 1)
@@ -49,7 +27,6 @@ let button: CGFloat = 36
 let gap: CGFloat = 10
 let clock: CGFloat = 58
 let width = pad + orb + 10 + clock + 4 + button + gap + button + pad + 2
-// Room around the pill for its glow and shadow; the panel is the pill plus this on every side.
 let margin: CGFloat = 30
 let pillPath = NSBezierPath(roundedRect: NSRect(x: margin, y: margin, width: width, height: height), xRadius: height / 2, yRadius: height / 2)
 
@@ -86,7 +63,6 @@ final class Pill: NSView {
   override func mouseExited(with event: NSEvent) { hover = nil }
 
   override func draw(_ dirtyRect: NSRect) {
-    // The orb: Claude's blob, wobbling more while it talks.
     let c = CGPoint(x: orbRect.midX, y: orbRect.midY)
     let base = orb * (talking ? 0.44 : 0.40)
     let wobble: CGFloat = talking ? 0.10 : 0.04
@@ -108,13 +84,11 @@ final class Pill: NSView {
     let size = digits.size()
     digits.draw(at: NSPoint(x: clockRect.midX - size.width / 2, y: clockRect.midY - size.height / 2))
 
-    // Mute: frosted grey, or white with a dark slashed mic while muted (like FaceTime).
     let muted = isMuted()
     var fill = muted ? NSColor.white : NSColor(white: 1, alpha: 0.16)
     if hover == muteRect { fill = muted ? NSColor(white: 0.85, alpha: 1) : NSColor(white: 1, alpha: 0.26) }
     circle(muteRect, fill, symbol(muted ? "mic.slash.fill" : "mic.fill", muted ? "Unmute" : "Mute", muted ? .black : .white))
 
-    // Hang up: red.
     let red = NSColor(red: 1, green: 0.23, blue: 0.19, alpha: 1)
     circle(hangUpRect, hover == hangUpRect ? red.blended(withFraction: 0.15, of: .black)! : red, symbol("phone.down.fill", "Hang up", .white))
   }
@@ -144,7 +118,7 @@ final class Pill: NSView {
   }
 }
 
-/** The pill's shadow and the mic-level glow, drawn only outside the pill so the glass never shows them through. */
+// Drawn only outside the pill, so the glass never shows the glow or shadow through.
 final class Glow: NSView {
   var level: CGFloat = 0 // 0...1
   var speech: CGFloat = 0 // 0 grey, 1 blue
@@ -172,7 +146,6 @@ final class Glow: NSView {
   }
 }
 
-/** The mic's level mapped to 0...1, and whether it's over the speech threshold, if the server wrote it in the last 0.25 s. */
 func micLevel() -> (level: CGFloat, speech: Bool)? {
   var st = stat()
   guard stat(levelsPath, &st) == 0,
@@ -182,7 +155,6 @@ func micLevel() -> (level: CGFloat, speech: Bool)? {
   return (CGFloat(max(0, min(1, (db + 90) / 80))), db > threshold)
 }
 
-/** The app hosting the call's MCP server (its terminal or IDE): walk up from call.json's pid. */
 func bringClaudeForward() {
   let call = readJSON(callFile)
   var pid = (call?["pid"] as? NSNumber)?.int32Value ?? 0
@@ -200,9 +172,8 @@ func bringClaudeForward() {
 }
 
 let app = NSApplication.shared
-app.setActivationPolicy(.accessory) // no Dock icon, no menu bar
+app.setActivationPolicy(.accessory)
 
-/** The pill's frame: where it was left, if that spot is still on a screen; else the top right of the main screen. */
 func startFrame() -> NSRect {
   if let place = readJSON(placeFile), let x = place["x"] as? Double, let y = place["y"] as? Double {
     let frame = NSRect(x: x, y: y, width: width, height: height)
@@ -223,7 +194,6 @@ panel.backgroundColor = .clear
 panel.hasShadow = false
 panel.hidesOnDeactivate = false
 
-// Frosted dark capsule, like FaceTime's and the Dynamic Island's.
 let glass = NSVisualEffectView(frame: NSRect(x: margin, y: margin, width: width, height: height))
 glass.material = .hudWindow
 glass.appearance = NSAppearance(named: .darkAqua)
@@ -245,7 +215,6 @@ NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, ob
   try? place?.write(to: placeFile, options: .atomic)
 }
 
-/** The call's start (ms since 1970), or nil once it's over: call.json gone, or the server that wrote it died. */
 let demoStart = Date().timeIntervalSince1970 * 1000
 func callStart() -> Double? {
   if demo { return demoStart }
@@ -257,18 +226,17 @@ func callStart() -> Double? {
 
 // MARK: - Live transcript
 
-let tPad: CGFloat = 14        // left and right
-let tPadV: CGFloat = 10       // top and bottom
+let tPad: CGFloat = 14
+let tPadV: CGFloat = 10
 let tLine: CGFloat = 20
-let tGap: CGFloat = 8         // between the pill and the panel
+let tGap: CGFloat = 8
 let tRadius: CGFloat = 16
 let tMaxWidth: CGFloat = 360
 let tMinWidth: CGFloat = 120
 let tMaxLines = 3
-let tEdge: CGFloat = 8        // least distance to the screen's edge
+let tEdge: CGFloat = 8
 let tFont = NSFont.systemFont(ofSize: 15, weight: .regular)
 
-/// Never key, never main: it can't take focus from whatever the user is typing in.
 final class TranscriptPanel: NSPanel {
   override var canBecomeKey: Bool { false }
   override var canBecomeMain: Bool { false }
@@ -285,9 +253,9 @@ final class Transcript {
   let ws = NSWorkspace.shared
 
   var state = TState.hidden
-  var raw = ""             // the words as received
+  var raw = ""
   var lastPartial = ""     // survives the idle fade: the same words again must not bring the panel back
-  var width: CGFloat = tMinWidth   // grows during one utterance, resets when hidden
+  var width: CGFloat = tMinWidth
   var lines = 1
   var below = true
   var cap = tMaxLines
@@ -307,7 +275,7 @@ final class Transcript {
     window.level = .floating
     window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
     window.sharingType = .none            // screen sharing and recording never show what you say
-    window.ignoresMouseEvents = true      // click-through: drag the pill to move things
+    window.ignoresMouseEvents = true
     window.isOpaque = false
     window.backgroundColor = .clear
     window.hasShadow = false   // a shadow on this borderless, rounded window shows as a dark outline
@@ -341,7 +309,7 @@ final class Transcript {
     label.usesSingleLineMode = false
     label.lineBreakMode = .byWordWrapping
     label.cell?.wraps = true
-    label.setAccessibilityLabel("Live transcript")   // read on demand; never announced
+    label.setAccessibilityLabel("Live transcript")
     label.setAccessibilityRole(.staticText)
     label.wantsLayer = true
 
@@ -370,7 +338,6 @@ final class Transcript {
     hairline.layer?.borderColor = NSColor(white: 1, alpha: highContrast ? 0.55 : 0.10).cgColor
   }
 
-  /// Partial words look provisional (72%), a final settles (96%); Increase Contrast raises both.
   var textAlpha: CGFloat { state == .final ? (highContrast ? 1.0 : 0.96) : (highContrast ? 0.85 : 0.72) }
 
   func attributed(_ text: String) -> NSAttributedString {
@@ -382,8 +349,7 @@ final class Transcript {
     return NSAttributedString(string: text, attributes: [.font: tFont, .paragraphStyle: style, .foregroundColor: NSColor.white])
   }
 
-  /// Measured by a cell like the label's, so its inset counts: a bare string measures a little
-  /// narrower, and the label then wrapped the last word onto a line it didn't have.
+  /// Measured with a cell like the label's: a bare string measures narrower, and the last word wrapped onto a hidden line.
   let measure: NSTextFieldCell = { let c = NSTextFieldCell(); c.wraps = true; c.lineBreakMode = .byWordWrapping; return c }()
   func sizeOf(_ text: String, width w: CGFloat) -> NSSize {
     measure.attributedStringValue = attributed(text)
@@ -392,23 +358,20 @@ final class Transcript {
   }
   func heightOf(_ text: String, width w: CGFloat) -> CGFloat { sizeOf(text, width: w).height }
 
-  /// The newest words that fit `cap` lines at `w`, with "… " in front when the start is cut. Never scrolls, never cuts the tail.
   func fit(_ text: String, width w: CGFloat, cap: Int) -> String {
     let limit = CGFloat(cap) * tLine + 0.5
     if heightOf(text, width: w) <= limit { return text }
-    let chars = Array(text.suffix(400))   // only the newest 400 characters are ever measured
-    var lo = 0, hi = chars.count   // smallest start offset that fits
+    let chars = Array(text.suffix(400))
+    var lo = 0, hi = chars.count
     while lo < hi {
       let mid = (lo + hi) / 2
       if heightOf("… " + String(chars[mid...]), width: w) <= limit { hi = mid } else { lo = mid + 1 }
     }
     var start = lo
-    // Start on a word when a space is close.
     if start > 0, start < chars.count, let space = chars[start..<min(chars.count, start + 12)].firstIndex(of: " ") { start = space + 1 }
     return "… " + String(chars[min(start, chars.count)...])
   }
 
-  /// Sets the text, the size and the 72%/96% look; returns the frame it wants.
   @discardableResult
   func layout(_ text: String) -> NSRect {
     let textWidth = sizeOf(String(text.suffix(400)).replacingOccurrences(of: "\n", with: " "), width: 10_000).width
@@ -425,7 +388,6 @@ final class Transcript {
     return frame(for: size)
   }
 
-  /// Re-apply the colours after a partial/final change or an accessibility change.
   func restyle() { label.alphaValue = textAlpha }
 
   // MARK: Place
@@ -439,7 +401,6 @@ final class Transcript {
 
   func screenVisible() -> NSRect { (screen() ?? NSScreen.screens[0]).visibleFrame }
 
-  /// Chosen when the panel appears: below the pill if three lines fit, else above, else the roomier side with fewer lines.
   func chooseSide() {
     let pill = pillFrame(), vis = screenVisible()
     let full = CGFloat(tMaxLines) * tLine + 2 * tPadV
@@ -453,7 +414,6 @@ final class Transcript {
     }
   }
 
-  /// The edge facing the pill stays put and the panel grows away from it; centred on the pill, kept 8 inside the screen.
   func frame(for size: NSSize) -> NSRect {
     let pill = pillFrame(), vis = screenVisible()
     var x = pill.midX - size.width / 2
@@ -487,7 +447,6 @@ final class Transcript {
     }, completionHandler: done)
   }
 
-  /// Text to show now: `isFinal` settles it at 96% for a moment, a partial waits for the next words.
   func show(_ text: String, isFinal: Bool) {
     generation += 1
     raw = text
@@ -500,7 +459,7 @@ final class Transcript {
     let slide: CGFloat = reduceMotion ? 0 : 6
     if wasHidden {
       var start = target
-      start.origin.y += below ? slide : -slide   // from the pill's side toward its place
+      start.origin.y += below ? slide : -slide
       window.setFrame(start, display: false)
       window.alphaValue = 0
       panel.addChildWindow(window, ordered: .above)
@@ -525,7 +484,7 @@ final class Transcript {
       let hold = min(3.0, 1.5 + 0.1 * Double(max(0, words - 8)))
       schedule(after: hold) { self.fadeOut(0.25) }
     } else {
-      schedule(after: 4.0) { self.fadeOut(0.25) }   // outlasts the end-of-turn silence and transcription, so the final replaces it
+      schedule(after: 4.0) { self.fadeOut(0.25) }
     }
   }
 
@@ -560,7 +519,7 @@ final class Transcript {
     let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
     if muted || t.isEmpty { return }
     if state == .final, Date().timeIntervalSince(finalAt) < 0.4 { return }   // a late reply to the utterance just finished
-    if t == lastPartial { return }                                             // same words (even after the idle fade): nothing new
+    if t == lastPartial { return }
     lastPartial = t
     show(t, isFinal: false)
   }
@@ -577,7 +536,6 @@ final class Transcript {
     if state != .hidden { fadeOut(0.2) }
   }
 
-  /// Called every frame of the pill's timer with what the files say; acts on changes only.
   func observe(muted nowMuted: Bool, speaking: Bool) {
     if nowMuted != muted {
       muted = nowMuted
@@ -598,7 +556,6 @@ final class Transcript {
 let transcript = Transcript()
 NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: panel, queue: .main) { _ in transcript.reposition() }
 
-/// One JSON object per line on stdin. Lines over 8 KB, bad JSON and unknown types are ignored; nothing is kept or written.
 final class LineReader {
   var buffer = Data()
   var skipping = false
@@ -635,7 +592,7 @@ if isatty(0) == 0 {
   let reader = LineReader()
   FileHandle.standardInput.readabilityHandler = { handle in
     let data = handle.availableData
-    if data.isEmpty {   // the server is gone or never wrote: stop reading, hide, carry on as before
+    if data.isEmpty {
       handle.readabilityHandler = nil
       DispatchQueue.main.async { transcript.hideNow() }
       return
@@ -644,7 +601,6 @@ if isatty(0) == 0 {
   }
 }
 
-/// `--demo`: a scripted talk, so the panel can be reviewed with no mic and no call.
 if demo && !CommandLine.arguments.contains("--no-script") {
   let long = "so I think we should move the retry into the upload function and add a short back-off, then make the tests wait for it instead of sleeping, and finally log how many tries it took"
   let script: [(Double, String, String)] = [

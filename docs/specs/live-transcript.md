@@ -1,6 +1,7 @@
-# Live transcript next to the call bubble (unreleased)
+# Live transcript next to the call bubble
 
-Status: in progress · Owner: Jeet · Target: next minor
+Status: shipped in 0.10.0 · Owner: Jeet · Source: `src/live-transcript.ts`, the transcript panel in
+`native/call-bubble.swift`, the pipe in `src/bubble.ts` (see [call bubble](call-bubble.md))
 
 ## Goal
 
@@ -37,6 +38,33 @@ then the final transcript for a moment, then fades away.
    A bubble started by another server process gets no text (it keeps working as today).
 4. **Switch.** `VOICE_MCP_LIVE_TRANSCRIPT=1` (default) or `0`. With the bubble off, nothing runs.
 
+## Scheduling in the server
+
+`LiveTranscript` in `src/live-transcript.ts` is pure scheduling. The call (`src/call/session.ts`) feeds it
+one `frame()` per 30 ms mic frame and supplies `request`, `emit`, `enabled` and `ready`. It is unit-tested
+with no clock: time is the audio's own (`FRAME_MS` per frame), so a recorder that delivers frames in
+bursts gets the same schedule.
+
+- `frame(speechSeconds, quietMs, audio)` takes the endpointer's numbers. `audio` builds the request's PCM
+  and is called only when a request goes out.
+- At most one request is in flight. Whisper serves one request at a time, so the panel and the word check
+  share one partial stream per utterance.
+- A waiting word check goes out on the next frame where `ready()` holds (the server is warm and not busy
+  with a final transcript), past the speech, quiet and interval rules.
+- Otherwise a partial needs `MIN_SPEECH_S` (0.5 s) of speech, less than `MAX_QUIET_MS` (300 ms) of quiet,
+  `everyMs` of audio since the last request, and `enabled()` (the switch is on, the bubble takes text,
+  the server is warm).
+- `emit` gets only trimmed, non-empty text that differs from the last text it got.
+- `end()` runs when the utterance is over or cut. It bumps an epoch so a late reply is dropped, aborts the
+  request in flight, answers waiting checks with `null`, and starts fresh.
+- `check(startMs)` is the word check. It rides the request in flight, or waits for the next frame to send
+  one. It resolves `null` when no request could go out within `startMs` (cold or busy server, or the
+  utterance ended) or the request failed. Unlike the panel's audio-time schedule, `startMs` is wall-clock
+  time.
+- `stats` counts requests and the total time spent waiting on them, in ms.
+- `utteranceFrames()` picks the request's audio: the last `MAX_AUDIO_MS` (30 s) of the utterance, from 10
+  frames (300 ms) before the speech began.
+
 ## UX
 
 Designed by the Voice MCP UX Designer. Everything here is for `native/call-bubble.swift` (AppKit, no new
@@ -44,7 +72,7 @@ dependencies). One new window, one new view, one stdin reader. Numbers are point
 
 ### Principles
 
-1. **Quiet.** Nothing on screen until words exist; gone about 2 s after the last new word.
+1. **Quiet.** Nothing on screen until words exist; gone about 4 s after the last new word (see Timing).
 2. **Never in the way.** Never key, never main, never takes a click (click-through), never moves the pill.
 3. **Newest words win.** Long speech shows its tail, never its head.
 4. **Honest.** What shows is what whisper heard so far. Partial text looks provisional; final looks settled.
@@ -115,6 +143,8 @@ the glow's transparent margin is ignored).
 
 **Long text.** Keep the newest words. Take at most the last 400 characters, measure with
 `NSAttributedString.boundingRect(with: NSSize(width: contentWidth, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin])`.
+Measure with a cell like the label's, so its inset counts: a bare string measures a little narrower, and
+the label then wrapped the last word onto a line it didn't have (fixed in PR #70).
 If taller than 60 (3 lines), binary-search the smallest start offset (by `Character`, snapped forward to the
 next space when one is within 12 characters) that fits, and prefix `"… "`. So the display is always
 `… newest words`, never a clipped first line. Never scroll, never truncate the tail.
@@ -160,7 +190,7 @@ The final replaces the last partial in place; it may differ by a word or two (wh
 | Event | Behaviour |
 |---|---|
 | First non-empty text (partial, or a final with no partial) | Order in, then **fade in 120 ms** (ease-out) with a **6 pt** slide from the pill's side toward its place. Empty or whitespace-only text never shows. |
-| Each new partial with different text | Swap text at once; animate height and width changes **120 ms** (ease-out). Same text as before: ignored, and it does **not** restart the idle timer. |
+| Each new partial with different text | Swap text at once; animate height and width changes **120 ms** (ease-out). Same text as before: ignored, and it does **not** restart the idle timer. The last partial survives the idle fade, so the same words arriving again after it keep the panel hidden instead of blinking it back (the `--demo` script checks this at about 12 s). |
 | Idle fade | **4,000 ms** after the last *changed* text, fade out **250 ms** (ease-in), then `orderOut` and drop the text. (Partials stop once the user goes quiet; the final comes after the 1.5 s end-of-turn silence plus transcription, so this outlasts that gap and the final replaces the partial.) |
 | New text during the fade-out | Cancel the fade, fade back in **80 ms**, restart the timer. |
 | Final | Show at 96% alpha for `1,500 + 100 × max(0, words − 8)` ms, at most **3,000**, then fade out 250 ms. |
@@ -169,11 +199,13 @@ The final replaces the last partial in place; it may differ by a word or two (wh
 | Mic closes (`clear` message) | Fade out **200 ms**, drop the text. |
 | Mute (`mute` file appears) | Fade out **120 ms**, drop the text, ignore partials and finals while muted. |
 | Call ends / bubble exits | Nothing to do (process exits). |
-| stdin closes (server gone, or another server owns the bubble) | Hide and keep working as today; no text ever shows. |
+| stdin closes (server gone, or another server owns the bubble) | Stop reading, hide and keep working as today; no text ever shows. |
 
 Implementation: one `DispatchWorkItem` for the idle or final-hold deadline (cancelled and recreated on each
 change). Do not use the 30 fps timer for this; animate with `NSAnimationContext.runAnimationGroup`
 (`allowsImplicitAnimation = true`) on the window's `alphaValue` and frame. No CPU while hidden.
+The pill's 30 fps timer still passes the panel what the files say (`phase.json`, `mute`) on every frame; the
+panel acts only on changes.
 
 ### Input
 

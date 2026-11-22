@@ -1,14 +1,4 @@
-/**
- * The flight recorder: an opt-in, on-device log of what the voice pipeline decided, and "flag that".
- * Spec: docs/specs/flight-recorder.md.
- *
- * Off by default (VOICE_MCP_FLIGHT_RECORDER=off|on|audio): every function here is a cheap no-op then.
- * Numbers and reasons only: each event has an allowlist of string fields and the values they may take
- * (see STRINGS); any other string is dropped, so a transcript or spoken text, even a one-word one,
- * can't end up in the log by mistake. Audio (mode `audio`) lives in memory, the last
- * few seconds, and reaches the disk only when the user flags a moment. Nothing here touches the
- * network: this module imports nothing that could (a test checks it). Writes are best-effort.
- */
+// The flight recorder: an opt-in, on-device log of voice decisions, and "flag that". See docs/specs/flight-recorder.md.
 import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -20,7 +10,6 @@ import { cacheRoot, readJson, stopFile } from "./state/voice-mode.js";
 export type FlightMode = "off" | "on" | "audio";
 
 const DAY_MS = 86_400_000;
-/** One day's event file stops growing at this size. */
 export const MAX_DAY_BYTES = 10 * 1024 * 1024;
 const FLAG_WINDOW_MS = 60_000;
 const MAX_NOTE_CHARS = 500;
@@ -30,7 +19,7 @@ const intEnv = (name: string, fallback: number, min: number, max: number): numbe
   return Number.isFinite(n) && process.env[name]?.trim() ? Math.min(max, Math.max(min, Math.floor(n))) : fallback;
 };
 
-/** Read each time (not cached), so the CLI and the tests see the environment they were given. */
+// Not cached, so the CLI and the tests see the environment they were given.
 export function flightMode(env = process.env): FlightMode {
   const v = env.VOICE_MCP_FLIGHT_RECORDER?.trim().toLowerCase();
   return v === "audio" ? "audio" : v === "on" || v === "1" || v === "true" ? "on" : "off";
@@ -43,8 +32,6 @@ export const flightDir = (): string => path.join(cacheRoot(), "flight");
 const flagsDir = (): string => path.join(flightDir(), "flags");
 const dayName = (t: number): string => `events-${new Date(t).toISOString().slice(0, 10)}.jsonl`;
 
-// --- Writing -----------------------------------------------------------------------------------
-
 type Field = number | boolean | string | null | undefined;
 export type FlightFields = Record<string, Field>;
 
@@ -52,14 +39,13 @@ const END_REASONS = ["end-of-turn", "no-speech", "max-duration", "cut", "stopped
 const SPEAK_REASONS = ["done", "stopped", "barge-in", "error", "fallback", "timeout"] as const;
 const FLAG_ID = /^\d{8}-\d{6}-\d{3}$/;
 
-/** A call engine table as one allowlist: its types, and each string field with every value it takes in any of them. */
 function engineStrings(table: Record<string, Record<string, readonly string[]>>): Record<string, readonly string[]> {
   const out: Record<string, string[]> = { type: Object.keys(table) };
   for (const fields of Object.values(table)) for (const [field, values] of Object.entries(fields)) (out[field] ??= []).push(...values);
   return out;
 }
 
-/** The only string fields an event may carry, and the values each may take. Everything else is dropped. */
+// Any string not allowed here is dropped, so no transcript or spoken text can reach the log.
 const STRINGS: Record<string, Record<string, readonly string[] | RegExp>> = {
   "listen.start": { mode: ["turn", "call", "worklisten"] },
   "listen.end": { mode: ["turn", "call", "worklisten"], reason: END_REASONS },
@@ -71,7 +57,6 @@ const STRINGS: Record<string, Record<string, readonly string[] | RegExp>> = {
   flag: { id: FLAG_ID },
 };
 
-/** `value` if this event may carry it in this field, else null. */
 function allowed(ev: string, field: string, value: unknown): string | null {
   const rule = STRINGS[ev]?.[field];
   if (typeof value !== "string" || !rule) return null;
@@ -91,7 +76,6 @@ function clean(ev: string, fields: FlightFields): Record<string, number | boolea
   return out;
 }
 
-/** Create the folder if needed. A symlinked folder is refused (treated as "can't write"). */
 function ensureDir(dir: string): void {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   if (lstatSync(dir).isSymbolicLink()) throw new Error("flight folder is a symlink");
@@ -99,7 +83,6 @@ function ensureDir(dir: string): void {
 }
 
 let turnCounter = 0;
-/** Start a new voice turn: events that follow carry its number. */
 export function flightTurn(): number {
   return ++turnCounter;
 }
@@ -107,7 +90,6 @@ export function flightTurn(): number {
 const sizes = new Map<string, number>();
 const full = new Set<string>();
 
-/** Add one event to today's file. Never throws. */
 export function flightEvent(ev: string, fields: FlightFields = {}, turn: number | null = turnCounter || null): void {
   if (!flightEnabled()) return;
   try {
@@ -128,25 +110,17 @@ export function flightEvent(ev: string, fields: FlightFields = {}, turn: number 
   }
 }
 
-/** `interrupted: { say, playedMs }` as `interrupted.say` and `interrupted.playedMs`. */
 const flat = (fields: object, prefix = ""): FlightFields =>
   Object.fromEntries(Object.entries(fields).flatMap(([k, v]) => (v && typeof v === "object" ? Object.entries(flat(v, `${prefix}${k}.`)) : [[prefix + k, v]])));
 
-/** One decision of the call engine (src/call/engine/step.ts): what happened, then each thing it decided to do about it. */
 export function recordStep(event: Event, effects: readonly Effect[]): void {
   if (!flightEnabled()) return;
   flightEvent("call.event", flat(event), null);
   for (const effect of effects) flightEvent("call.effect", flat(effect), null);
 }
 
-// --- The audio ring (mode audio) ----------------------------------------------------------------
-
 let ring: { t: number; frame: Buffer }[] = [];
 
-/**
- * One 30 ms mic frame (16 kHz mono s16le), kept in memory only. Everything the mic hears while voice-mcp
- * has it open goes in, not only speech; frames older than VOICE_MCP_FLIGHT_AUDIO_SECONDS are dropped.
- */
 export function flightAudio(frame: Buffer, now = Date.now()): void {
   if (flightMode() !== "audio") {
     if (ring.length) ring = [];
@@ -160,9 +134,6 @@ export function flightAudio(frame: Buffer, now = Date.now()): void {
   if (drop) ring.splice(0, drop);
 }
 
-// --- Retention, status, purge --------------------------------------------------------------------
-
-/** Delete event and flag files older than the retention. Returns how many were removed. */
 export function flightSweep(now = Date.now()): number {
   let removed = 0;
   try {
@@ -191,10 +162,6 @@ export function flightSweep(now = Date.now()): number {
 }
 
 let sweepTimer: NodeJS.Timeout | undefined;
-/**
- * On server start: sweep now and, when the recorder is on, once a day. When it's off, one sweep of any
- * folder left from an earlier run, so old logs still expire after the retention.
- */
 export function startFlight(): void {
   if (!flightEnabled()) {
     if (existsSync(flightDir())) flightSweep();
@@ -235,7 +202,6 @@ export function flightStatus(): { mode: FlightMode; dir: string; exists: boolean
   return { mode: flightMode(), dir: flightDir(), exists: existsSync(flightDir()), files, bytes, days: retentionDays() };
 }
 
-/** Delete the whole folder (and the audio held in memory). Returns the files removed. */
 export function flightPurge(): number {
   const { files } = walk(flightDir());
   rmSync(flightDir(), { recursive: true, force: true });
@@ -246,15 +212,12 @@ export function flightPurge(): number {
   return files;
 }
 
-// --- Flags ----------------------------------------------------------------------------------------
-
 export interface FlightEvent {
   t: number;
   ev: string;
   [k: string]: unknown;
 }
 
-/** Events from the last `windowMs`, oldest first. */
 export function recentEvents(now = Date.now(), windowMs = FLAG_WINDOW_MS): FlightEvent[] {
   const out: FlightEvent[] = [];
   for (const t of [now - DAY_MS, now]) {
@@ -278,7 +241,6 @@ export function recentEvents(now = Date.now(), windowMs = FLAG_WINDOW_MS): Fligh
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
-/** "last turn ended by max-duration after 30.0 s; last reply finished: no, stopped" */
 export function flagSummary(events: FlightEvent[]): string {
   const last = (ev: string) => [...events].reverse().find((e) => e.ev === ev);
   const l = last("listen.end");
@@ -301,13 +263,10 @@ export interface FlagResult {
   file: string;
   wav?: string;
   summary: string;
-  /** A flag was saved less than MIN_FLAG_GAP_MS ago: nothing new was written. */
   tooSoon?: boolean;
 }
 
-/** A second flag inside this gap is ignored (a stuck loop can't fill the disk). */
 export const MIN_FLAG_GAP_MS = 10_000;
-/** At most this many flags are kept; the oldest go first. */
 export const MAX_FLAGS = 50;
 let lastFlagAt = 0;
 
@@ -325,11 +284,6 @@ function trimFlags(): void {
   }
 }
 
-/**
- * Save the last minute: a markdown file with a one-line summary and the recent events, and, in `audio`
- * mode with `withAudio`, the audio ring as a 16 kHz mono WAV. Works while the recorder is on, or when an
- * earlier run left a folder behind (the CLI runs in its own process). Returns null if there's nothing to flag against.
- */
 export function flightFlag(noteIn?: string, opts: { withAudio?: boolean } = {}): FlagResult | null {
   if (!flightEnabled() && !existsSync(flightDir())) return null;
   const now = Date.now();
@@ -399,7 +353,6 @@ export function flightFlag(noteIn?: string, opts: { withAudio?: boolean } = {}):
   return { file, wav, summary };
 }
 
-/** `stop.seen`: the user's typing stopped speech or listening (reads the stop file the plugin writes). */
 export function flightStopSeen(ownStartAt: number): void {
   if (!flightEnabled()) return;
   const stopAt = (readJson(stopFile(cacheRoot())) as { at?: unknown } | null)?.at;
