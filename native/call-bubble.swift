@@ -382,9 +382,15 @@ final class Transcript {
     return NSAttributedString(string: text, attributes: [.font: tFont, .paragraphStyle: style, .foregroundColor: NSColor.white])
   }
 
-  func heightOf(_ text: String, width w: CGFloat) -> CGFloat {
-    ceil(attributed(text).boundingRect(with: NSSize(width: w, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin]).height)
+  /// Measured by a cell like the label's, so its inset counts: a bare string measures a little
+  /// narrower, and the label then wrapped the last word onto a line it didn't have.
+  let measure: NSTextFieldCell = { let c = NSTextFieldCell(); c.wraps = true; c.lineBreakMode = .byWordWrapping; return c }()
+  func sizeOf(_ text: String, width w: CGFloat) -> NSSize {
+    measure.attributedStringValue = attributed(text)
+    let s = measure.cellSize(forBounds: NSRect(x: 0, y: 0, width: w, height: .greatestFiniteMagnitude))
+    return NSSize(width: ceil(s.width), height: ceil(s.height))
   }
+  func heightOf(_ text: String, width w: CGFloat) -> CGFloat { sizeOf(text, width: w).height }
 
   /// The newest words that fit `cap` lines at `w`, with "… " in front when the start is cut. Never scrolls, never cuts the tail.
   func fit(_ text: String, width w: CGFloat, cap: Int) -> String {
@@ -405,7 +411,7 @@ final class Transcript {
   /// Sets the text, the size and the 72%/96% look; returns the frame it wants.
   @discardableResult
   func layout(_ text: String) -> NSRect {
-    let textWidth = ceil(attributed(String(text.suffix(400)).replacingOccurrences(of: "\n", with: " ")).boundingRect(with: NSSize(width: 10_000, height: tLine), options: []).width)
+    let textWidth = sizeOf(String(text.suffix(400)).replacingOccurrences(of: "\n", with: " "), width: 10_000).width
     let maxW = min(tMaxWidth, (screenVisible().width - 2 * tEdge))
     width = max(width, min(max(textWidth + 2 * tPad, tMinWidth), maxW))
     let inner = width - 2 * tPad
