@@ -2,6 +2,8 @@
 
 Synthesized from two candidate designs (ports and adapters around one audio port; a pure call engine) and an adversarial review.
 
+How the audio port, both backends, the mic lock, the worker and its wire protocol work as built is in [audio.md](audio.md).
+
 ## Synthesis decision
 
 Base: **A's audio port**. It is the deeper module: three exports (`openAudio`, `play`, types) hide backend choice,
@@ -28,7 +30,8 @@ the engine holds `say.requested` while `user.kind === "talking"` and starts it o
 |---|---|---|
 | `src/audio/device.ts` | The only audio port: `openAudio(purpose)`, `play(sound)`, `Frame`, `Playback`, `AudioSession` | A |
 | `src/audio/mic.ts` (internal) | Mic ownership: cross-process lock, one owner per process, work-listener preemption, release after the mic is really closed | A (absorbs lock.ts, exclusive(), worklisten hand-off) |
-| `src/audio/native.ts` (internal) | Client for the native worker; wire types stay here | A/B |
+| `src/audio/native.ts` (internal) | Client for the native worker | A/B |
+| `src/audio/protocol.ts` (internal) | The worker's wire protocol, defined once: command and event types, parsers, serializers | A/B (M4) |
 | `src/audio/process.ts` (internal) | rec/sox/ffmpeg in, play/afplay/say out, SIGSTOP pause, headphone detection, echo flag | A (absorbs speakers.ts, kokoro players) |
 | `native/audio-worker.swift` | VoiceProcessingIO: mic out as 16 kHz s16le on stdout, play/gain/stop commands as JSON lines on stdin, ready/pos/done/error/mic-closed on fd 3. No VAD, no policy, no files | A/B |
 | `src/native-build.ts` | Consent-gated swiftc build + hash for every native binary (bubble, worker) from one registry | A/B |
