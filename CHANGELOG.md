@@ -17,6 +17,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **The default whisper hint is a word list.** `npm, JSON, TypeScript, git, main, rebase, pull request, CI, macOS.` replaces the sentence about a developer: on 60 jargon clips it got 11.3% of words wrong instead of 13.2%.
 
 ### Fixed
+- **The live transcript panel shows your last word.** It sized itself a few points too narrow, so the last word wrapped onto a line the panel didn't have and was hidden, most often on short sentences.
 - **Muting mid-sentence keeps what you'd said so far** instead of dropping it.
 - **A failed transcription no longer stops the rest of a call being heard.**
 - **A whisper-server that fails at start-up no longer stalls the first transcription for 3 minutes.** The call switches to whisper-cli at once.
