@@ -1,13 +1,4 @@
-/**
- * Speech-to-text with whisper.cpp.
- *
- * Fast path: a warm `whisper-server` on 127.0.0.1 keeps the model loaded between
- * turns, so each reply skips the model load (and Metal start-up on Apple Silicon).
- * It's started in the background while the question is being spoken, and stopped
- * after VOICE_MCP_SERVER_IDLE_MINUTES of inactivity to give the memory back.
- *
- * Fallback: `whisper-cli`, one process per transcription. Always correct, just slower.
- */
+// Speech to text with whisper.cpp: a warm whisper-server, whisper-cli as the fallback. See docs/specs/speech-to-text.md.
 import { spawn, type ChildProcess } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -24,13 +15,9 @@ export const STT_MISSING =
   "whisper.cpp (speech-to-text) is not installed. Call the voice_setup tool to check and install what's missing " +
   "(or run `brew install whisper-cpp`, or set VOICE_MCP_WHISPER_BIN to an existing `whisper-cli`).";
 
-/**
- * Speech the VAD keeps on each side of what it detects. On whole recorded utterances, 30-300 ms turned
- * "Flag that." into "Like that." or "It's like that."; 350 ms and up kept it, and silences stayed empty up to 1000 ms.
- */
 const VAD_PAD_MS = 400;
 
-/** Per installed binary (Homebrew upgrades change the real path): whisper.cpp builds from before VAD exit on --vad. */
+// Keyed by real path: a Homebrew upgrade swaps the binary behind the same link.
 const vadSupport = new Map<string, Promise<boolean>>();
 
 export function supportsVad(bin: string): Promise<boolean> {
@@ -51,7 +38,6 @@ async function vadArgs(bin: string): Promise<string[]> {
   return vad && (await supportsVad(bin)) ? ["--vad", "-vm", vad, "-vp", String(VAD_PAD_MS)] : [];
 }
 
-/** Where people usually clone and build whisper.cpp themselves. */
 function sourceBuildDirs(): string[] {
   const home = os.homedir();
   return ["", "src", "code", "Code", "dev", "Developer", "projects", "Projects", "workspace", "git", "repos", "GitHub", "Downloads"].flatMap(
@@ -61,12 +47,11 @@ function sourceBuildDirs(): string[] {
 
 export function findWhisperCli(): string | null {
   if (CONFIG.whisperBin) return which(CONFIG.whisperBin);
-  // Homebrew's whisper-cpp formula ships `whisper-cli` (older releases: `whisper-cpp`).
   for (const bin of ["whisper-cli", "whisper-cpp", "whisper-cpp-cli"]) {
     const found = which(bin);
     if (found) return found;
   }
-  // A whisper.cpp you built yourself and never put on PATH. Old builds call the CLI `main`.
+  // Old source builds call the CLI `main`.
   for (const dir of sourceBuildDirs()) {
     for (const bin of ["whisper-cli", "main"]) {
       const candidate = path.join(dir, bin);
@@ -82,7 +67,6 @@ export function findWhisperServer(): string | null {
   if (onPath) return onPath;
   const cli = findWhisperCli();
   if (!cli) return null;
-  // Next to the CLI; old source builds call the server `server` (and the CLI `main`).
   const names = path.basename(cli) === "main" ? ["whisper-server", "server"] : ["whisper-server"];
   for (const name of names) {
     const sibling = path.join(path.dirname(cli), IS_WIN ? `${name}.exe` : name);
@@ -103,7 +87,7 @@ function freePort(): Promise<number> {
   });
 }
 
-/** fetch() with a timeout that also honours the caller's abort signal (works without AbortSignal.any). */
+// Links the caller's signal by hand: works without AbortSignal.any.
 async function fetchWithin(url: string, init: RequestInit, timeoutMs: number, signal?: AbortSignal): Promise<Response> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
@@ -125,7 +109,6 @@ class WarmWhisperServer {
   private stderrTail = "";
   private failures = 0;
 
-  /** Too many start failures (e.g. an old whisper.cpp build) → stop trying for this session. */
   get disabled(): boolean {
     return this.failures >= 2;
   }
@@ -134,7 +117,6 @@ class WarmWhisperServer {
     return !!this.child && this.child.exitCode === null;
   }
 
-  /** Start (or reuse) a server for `model`. Resolves with its base URL once the model is loaded. */
   warm(model: string): Promise<string> {
     if (this.ready && this.model === model && this.running) {
       this.touch();
@@ -166,15 +148,7 @@ class WarmWhisperServer {
     if (CONFIG.prompt) args.push("--prompt", CONFIG.prompt);
     debug("starting whisper-server:", bin, args.join(" "));
 
-    // Orphan guard: the server runs under a tiny shell that waits on our stdin pipe
-    // and kills the server when that pipe closes — i.e. whenever this process exits,
-    // even if it's killed hard. `detached` gives it a process group we can stop as one.
-    // A server that exits by itself (an unknown flag, a bad model) takes the shell with it,
-    // so start-up sees the exit instead of polling /health until the deadline.
-    // The script is a fixed string. `bin` and `args` (which include settings such as the
-    // model path and VOICE_MCP_WHISPER_PROMPT) reach it as positional parameters, and "$@"
-    // passes each one on as a single word: the shell never parses or expands them. A test
-    // in e2e.test.mjs checks this with shell characters in those settings.
+    // Orphan guard, and "$@" so the shell never parses settings (tested in e2e.test.mjs).
     const child = IS_WIN
       ? spawn(bin, args, { stdio: ["ignore", "ignore", "pipe"], windowsHide: true })
       : spawn(
@@ -212,7 +186,6 @@ class WarmWhisperServer {
     throw new Error("whisper-server did not become ready in time");
   }
 
-  /** The server is up and its model loaded (or loading): a partial may go to it without starting anything. */
   get isWarm(): boolean {
     return !!this.ready && this.running;
   }
@@ -264,7 +237,6 @@ const warmServer = new WarmWhisperServer();
 
 const serverUsable = () => CONFIG.useWhisperServer && !warmServer.disabled && !!findWhisperServer();
 
-/** Start loading the model in the background (called while the question is being spoken). */
 export function prewarm(model: string): void {
   if (serverUsable()) warmServer.warm(model).catch(() => {});
 }
@@ -273,16 +245,11 @@ export function stopWhisperServer(): void {
   warmServer.stop();
 }
 
-/** A partial transcript can be asked for: the warm server is up. Never starts a server, never falls back to whisper-cli. */
 export function partialsAvailable(): boolean {
   return serverUsable() && warmServer.isWarm;
 }
 
-/**
- * A rough transcript of an utterance still being said, for the live transcript (docs/specs/live-transcript.md):
- * the warm whisper-server only, audio from memory. Resolves null on any failure or abort, with nothing logged
- * (partial words are display only: never in logs, even with VOICE_MCP_DEBUG).
- */
+// Partial words are display only: never logged, even with VOICE_MCP_DEBUG.
 export async function transcribePartial(wav: Buffer, signal: AbortSignal): Promise<string | null> {
   if (!partialsAvailable()) return null;
   try {
@@ -292,7 +259,6 @@ export async function transcribePartial(wav: Buffer, signal: AbortSignal): Promi
   }
 }
 
-/** Which engine the next transcription will use — for the setup report. */
 export async function describeStt(): Promise<string> {
   const cli = findWhisperCli();
   const server = findWhisperServer();
@@ -312,7 +278,7 @@ async function transcribeCli(bin: string, wavFile: string, model: string, signal
   return cleanTranscript(result.stdout, dropped);
 }
 
-/** What the last clean-up removed from a transcript, in characters (the recorder logs the number, never the text). */
+// A count only: the recorder logs the number, never the text.
 let lastDropped = 0;
 function cleanTranscript(raw: string, dropped?: string[]): string {
   const text = cleanText(raw, dropped);
@@ -320,7 +286,6 @@ function cleanTranscript(raw: string, dropped?: string[]): string {
   return text;
 }
 
-/** A WAV file on disk, or the WAV bytes already in memory (no temp file for the warm server). */
 export type WavInput = { file: string } | { wav: Buffer };
 
 async function transcribeInput(input: WavInput, model: string, signal?: AbortSignal, dropped?: string[]): Promise<string> {
@@ -364,12 +329,11 @@ async function transcribeNow(input: WavInput, model: string, signal?: AbortSigna
   return text;
 }
 
-/** `dropped`, when given, receives whatever cleaning removed as invented (whisper's stock sentences). */
+/** `dropped`, when given, receives whatever cleaning removed as invented. */
 export function transcribe(wavFile: string, model: string, signal?: AbortSignal, dropped?: string[]): Promise<string> {
   return transcribeInput({ file: wavFile }, model, signal, dropped);
 }
 
-/** Transcribe a complete WAV held in memory (the turn path: no temp file with the warm server). */
 export function transcribeBuffer(wav: Buffer, model: string, signal?: AbortSignal, dropped?: string[]): Promise<string> {
   return transcribeInput({ wav }, model, signal, dropped);
 }
