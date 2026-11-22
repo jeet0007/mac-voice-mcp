@@ -16,6 +16,7 @@
     "examples",
     "README.md",
     "LICENSE",
+    "NOTICE.md",
     "CHANGELOG.md"
   ],
   "scripts": {
