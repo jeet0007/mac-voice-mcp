@@ -27,4 +27,4 @@ Once Kokoro is installed it's used automatically, and the macOS voice becomes th
 - **To stop using it:** set `VOICE_MCP_TTS=say`, or delete `~/.cache/mac-voice-mcp/kokoro/`.
 - **Limits:** English only (American and British voices). It speaks with its own pronunciation rules, which handle common developer words (JSON, `index.ts`, version numbers).
 
-**Licenses.** The Kokoro model and kokoro-js are Apache-2.0. kokoro-js turns text into sounds with a WebAssembly build of espeak-ng (GPL-3.0), through the `phonemizer` package. None of this is part of mac-voice-mcp (MIT); it's installed on your Mac only if you ask for it. See [Third-party software](../README.md#third-party-software).
+**Licenses.** The Kokoro model and kokoro-js are Apache-2.0. kokoro-js turns text into sounds with a WebAssembly build of espeak-ng (GPL-3.0), through the `phonemizer` package. None of this is part of mac-voice-mcp (MIT); it's installed on your Mac only if you ask for it. See [Third-party software](../NOTICE.md#third-party-software).

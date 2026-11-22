@@ -5,6 +5,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+- **A shorter README.** It follows the usual layout: highlights, installation, usage, troubleshooting and docs. The disclaimer and third-party licenses moved to [NOTICE.md](NOTICE.md), which now ships in the npm package, and the silence filter's Silero VAD model is listed there.
+
 ## [0.11.0] - 2026-11-22
 
 ### Added
