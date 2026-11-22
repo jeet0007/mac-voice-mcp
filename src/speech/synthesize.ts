@@ -136,9 +136,28 @@ export async function builtInCommand(): Promise<{ bin: string; args: string[]; s
 
 // --- Kokoro ----------------------------------------------------------------------------------
 
-/** A short pause between sentences, so they don't run into each other. */
-const GAP_MS = 120;
-const silence = (ms: number) => Buffer.alloc(Math.round((KOKORO_RATE * ms) / 1000) * 2);
+/** Kokoro pads each chunk with ~0.3 s of near-silence before and ~0.5 s after; this much of it is kept. */
+const LEAD_MS = 30;
+const TAIL_MS = 50;
+const QUIET = 0.01 * 32768; // a 16-bit sample below this (-40 dBFS) is edge silence
+// The pause after a chunk, by how it ends: placeholders until the owner's listening test.
+const SENTENCE_PAUSE_MS = 350;
+const CLAUSE_PAUSE_MS = 200;
+const samples = (ms: number) => Math.round((KOKORO_RATE * ms) / 1000);
+
+/** A chunk's PCM with its edge silence trimmed and, unless it's the last, the pause its ending calls for. */
+function withPause(pcm: Buffer, chunk: string, last: boolean): Buffer {
+  const n = pcm.length / 2;
+  const loud = (i: number) => Math.abs(pcm.readInt16LE(i * 2)) >= QUIET;
+  let start = 0;
+  while (start < n && !loud(start)) start++;
+  let end = n;
+  while (end > start && !loud(end - 1)) end--;
+  const body = pcm.subarray(Math.max(0, start - samples(LEAD_MS)) * 2, Math.min(n, end + samples(TAIL_MS)) * 2);
+  if (last) return body;
+  const pause = /[.!?…]["'”’)\]]*$/.test(chunk) ? SENTENCE_PAUSE_MS : /[,;:—–-]["'”’)\]]*$/.test(chunk) ? CLAUSE_PAUSE_MS : 0;
+  return Buffer.concat([body, Buffer.alloc(samples(pause) * 2)]);
+}
 
 export interface KokoroSpeech {
   /** Loads the model, then the sound to play (null: nothing to say). Throws if Kokoro can't start. */
@@ -167,7 +186,7 @@ export function kokoroSpeech(text: string, signal: AbortSignal): KokoroSpeech {
         chunks,
         (seq, audio) => {
           if (seq === 0) stats.firstAudioMs = Date.now() - t0;
-          ready.push(seq < chunks.length - 1 ? Buffer.concat([audio, silence(GAP_MS)]) : audio);
+          ready.push(withPause(audio, chunks[seq]!, seq === chunks.length - 1));
           s.wake?.();
         },
         cancel.signal,
@@ -259,7 +278,7 @@ async function kokoroToFile(text: string, outFile: string): Promise<{ firstAudio
   let firstAudioMs = 0;
   await kokoroWorker.speak(chunks, (seq, pcm) => {
     if (seq === 0) firstAudioMs = Date.now() - t0;
-    parts[seq] = seq < chunks.length - 1 ? Buffer.concat([pcm, silence(GAP_MS)]) : pcm;
+    parts[seq] = withPause(pcm, chunks[seq]!, seq === chunks.length - 1);
   });
   const pcm16k = resamplePcm16(Buffer.concat(parts), KOKORO_RATE, 16_000);
   await writeFile(outFile, Buffer.concat([wavHeader(pcm16k.length), pcm16k]));
