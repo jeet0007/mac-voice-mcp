@@ -53,6 +53,11 @@ Turn the volume up, keep the room quiet, and stop voice mode in other sessions w
 | `call/engine/` | Every rule of a call, pure: `step(state, event)` returns the next state and the effects to run, `nextWake(state)` the next deadline. When a reply plays, waits, pauses or stops, the thinking ticks, hang-up phrases and fillers (`words.ts`), the idle limit. No text or audio in its state, events or effects, so each step goes to the flight recorder as it is. Imports nothing outside the directory (tested) |
 | `call/session.ts` | A call: one open mic until the user hangs up. The shell around the engine: the audio session, transcription, the texts of the replies, the inbox, `call.json`, one timer; `start`, `say`, `listen`, `end` |
 | `mcp.ts` | A small MCP server over stdio: JSON-RPC, tools, prompts, progress, cancellation |
+| `proc.ts` | Child-process helpers: PATH lookup, a promise-based runner, and error types |
+| `doctor.ts` | `mac-voice-mcp doctor`: a self-check of the voice pipeline, PASS, WARN or FAIL against fixed limits |
+| `wer.ts` | Word error rate, the yardstick for doctor and the round-trip tests (pure, unit-tested) |
+| `texts.ts` | Everything the model reads: speaking rules, server instructions, tool descriptions and prompts |
+| `bubble.ts` | Starting and stopping the call bubble, and sending it the live transcript |
 | `voice.ts`, `server.ts`, `index.ts` | The round trip, the MCP tools and prompts, and the CLI |
 | `skills/`, `hooks/` | The Claude Code plugin's `/mac-voice-mcp:talk`, `:call`, `:hangup` and `:setup` commands, the `voice-help` skill, and the stay-in-voice hook |
 

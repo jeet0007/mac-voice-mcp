@@ -1,6 +1,5 @@
-/** Small PCM helpers for the Kokoro voice (pure, unit-tested). */
+// Small pure PCM and WAV helpers for the Kokoro voice. See docs/specs/speech-output.md.
 
-/** Float samples (-1…1) → 16-bit little-endian PCM, clipped. */
 export function floatToPcm16(samples: Float32Array): Buffer {
   const buf = Buffer.alloc(samples.length * 2);
   for (let i = 0; i < samples.length; i++) {
@@ -10,10 +9,7 @@ export function floatToPcm16(samples: Float32Array): Buffer {
   return buf;
 }
 
-/**
- * Resample 16-bit mono PCM by linear interpolation (24 kHz → 16 kHz for whisper). Good enough
- * for speech recognition, which is all it's used for; playback always uses the original rate.
- */
+// Linear interpolation: good enough for whisper, its only use; playback keeps the original rate.
 export function resamplePcm16(pcm: Buffer, fromRate: number, toRate: number): Buffer {
   const inCount = Math.floor(pcm.length / 2);
   if (fromRate === toRate || inCount === 0) return Buffer.from(pcm.subarray(0, inCount * 2));
@@ -31,7 +27,7 @@ export function resamplePcm16(pcm: Buffer, fromRate: number, toRate: number): Bu
   return out;
 }
 
-/** A 16-bit mono WAV file's data chunk and rate (`say` may add chunks before it), or null if it has none. */
+// `say` may add chunks before the data chunk.
 export function wavData(wav: Buffer): { pcm: Buffer; rate: number } | null {
   if (wav.length < 12 || wav.toString("ascii", 0, 4) !== "RIFF") return null;
   let rate = 16_000;
@@ -46,7 +42,6 @@ export function wavData(wav: Buffer): { pcm: Buffer; rate: number } | null {
   return null;
 }
 
-/** Seconds of audio in a 16-bit mono WAV file. 0 if there is none. */
 export function wavSeconds(wav: Buffer): number {
   const data = wavData(wav);
   return data ? data.pcm.length / 2 / data.rate : 0;

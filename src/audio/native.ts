@@ -1,8 +1,4 @@
-/**
- * The native backend: the audio worker (native/audio-worker.swift) runs one macOS voice-processing
- * unit that owns the mic and the speaker, so what it plays is cancelled from what the mic hears.
- * Internal to src/audio/: device.ts starts one for a call on allowlisted speakers. The wire is protocol.ts.
- */
+// The native backend: the Node client for the echo-cancelling audio worker. See docs/specs/audio.md.
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
@@ -19,28 +15,19 @@ import { builtInCommand } from "../speech/synthesize.js";
 import { SPEECH_RATE, type Playback, type PlayEnd, type Sound } from "./device.js";
 import { FRAME_BYTES, parseEvent, serializeCommand, type Command, type WorkerEvent } from "./protocol.js";
 
-/** Long enough to answer a first-time mic permission prompt, mostly. */
+// Long enough to answer a first-time mic permission prompt, mostly.
 const START_TIMEOUT_MS = 10_000;
-/** The worker fades out and exits within milliseconds of stdin closing; this is for one that hangs. */
 const STOP_TIMEOUT_MS = 2000;
-/**
- * Frames count as echo this long after the unit starts, until the canceller has converged (H2). The
- * probe heard no false onset in the first 5 s of a reply with no calibration (residue median -100 dB),
- * so convergence is already under a frame or two there; 500 ms is a margin for other Macs and rooms
- * that costs nothing audible, since the call's greeting plays then.
- */
 const CONVERGE_MS = 500;
-/** Speech goes to the worker in 100 ms commands (at SPEECH_RATE), so a long sentence never holds up a gain or a stop behind it. */
+// 100 ms at SPEECH_RATE, so a long sentence never holds up a gain or a stop behind it.
 const PCM_COMMAND_BYTES = 4800;
 
 type Ack = Extract<WorkerEvent, { ev: "ack" }>;
 
-/** Why a worker ended on its own. */
 export class WorkerLost extends Error {
   override name = "WorkerLost";
   constructor(
     message: string,
-    /** The input or output device changed: the worker is fine, the route isn't the one it started on. */
     readonly routeChanged: boolean,
   ) {
     super(message);
@@ -48,14 +35,11 @@ export class WorkerLost extends Error {
 }
 
 export interface Worker {
-  /** Mic audio in FRAME_BYTES slices from the start. Ends after close() or return(); throws a WorkerLost when the worker ends on its own. */
   readonly frames: AsyncIterableIterator<Buffer>;
-  /** The canceller may not have converged yet: nothing heard now can be trusted as the user. */
   converging(): boolean;
   play(sound: Sound): Playback;
-  /** Aborts, with a WorkerLost as its reason, when the worker ends on its own: a device changed, the mic stalled, or it died. */
+  // Aborts with a WorkerLost as its reason.
   readonly lost: AbortSignal;
-  /** Close stdin, and resolve once the worker has said mic-closed and exited. Idempotent. */
   close(): Promise<void>;
 }
 
@@ -65,7 +49,7 @@ interface Playing {
   fail(err: unknown): void;
 }
 
-/** Start the worker. Resolves once its unit runs; rejects, only after it has exited, if it can't start. */
+// Rejects only after the worker has exited, so nothing else opens the mic while it lives.
 export function start(): Promise<Worker> {
   const child = spawn(nativeBin("audio-worker"), [], { stdio: ["pipe", "pipe", "ignore", "pipe"] });
   activeChildren.add(child);
@@ -78,7 +62,6 @@ export function start(): Promise<Worker> {
   let readyAt = 0;
   let closing: Promise<void> | null = null;
   let gone = false;
-  /** The first reason the worker gave for ending. */
   let failure: WorkerLost | null = null;
   let started!: { resolve: (w: Worker) => void; reject: (e: unknown) => void };
   const starting = new Promise<Worker>((resolve, reject) => (started = { resolve, reject }));
@@ -94,7 +77,7 @@ export function start(): Promise<Worker> {
     return new Promise((resolve) => acks.set(mine, resolve));
   };
 
-  // --- The mic: re-cut into whole frames, as a pipe may split them.
+  // A pipe may split frames, so re-cut them.
   const queue: Buffer[] = [];
   let pending: Buffer = Buffer.alloc(0);
   let end: "done" | Error | null = null;
@@ -114,7 +97,6 @@ export function start(): Promise<Worker> {
     if (queue.length) notify();
   });
 
-  // --- Built-in speech: `say -o` renders each chunk to a WAV, by a `say` started ahead so its voice is loaded.
   const dir = mkdtempSync(path.join(os.tmpdir(), "voice-mcp-say-"));
   let renders = 0;
   let spare: { key: string; file: string; proc: Waiting } | null = null;
@@ -127,11 +109,11 @@ export function start(): Promise<Worker> {
     let r = spare;
     spare = null;
     if (r && (r.key !== [bin, ...args].join("\0") || !r.proc.ready)) {
-      r.proc.kill(); // the voice setting changed, or it stopped
+      r.proc.kill();
       r = null;
     }
     r ??= startRender(bin, args);
-    if (standby && !closing && !gone) spare = startRender(bin, args); // the next chunk's voice loads while this one renders
+    if (standby && !closing && !gone) spare = startRender(bin, args);
     try {
       const result = await r.proc.send(text, { signal, timeoutMs: 60_000 });
       if (result.code !== 0) throw new Error(`Text-to-speech failed (exit ${result.code}): ${tail(result.stderr) || "no output"}`);
@@ -142,7 +124,6 @@ export function start(): Promise<Worker> {
       void rm(r.file, { force: true });
     }
   }
-  // The first reply's voice loads while the call starts.
   void builtInCommand().then(
     ({ bin, args, standby }) => {
       if (standby && !closing && !gone) spare ??= startRender(bin, args);
@@ -289,7 +270,7 @@ export function start(): Promise<Worker> {
     }
   });
 
-  /** Resolves once the worker is gone and its pipes are closed, so every event has been read. */
+  // Resolves once the pipes are closed too, so every event has been read.
   const exited = new Promise<void>((resolve) => {
     const finish = (why: string) => {
       if (gone) return;
@@ -301,7 +282,7 @@ export function start(): Promise<Worker> {
       const reason = failure ?? new WorkerLost(`The audio worker stopped (${why}).`, false);
       for (const ack of acks.values()) ack(null);
       acks.clear();
-      for (const sound of sounds.values()) sound.fail(reason); // no `done` came for it: the worker died
+      for (const sound of sounds.values()) sound.fail(reason);
       sounds.clear();
       end = closing ? "done" : reason;
       notify();

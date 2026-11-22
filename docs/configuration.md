@@ -16,21 +16,23 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 | `VOICE_MCP_KOKORO_DTYPE` | `fp32` | `q8`: a smaller model (~90 MB instead of ~330 MB) that's about half as fast. |
 | `VOICE_MCP_KOKORO_STALL_SECONDS` | `30` | If the Kokoro voice makes no sound for this long, voice-mcp resets it and the built-in voice finishes the reply. |
 | `VOICE_MCP_KOKORO_DIR` | `~/.cache/mac-voice-mcp/kokoro` | Where the Kokoro voice is installed. |
-| `VOICE_MCP_MAX_SPEAK_WORDS` | `120` | Longer text is cut at a sentence boundary ("the rest is on screen"), and Claude is told how much was spoken. |
-| `VOICE_MCP_VOICE_STANDBY` | `1` | The built-in voice is started ahead of each reply and waits for the text, so the reply starts sooner (about 0.8 s sooner with Siri voices). It's started after your first voice turn and stopped after 15 idle minutes. `0` starts it only when there's something to say. |
+| `VOICE_MCP_MAX_SPEAK_WORDS` | `120` | Longer text is cut at a sentence boundary ("the rest is on screen"), and Claude is told how much was spoken. `0` means no limit. |
+| `VOICE_MCP_VOICE_STANDBY` | `1` | The built-in voice is started ahead of each reply and waits for the text, so the reply starts sooner (about 0.8 s sooner with Siri voices). It's started after your first voice turn and stopped after `VOICE_MCP_SERVER_IDLE_MINUTES` idle minutes (default 15). `0` starts it only when there's something to say. |
 | `VOICE_MCP_CHIME` | `1` | Set to `0` to turn off all the sounds: mic open (tick), closed after words (pop), closed after nothing was heard (purr) and errors (thud). Spoken errors still play. |
 | `VOICE_MCP_SPOKEN_ERRORS` | `1` | When a voice turn can't work (no microphone access, no recorder, no speech model), voice-mcp says one short fixed line out loud with the built-in voice, after the error sound. Each kind is spoken at most once per 10 minutes per server. `0` turns the lines off; the sounds still play (see `VOICE_MCP_CHIME`). A microphone busy in another window is never spoken. |
 | `VOICE_MCP_PHASE_FILE` | `1` | Writes what a voice turn is doing (`speaking`, `listening`, `transcribing`, `waiting`) to `voice-mode/phase.json` in the cache folder, for Voice Buddy's status line, the call bubble, or a display of your own. One file for the whole Mac; removed when the turn ends. `0` turns it off. |
 | `VOICE_MCP_LISTEN_WHILE_WORKING` | `1` | Claude Code plugin: after you answer out loud, listen while Claude works for things you say to it ("Claude, …"). See [Talk to Claude while it works](usage.md#talk-to-claude-while-it-works). `0` turns it off. |
 | `VOICE_MCP_WORK_LISTEN_MINUTES` | `10` | Stop listening while Claude works after this long without a voice turn. |
+| `VOICE_MCP_WORK_LISTEN_CONFIRM_MS` | `10000` | After a voice turn, how long the plugin's hook has to confirm voice mode before voice-mcp gives up listening while Claude works (at least `200`). With no hook, it never listens. |
 | `VOICE_MCP_LOCK_WAIT_SECONDS` | `120` | How long a turn waits while another session on this Mac is using the mic. |
 
 ## Listening
 
 | Variable | Default | |
 |---|---|---|
-| `VOICE_MCP_END_SILENCE_MS` | `1500` | How long a pause ends your turn. Use `2000` if it still cuts you off while you think, `1000` for snappier replies. |
+| `VOICE_MCP_END_SILENCE_MS` | `1500` | How long a pause ends your turn (at least `300`). Use `2000` if it still cuts you off while you think, `1000` for snappier replies. On 10 recorded explanations, with pauses of up to 1.5 s, 1.2 s cut off 3 of them mid-thought and 1.5 s cut off none. |
 | `VOICE_MCP_START_TIMEOUT_SECONDS` | `15` | How long to wait for you to start talking. |
+| `VOICE_MCP_TEST_SECONDS` | `30` | The longest the `test` command listens for your reply. |
 | `VOICE_MCP_SPEECH_MARGIN_DB` | `12` | How much louder than room noise counts as speech. Raise it in noisy rooms. |
 | `VOICE_MCP_MIN_SPEECH_DB` | `-48` | The quietest level that ever counts as speech (dBFS). |
 | `VOICE_MCP_RECORDER` | `auto` | `sox` or `ffmpeg` (`ffmpeg` is macOS only). `auto` uses SoX, falling back to ffmpeg. |
@@ -42,14 +44,18 @@ Everything is optional. Set these in your client config's `"env": { … }` block
 |---|---|---|
 | `VOICE_MCP_WHISPER_MODEL` | `base.en` | Which model to use (see the table below). |
 | `VOICE_MCP_LANGUAGE` | `en` for `*.en` models, otherwise `auto` | `en`, `th`, `ja`, `de`, … |
-| `VOICE_MCP_WHISPER_PROMPT` | a developer word list (English) | Tells whisper which words to expect, so it hears them better. By default, in English: `npm, JSON, TypeScript, git, main, rebase, pull request, CI, macOS.` Write your own list of names and terms, e.g. `Priya, Postgres, Kubernetes, migration.`, or set `none` for no hint. With the silence filter on, on 60 jargon clips, this list got 11.3% of words wrong, a sentence about a developer 13.2%, and no hint 14.5%. A sentence also turned foreign background talk into a sentence about code. |
-| `VOICE_MCP_WHISPER_MODEL_PATH` | — | Use this exact `ggml-*.bin` file. |
+| `VOICE_MCP_WHISPER_PROMPT` | a developer word list (English) | Tells whisper which words to expect, so it hears them better. By default, in English: `npm, JSON, TypeScript, git, main, rebase, pull request, CI, macOS.` Write your own list of names and terms, e.g. `Priya, Postgres, Kubernetes, migration.`, or set `none` (or `off`, `0`, `false`) for no hint. With the silence filter on, on 60 jargon clips, this list got 11.3% of words wrong, a sentence about a developer 13.2%, and no hint 14.5%. A sentence also turned foreign background talk into a sentence about code. |
+| `VOICE_MCP_WHISPER_MODEL_PATH` | — | Use this exact `ggml-*.bin` file. It skips the model lookup and the download. |
+| `VOICE_MCP_MODELS_DIR` | `<cache>/models` | Where models are kept, downloaded or symlinked. The silence filter goes here too. |
 | `VOICE_MCP_MODEL_SEARCH_PATHS` | — | Extra folders to check for an existing model (`:`-separated). |
+| `VOICE_MCP_WHISPER_BIN` | found on `PATH` | The `whisper-cli` program to use, as a path or a name. |
+| `VOICE_MCP_WHISPER_SERVER_BIN` | found on `PATH` | The `whisper-server` program to use, as a path or a name. |
 | `VOICE_MCP_WHISPER_SERVER` | `1` | Set to `0` to always use `whisper-cli`, with no warm server. |
-| `VOICE_MCP_SERVER_IDLE_MINUTES` | `15` | How long the warm server stays up without use. |
+| `VOICE_MCP_SERVER_IDLE_MINUTES` | `15` | How long the warm whisper server, the Kokoro worker and the built-in voice standby stay up without use. At least 1. |
 | `VOICE_MCP_THREADS` | min(8, cores) | Number of whisper.cpp threads. |
 | `VOICE_MCP_MODEL_BASE_URL` | Hugging Face | A mirror that serves the `ggml-*.bin` models, and the silence filter `ggml-silero-v5.1.2.bin`. |
-| `VOICE_MCP_CACHE_DIR` | `~/.cache/mac-voice-mcp` | Where models are downloaded or symlinked. |
+| `VOICE_MCP_CACHE_DIR` | `~/.cache/mac-voice-mcp` (or `$XDG_CACHE_HOME/mac-voice-mcp`) | Everything voice-mcp downloads, builds or links: models, the Kokoro voice, the native binaries, the mic lock, the voice-mode files and doctor reports. Every version and every client shares it. |
+| `VOICE_MCP_EXTRA_PATH` | Homebrew folders | Folders added to the end of `PATH`, `:`-separated. GUI apps such as Claude Desktop and Cursor start MCP servers with a short `PATH` that misses Homebrew, so by default voice-mcp adds `/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin` and `~/.local/bin`. Set to an empty value to add nothing. When it is set at all, setup looks for `brew` only on `PATH` (the tests use this). Not on Windows. |
 | `VOICE_MCP_DEBUG` | `0` | Verbose logs with per-turn timings, written to stderr. |
 
 ## Flight recorder
@@ -68,7 +74,7 @@ Commands: `mac-voice-mcp flag ["note"]` saves the last minute to `flight/flags/`
 |---|---|---|
 | `VOICE_MCP_CALL_IDLE_MINUTES` | `30` | A call ends after this long with nothing said by you or Claude. Silence alone never ends it before then. |
 | `VOICE_MCP_CALL_DUPLEX` | `auto` | Whether the mic stays open while Claude speaks on a call. `full`: yes, so you can talk over Claude; it pauses, drops the rest of its reply when you say something real, and carries on after a filler such as "mm-hmm". Use it only with headphones: on speakers the mic hears Claude. `half`: the mic is muted while Claude speaks. `auto`: `full` when the Mac's sound goes to headphones (the headphone jack, or Bluetooth that isn't a speaker), else `half`; checked once when the call starts. Windows calls are always `half`: speech can't be paused there. |
-| `VOICE_MCP_AUDIO` | `native` | How a call plays and records sound on macOS 15 or later. `native`: through the audio worker, which cancels Claude's voice from the mic, on the Mac's own or wired speakers. Setup builds the worker after you agree; until then calls use `process`. Other outputs (AirPlay, HDMI, Bluetooth speakers), headphones and a forced `VOICE_MCP_CALL_DUPLEX` keep `process`. If the worker can't start, the call falls back to `process` until the server restarts. `process` (or `0`): the recorder and player programs, for every call. |
+| `VOICE_MCP_AUDIO` | `native` | How a call plays and records sound on macOS 15 or later. `native`: through the audio worker, which cancels Claude's voice from the mic, on the Mac's own or wired speakers. Setup builds the worker after you agree; until then calls use `process`. Other outputs (AirPlay, HDMI, Bluetooth speakers), headphones and a forced `VOICE_MCP_CALL_DUPLEX` keep `process`. If the worker can't start, the call falls back to `process` until the server restarts. `process` (or `0`, `off`, `false`): the recorder and player programs, for every call. |
 | `VOICE_MCP_CALL_THINKING_SOUND` | `0` | `1`: after your words reach Claude on a call, a soft tick every 1.5 s until Claude speaks, for at most 10 s, so the call never goes silent. Off by default. macOS only. |
 | `VOICE_MCP_CALL_BUBBLE` | `1` | `0`: never show the floating call bubble, even once it's built (see [Calls](usage.md#the-call-bubble-macos)). |
 | `VOICE_MCP_LIVE_TRANSCRIPT` | `1` | `0`: don't show your words next to the call bubble while you speak (see [the call bubble](usage.md#the-call-bubble-macos)). Nothing runs with it off, with no bubble, or with `VOICE_MCP_WHISPER_SERVER=0`. |

@@ -1,11 +1,4 @@
-/**
- * The whisper.cpp speech model: find it without redoing work, download only with consent.
- *
- *   1. VOICE_MCP_WHISPER_MODEL_PATH
- *   2. our cache (a real file, or a symlink made by an earlier run)
- *   3. the same model elsewhere on this machine → symlinked into the cache
- *   4. a one-time download — only via voice_setup(install=true) / `setup`
- */
+// The whisper.cpp speech model and the silence filter: find, symlink, or download with consent. See docs/specs/setup-and-doctor.md.
 import { createHash } from "node:crypto";
 import { closeSync, createWriteStream, existsSync, fstatSync, lstatSync, openSync, readSync, statSync } from "node:fs";
 import { mkdir, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
@@ -16,13 +9,11 @@ import { pipeline } from "node:stream/promises";
 import { CONFIG, debug, IS_MAC, log } from "./config.js";
 import { run, SetupError } from "./proc.js";
 
-/** Approximate download sizes, for the setup report. */
 export const MODEL_SIZES_MB: Record<string, number> = {
   "tiny.en": 75, tiny: 75, "base.en": 142, base: 142, "small.en": 466, small: 466,
   "medium.en": 1500, medium: 1500, "large-v3-turbo": 1620, "large-v3-turbo-q5_0": 547, "large-v3": 3100,
 };
 
-/** How the current model was obtained — shown in the setup report. */
 export let modelSource = "";
 
 export function modelFile(): string {
@@ -33,7 +24,6 @@ export function modelFile(): string {
   return path.join(CONFIG.modelsDir, `ggml-${CONFIG.modelName}.bin`);
 }
 
-/** whisper.cpp ggml model files start with the magic 0x67676d6c ("ggml"). */
 export function isGgmlModel(file: string): boolean {
   let fd: number | undefined;
   try {
@@ -49,10 +39,6 @@ export function isGgmlModel(file: string): boolean {
   }
 }
 
-/**
- * Look for the same model elsewhere before downloading: whisper.cpp checkouts,
- * Homebrew's share folder, other tools' caches, and (on macOS) Spotlight.
- */
 async function findExistingModel(fileName: string): Promise<string | null> {
   const home = os.homedir();
   const dirs = [
@@ -82,13 +68,12 @@ async function findExistingModel(fileName: string): Promise<string | null> {
         if (path.basename(line) === fileName && !line.startsWith(CONFIG.modelsDir) && isGgmlModel(line)) return line;
       }
     } catch {
-      /* Spotlight unavailable — fine */
+      /* Spotlight unavailable */
     }
   }
   return null;
 }
 
-/** Point our cache at an existing file (symlink), so later lookups are instant. */
 async function linkIntoCache(target: string, linkPath: string): Promise<string> {
   try {
     await mkdir(path.dirname(linkPath), { recursive: true });
@@ -103,7 +88,7 @@ async function linkIntoCache(target: string, linkPath: string): Promise<string> 
 let resolvedModel: string | null = null;
 let modelDownload: Promise<string> | null = null;
 
-/** Find the model on this machine (steps 1–3). Returns null if it isn't here at all. Never downloads. */
+/** Never downloads. Null when the model isn't on this machine. */
 export async function locateModel(): Promise<string | null> {
   if (resolvedModel && existsSync(resolvedModel)) return resolvedModel;
 
@@ -136,7 +121,6 @@ export async function locateModel(): Promise<string | null> {
   return null;
 }
 
-/** locateModel(), plus — only when allowed — a one-time download into the cache. */
 export async function ensureModel(opts: { download: boolean }): Promise<string> {
   const found = await locateModel();
   if (found) return found;
@@ -154,7 +138,6 @@ export async function ensureModel(opts: { download: boolean }): Promise<string> 
   return (resolvedModel = downloaded);
 }
 
-/** Is a download currently running (e.g. started by an earlier voice_setup call)? */
 export const isModelDownloading = () => modelDownload !== null;
 
 async function downloadModel(dest: string): Promise<string> {
@@ -203,7 +186,6 @@ async function downloadModel(dest: string): Promise<string> {
   return dest;
 }
 
-/** Silero VAD for whisper.cpp: whisper skips the stretches without speech instead of inventing words there (issue #62). */
 export const VAD_MODEL = {
   file: "ggml-silero-v5.1.2.bin",
   url: "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin",
@@ -213,7 +195,7 @@ export const VAD_MODEL = {
 
 const vadModelFile = () => path.join(CONFIG.modelsDir, VAD_MODEL.file);
 
-/** The VAD model in our cache, or null. A file of the wrong size (truncated, replaced) makes whisper abort, so it's ignored until downloadVadModel replaces it. */
+/** A file of the wrong size makes whisper abort, so it's ignored until downloadVadModel replaces it. */
 export function locateVadModel(): string | null {
   try {
     return statSync(vadModelFile()).size === VAD_MODEL.size ? vadModelFile() : null;

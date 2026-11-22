@@ -1,16 +1,4 @@
-/**
- * Mic ownership. Internal to src/audio/: device.ts claims the mic for each session.
- *
- * Across processes, one voice turn at a time across every voice-mcp on this Mac — several Claude
- * Code windows, Claude Desktop and Cursor all share one speaker and one microphone. The lock is a
- * file created atomically (O_EXCL) holding the owner's pid and start time. A lock whose owner has
- * died (or that is implausibly old) is taken over, so a crash never blocks the mic for good. If the
- * lock can't be used at all (read-only or missing cache folder), turns go ahead without it rather
- * than failing.
- *
- * In this process, exclusive() runs one turn, call start or setup at a time, and a turn or a call
- * takes the mic from the work listener, waiting until its mic is really closed.
- */
+// Mic ownership: the cross-process mic lock and the work listener's hand-off in this process. See docs/specs/audio.md.
 import { closeSync, linkSync, mkdirSync, openSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
 import path from "node:path";
 import { CONFIG, debug } from "../config.js";
@@ -18,16 +6,13 @@ import { CancelledError, sleep } from "../proc.js";
 import { isAlive, readJson } from "../state/voice-mode.js";
 import type { Purpose } from "./device.js";
 
-/** Longer than any real turn (speaking, up to two minutes of listening, transcribing). */
 const STALE_AFTER_MS = 10 * 60_000;
-/** A lock file that's still unreadable after this long was never going to be written. */
 const UNREADABLE_GRACE_MS = 5_000;
 const POLL_MS = 250;
 
 interface Owner {
   pid: number;
   since: number;
-  /** Held for a whole call (src/call/session.ts): as long as the owner lives, however long that is. */
   call?: true;
 }
 
@@ -46,49 +31,44 @@ function readOwner(file: string): Owner | null {
   return o && Number.isInteger(o.pid) && Number.isFinite(o.since) ? o : null;
 }
 
-/** The lock file's identity (inode) if it's stale, otherwise null. */
 function staleIdentity(file: string, now: number): number | null {
   let ino: number;
   let mtimeMs: number;
   try {
     ({ ino, mtimeMs } = statSync(file));
   } catch {
-    return null; // gone already; the next attempt will create it
+    return null;
   }
   const owner = readOwner(file);
   const stale = owner ? !isAlive(owner.pid) || (!owner.call && now - owner.since > STALE_AFTER_MS) : now - mtimeMs > UNREADABLE_GRACE_MS;
   return stale ? ino : null;
 }
 
-/**
- * Remove a stale lock without ever removing a fresh one someone else just created: move it aside
- * atomically, check it's the same file we judged stale, and put it back if it isn't.
- */
+// Never removes a fresh lock someone else just created: move aside, check the inode, put back.
 function takeOver(file: string, ino: number): void {
   const aside = `${file}.${process.pid}.${Date.now()}.stale`;
   try {
     renameSync(file, aside);
   } catch {
-    return; // another session got there first
+    return;
   }
   try {
     if (statSync(aside).ino !== ino) {
       try {
-        linkSync(aside, file); // it was a live lock after all: restore it (fails harmlessly if one exists)
+        linkSync(aside, file);
       } catch {
-        /* a newer lock is already in place */
+        /* a newer lock is in place */
       }
     }
   } finally {
     try {
       unlinkSync(aside);
     } catch {
-      /* ignore */
+      /* gone */
     }
   }
 }
 
-/** Remove the file only if it's still ours. */
 function releaseIfOurs(file: string, me: Owner): void {
   const now = readOwner(file);
   if (!now || now.pid !== me.pid || now.since !== me.since) return;
@@ -104,14 +84,11 @@ const noLock = () => {};
 
 export interface AcquireOptions {
   signal?: AbortSignal;
-  /** Called once, when we start waiting for another session. */
   onWait?: () => void;
   waitMs?: number;
-  /** Hold the mic for a whole call: other sessions give up at once instead of waiting. */
   call?: true;
 }
 
-/** Wait for the mic, take it, and return the function that gives it back. */
 export async function acquireMicLock(opts: AcquireOptions = {}): Promise<() => void> {
   const file = lockFile();
   const waitMs = opts.waitMs ?? CONFIG.lockWaitSeconds * 1000;
@@ -174,10 +151,6 @@ export async function acquireMicLock(opts: AcquireOptions = {}): Promise<() => v
   }
 }
 
-/**
- * Take the lock without waiting. Held: its release function. Someone else's: null, because anything
- * we said now would be recorded and transcribed as that other session's user.
- */
 export async function lockIfFree(): Promise<(() => void) | null> {
   try {
     return await acquireMicLock({ waitMs: 0 });
@@ -187,38 +160,26 @@ export async function lockIfFree(): Promise<(() => void) | null> {
   }
 }
 
-/** Another process holds the lock (it is in a voice turn or a call). */
 function lockHeldElsewhere(): boolean {
   const pid = readOwner(lockFile())?.pid;
   return pid !== undefined && pid !== process.pid && isAlive(pid);
 }
 
-/** How often the work listener checks whether another process wants the mic. */
 const BACKGROUND_WATCH_MS = 250;
 
-/** The work listener's claim in this process: a turn or a call takes the mic from it. */
 let background: { ctl: AbortController; released: Promise<void> } | null = null;
 
 export interface Claim {
-  /** Aborts when the mic is taken from this claim (the work listener's only). */
   readonly preempted: AbortSignal;
-  /** Free the mic. Call only once it's really closed. Idempotent. */
+  // Call only once the mic is really closed.
   release(): void;
 }
 
 export interface ClaimOptions {
-  /** Cancels waiting for the lock. */
   signal?: AbortSignal;
-  /** Called once, when we start waiting for another session. */
   onWait?: () => void;
 }
 
-/**
- * Take the mic for `purpose`. A turn or a call first takes it from this process's work listener,
- * then waits for the lock (a call's lock makes others give up at once). The work listener never
- * takes the lock, so it never holds up another window's turn: it gives up (MicBusyError) while
- * another process holds it, and is preempted as soon as one does. Doctor takes nothing.
- */
 export async function claim(purpose: Purpose, opts: ClaimOptions = {}): Promise<Claim> {
   const never = new AbortController().signal;
   if (purpose === "doctor") return { preempted: never, release: () => {} };
@@ -246,7 +207,6 @@ export async function claim(purpose: Purpose, opts: ClaimOptions = {}): Promise<
   return { preempted: never, release };
 }
 
-/** Serialize calls: there is one speaker and one microphone. */
 let queue: Promise<unknown> = Promise.resolve();
 export function exclusive<T>(fn: () => Promise<T>): Promise<T> {
   const next = queue.then(fn, fn);

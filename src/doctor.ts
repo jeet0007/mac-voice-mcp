@@ -1,17 +1,4 @@
-/**
- * `doctor`: an objective self-check of the whole voice pipeline on this Mac.
- *
- * Every check ends in PASS / WARN / FAIL against fixed limits, so "does it work?" is answered by
- * numbers rather than by ear. Results are also written as JSON, so reports from different Macs
- * and audio setups (headphones, Bluetooth, external mics) can be compared.
- *
- *   1. Setup          everything speak_and_listen needs is installed.
- *   2. Speech → text  the voice speaks a known sentence into a file and whisper transcribes it.
- *                     Checks the voice and the transcriber without involving the room.
- *   3. Speaker → mic  the same sentence is spoken live through the speakers (exactly as in a
- *                     conversation) while the mic records, then transcribed. Checks the real
- *                     hardware path (skipped with --no-loopback).
- */
+// `doctor`: a self-check of the voice pipeline with PASS, WARN and FAIL against fixed limits. See docs/specs/setup-and-doctor.md.
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -30,15 +17,13 @@ import { wordErrorRate } from "./wer.js";
 
 export const DOCTOR_SENTENCE = "The build passed and all tests are green. Should I open the pull request now?";
 
-/** Word error rate limits: [PASS at or below, WARN at or below]; above that is FAIL. */
+/** Word error rate: [PASS at or below, WARN at or below]; above that is FAIL. */
 export const LIMITS = {
-  /** Clean synthetic speech straight into whisper should be near perfect. */
   file: [0.1, 0.25],
-  /** Through the air, room noise and a laptop mic make it harder. */
   loopback: [0.3, 0.5],
 } as const;
 
-/** Kokoro, model loaded: milliseconds from "speak" to the first sound, [PASS at or below, WARN at or below]. */
+/** Kokoro, model loaded: ms from "speak" to the first sound, [PASS at or below, WARN at or below]. */
 export const FIRST_SOUND_MS = [1500, 3000] as const;
 
 export type Status = "PASS" | "WARN" | "FAIL" | "SKIP";
@@ -59,18 +44,16 @@ export interface DoctorReport {
   reportFile?: string;
 }
 
-/** Ends the run early without counting as an unexpected error. */
 class StopChecks extends Error {}
 
 const grade = (wer: number, [pass, warn]: readonly [number, number]): Status => (wer <= pass ? "PASS" : wer <= warn ? "WARN" : "FAIL");
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
-/** WAV length in seconds (16 kHz mono 16-bit, 44-byte header). */
+/** 16 kHz mono 16-bit, 44-byte header. */
 async function wavSeconds(file: string): Promise<number> {
   return Math.max(0, ((await stat(file)).size - 44) / 32000);
 }
 
-/** The default input and output device names (macOS), for the report. Best effort. */
 async function audioDevices(): Promise<Record<string, string>> {
   if (!IS_MAC) return {};
   try {
@@ -83,10 +66,7 @@ async function audioDevices(): Promise<Record<string, string>> {
   }
 }
 
-/**
- * Record `seconds` from the microphone into `outFile` (16 kHz mono WAV), no turn-taking.
- * `onStarted` fires once audio is actually flowing, so playback can start in sync.
- */
+/** `onStarted` fires once audio is flowing, so playback can start in sync. */
 async function recordForSeconds(seconds: number, outFile: string, onStarted: () => void): Promise<{ digitalSilence: boolean; peakDb: number }> {
   const session = await openAudio({ purpose: "doctor" });
   const safety = setTimeout(() => void session.close(), (seconds + 10) * 1000);
@@ -138,7 +118,6 @@ export async function runDoctor(opts: { loopback?: boolean; reportDir?: string; 
   };
 
   try {
-    // 1. Setup
     const setup = await runSetupFlow();
     add({ name: "Setup", status: setup.ready ? "PASS" : "FAIL", detail: setup.ready ? "everything is installed" : "something is missing — run `setup`" });
     if (!setup.ready) throw new StopChecks();
@@ -154,7 +133,6 @@ export async function runDoctor(opts: { loopback?: boolean; reportDir?: string; 
     });
     const model = await ensureModel({ download: false });
 
-    // 2. Speech → text, straight from a file
     const spoken = path.join(tmp, "spoken.wav");
     let t = Date.now();
     const cold = await synthesizeToFile(DOCTOR_SENTENCE, spoken);
@@ -187,7 +165,6 @@ export async function runDoctor(opts: { loopback?: boolean; reportDir?: string; 
       metrics: { wer: fileScore.wer, engine: cold.engine, synthMs, transcribeColdMs: coldMs, transcribeWarmMs: warmMs, audioSeconds: await wavSeconds(spoken) },
     });
 
-    // 3. Speaker → mic, through the air
     if (opts.loopback === false || !IS_MAC) {
       add({ name: "Speaker → mic", status: "SKIP", detail: IS_MAC ? "skipped (--no-loopback)" : "macOS only" });
     } else {
@@ -195,7 +172,7 @@ export async function runDoctor(opts: { loopback?: boolean; reportDir?: string; 
       const seconds = (await wavSeconds(spoken)) + 1.5;
       let player: Promise<unknown> | undefined;
       const rec = await recordForSeconds(seconds, recorded, () => {
-        // The live voice at full quality, the way speak_and_listen speaks — not the 16 kHz test file.
+        // The live voice at full quality, the way speak_and_listen speaks, not the 16 kHz test file.
         player ??= new Promise((r) => setTimeout(r, 300)).then(() => speak(DOCTOR_SENTENCE).done);
       });
       await player;

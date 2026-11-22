@@ -1,24 +1,20 @@
-/**
- * Word error rate: how far a transcript is from the words that were actually said.
- * Used by `doctor` and the round-trip tests, so "it heard me right" is a number, not a feeling.
- */
+// Word error rate between what was said and what whisper heard. See docs/specs/speech-to-text.md.
 
 const ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
 const TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
 
-/** 0–999 as words ("42" → "forty two"), so "60" and "sixty" count as the same word. */
+// 0 to 999 only.
 export function numberToWords(n: number): string {
   if (n < 20) return ONES[n]!;
   if (n < 100) return TENS[Math.floor(n / 10)]! + (n % 10 ? ` ${ONES[n % 10]}` : "");
   return `${ONES[Math.floor(n / 100)]} hundred` + (n % 100 ? ` ${numberToWords(n % 100)}` : "");
 }
 
-/** Lower-case words without punctuation; "index.ts" → "index ts", "60" → "sixty". */
 export function normalizeWords(text: string): string[] {
   return text
     .toLowerCase()
     .replace(/\[[^\]]*\]|\([^)]*\)/g, " ") // whisper's [BLANK_AUDIO], (music) …
-    .replace(/(\d)[,.](?=\d{3}\b)/g, "$1") // 1,000 → 1000
+    .replace(/(\d)[,.](?=\d{3}\b)/g, "$1")
     .replace(/[^\p{L}\p{N}']+/gu, " ")
     .replace(/'/g, "")
     .split(/\s+/)
@@ -27,13 +23,11 @@ export function normalizeWords(text: string): string[] {
 }
 
 export interface WordScore {
-  /** Word error rate: (substitutions + deletions + insertions) / reference words. 0 = perfect. */
   wer: number;
   errors: number;
   words: number;
 }
 
-/** Word-level edit distance between what was said (reference) and what was heard (hypothesis). */
 export function wordErrorRate(reference: string, hypothesis: string): WordScore {
   const ref = normalizeWords(reference);
   const hyp = normalizeWords(hypothesis);

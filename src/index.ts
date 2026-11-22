@@ -1,50 +1,5 @@
 #!/usr/bin/env node
-/**
- * mac-voice-mcp — a local voice bridge for MCP clients.
- *
- * Tools
- *   speak_and_listen(text_to_speak, listen_seconds?)
- *     1. speaks the text with native TTS (`say` on macOS)
- *     2. listens like a conversation turn: waits for the user to start talking and
- *        stops ~1.2 s after they finish (adaptive voice-activity detection)
- *     3. transcribes on-device with whisper.cpp (a warm whisper-server keeps the
- *        model loaded between turns; whisper-cli is the fallback)
- *     4. returns the transcript to the model
- *   voice_setup(install?)
- *     checks what's already installed and — only with the user's OK — installs
- *     what's missing (Homebrew packages, the speech model). Reuses everything.
- *
- * Everything runs locally. No audio leaves the machine.
- * stdout is reserved for the MCP protocol; all logging goes to stderr.
- *
- * Module map
- *   config.ts       settings (env vars), logging, PATH fix-up for GUI apps
- *   proc.ts         which / run helpers, error types
- *   speech-text.ts  screen text → ear text; transcript clean-up        (pure)
- *   endpointer.ts   turn-taking voice-activity detection               (pure)
- *   audio/device.ts the audio port: openAudio() for mic frames, play() a sound, duck or stop it (process.ts, mic.ts behind it)
- *   listen/utterances.ts  mic frames → endpointer → utterances, for a turn or a call
- *   speech/synthesize.ts  text → speech (Kokoro PCM or the built-in voice), voice choice, speech to a file
- *   speech/replies.ts     speak(): synthesize + play, Kokoro falling back to the built-in voice
- *   kokoro.ts       the optional Kokoro voice: install, warm worker
- *   kokoro-worker.ts  the process that runs the Kokoro model
- *   kokoro-text.ts  pronunciation fixes and sentence chunks for Kokoro (pure)
- *   pcm.ts          PCM conversion and resampling (pure)
- *   model.ts        find / symlink / download the whisper model
- *   stt.ts          warm whisper-server + whisper-cli fallback
- *   setup.ts        requirement checks and consent-based installs
- *   state/voice-mode.ts  the voice-mode files shared with the plugin hook and Voice Buddy
- *   native-build.ts build the native binaries (call bubble, audio worker) with the user's swiftc, after consent
- *   bubble.ts       the floating call bubble: start and stop it with a call
- *   audio/protocol.ts  the wire protocol of the native audio worker (not used by a call yet)
- *   call/engine/    every rule of a call: step(state, event) → effects, and what a transcript is  (pure)
- *   call/session.ts a call: the open mic, transcripts and replies around the engine
- *   voice.ts        the speak → listen → transcribe round trip
- *   wer.ts          word error rate (pure)
- *   doctor.ts       objective self-check with PASS / WARN / FAIL
- *   texts.ts        everything the model reads (rules, instructions, prompts)
- *   server.ts       MCP tools and prompts
- */
+// The command-line entry point: the MCP server on stdio, and the setup, doctor, test and flight recorder commands. See docs/specs/setup-and-doctor.md.
 import { createInterface } from "node:readline/promises";
 import { DEFAULT_LISTEN_SECONDS, envNum, log, PKG } from "./config.js";
 import { startServer } from "./server.js";
@@ -81,7 +36,7 @@ Environment variables (all optional):
   VOICE_MCP_TTS                    auto (Kokoro once installed) | say | kokoro
   VOICE_MCP_KOKORO_VOICE           Kokoro voice (default af_heart; e.g. af_bella, am_michael, bf_emma)
   VOICE_MCP_KOKORO_SPEED           Kokoro speed, 0.5–2 (default 1)
-  VOICE_MCP_END_SILENCE_MS         pause length that ends your turn (default 1200)
+  VOICE_MCP_END_SILENCE_MS         pause length that ends your turn (default 1500)
   VOICE_MCP_START_TIMEOUT_SECONDS  wait this long for you to start talking (default 15)
   VOICE_MCP_SPEECH_MARGIN_DB       how far above room noise counts as speech (default 12)
   VOICE_MCP_WHISPER_SERVER         0 to always use whisper-cli (no warm server)
@@ -101,7 +56,6 @@ async function runSetupCli(args: string[]): Promise<number> {
   const onProgress = (m: string) => console.error(`  … ${m}`);
   let outcome = await runSetupFlow({ install: force, kokoro, bubble, onProgress });
 
-  // Interactive terminal: offer to install right away.
   if (!force && !outcome.ready && !outcome.installing && process.stdin.isTTY && /ask the user whether/.test(outcome.report)) {
     console.error(outcome.report.replace(/\nNext:.*$/s, ""));
     const rl = createInterface({ input: process.stdin, output: process.stderr });
@@ -110,7 +64,6 @@ async function runSetupCli(args: string[]): Promise<number> {
     if (answer !== "" && !answer.startsWith("y")) return 1;
     outcome = await runSetupFlow({ install: true, onProgress });
   }
-  // In a terminal we can simply wait for background installs to finish.
   while (outcome.installing) outcome = await runSetupFlow({ onProgress });
 
   console.error(outcome.report);

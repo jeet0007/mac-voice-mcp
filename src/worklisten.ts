@@ -1,19 +1,4 @@
-/**
- * Talking to Claude while it works (Claude Code plugin).
- *
- * After a voice turn in which the user answered, the mic stays open while Claude works. Anything
- * said that starts with Claude's name ("Claude, use the other branch") is transcribed on this Mac
- * and left in a small inbox; the plugin's hook (hooks/voice-mode-lib.mjs) hands it to Claude after
- * its next tool call, or when it tries to stop. Everything else heard is transcribed, checked for
- * the name, and dropped: nothing is kept.
- *
- * It only runs while the plugin's hook says this session is in voice mode (the hook writes
- * listening.state right after each voice turn and removes it when the user types), so apps
- * without the hook (Claude Desktop, Cursor) never get an open mic. It pauses for each voice turn
- * (and carries on after one that only announces something), and stops when Claude finishes, when
- * voice mode ends, when another session takes over, and after VOICE_MCP_WORK_LISTEN_MINUTES
- * (default 10) without a voice turn.
- */
+// Keeps the mic open while Claude works and leaves "Claude, ..." in the inbox. See docs/specs/voice-mode.md.
 import { findRecorder, MicBusyError, openAudio, type AudioSession } from "./audio/device.js";
 import { CONFIG, debug, envNum } from "./config.js";
 import { chime } from "./cues.js";
@@ -23,25 +8,17 @@ import { CancelledError, sleep } from "./proc.js";
 import { addToInbox, readListening, setOwnSession, stopRequestedSince, type InboxEntry } from "./state/voice-mode.js";
 import { transcribeBuffer } from "./stt.js";
 
-/** How long after our voice turn the hook has to confirm voice mode before we give up (no hook → no listening). */
 const CONFIRM_MS = Math.max(200, envNum("VOICE_MCP_WORK_LISTEN_CONFIRM_MS", 10_000));
-/** How often, while listening, we check whether to stop (the user typed, voice mode ended, …). */
 const WATCH_MS = 250;
-/**
- * "Claude, use the other branch" → "use the other branch". Only speech that starts with Claude's
- * name counts (optionally after "hey", "okay"…), so talk in the room, a call or a video is ignored.
- * Returns null when it isn't addressed to Claude, and "" when it's only the name ("Claude?").
- */
+// "Claude, use the other branch" → "use the other branch"; null when not addressed to Claude, "" for only the name.
 export function parseInterjection(text: string): string | null {
   const t = text.trim();
-  // whisper's usual spellings of the name; "cloud" only with a pause after it ("Cloud, …"), since
-  // "Cloud deployment failed" is ordinary talk.
+  // "cloud" only with punctuation after it: "Cloud deployment failed" is ordinary talk
   const m = /^(?:(?:hey|hi|okay|ok|so|um|uh|oh)[,.]?\s+)?(?:(?:claude|claud|clyde|klaud|clod)\b[,.!?:;]*|cloud[,.!?:;]+)\s*/i.exec(t);
   if (!m) return null;
   return t.slice(m[0].length).trim();
 }
 
-/** What the next voice turn tells Claude about interjections the hook hasn't delivered yet. */
 export function interjectionNote(entries: InboxEntry[]): string | null {
   if (!entries.length) return null;
   const said = entries.map((e) => (e.text ? `"${e.text}"` : "(only your name: they want to talk)")).join(", then ");
@@ -56,7 +33,6 @@ class WorkListener {
     return this.ctl !== null;
   }
 
-  /** Start listening after the voice turn that just ended at `turnEnd`. */
   start(turnEnd = Date.now()): void {
     if (!CONFIG.listenWhileWorking || this.ctl || !findRecorder()) return;
     const ctl = new AbortController();
@@ -72,7 +48,6 @@ class WorkListener {
       });
   }
 
-  /** Stop and wait until the mic is free again. */
   async stop(): Promise<void> {
     this.ctl?.abort();
     await this.loop;
@@ -82,32 +57,29 @@ class WorkListener {
 
   private async run(turnEnd: number, signal: AbortSignal): Promise<void> {
     const idleMs = Math.max(1, envNum("VOICE_MCP_WORK_LISTEN_MINUTES", 10)) * 60_000;
-    // Voice mode is confirmed when the hook marks this session right after our turn. Later marks
-    // come from another session's turn: it takes over, and we stop.
+    // a mark after the window is another session's turn taking over
     const ours = (s: { at: number } | null) => !!s && s.at >= turnEnd - 2_000 && s.at <= turnEnd + CONFIRM_MS;
     const confirmBy = Date.now() + CONFIRM_MS;
     while (!ours(readListening())) {
-      if (Date.now() > confirmBy) return; // no plugin hook here, or voice mode ended right away
+      if (Date.now() > confirmBy) return;
       await sleep(200);
       if (signal.aborted) return;
     }
 
-    setOwnSession(readListening()?.session); // the hook's mark names this window's session
+    setOwnSession(readListening()?.session);
     const model = await ensureModel({ download: false });
     {
       while (!signal.aborted) {
-        if (!ours(readListening()) || stopRequestedSince(turnEnd)) return; // the user typed, voice mode ended, or another session took over
+        if (!ours(readListening()) || stopRequestedSince(turnEnd)) return;
         if (Date.now() - turnEnd > idleMs) return;
         let session: AudioSession;
         try {
           session = await openAudio({ purpose: "worklisten" });
         } catch (e) {
           if (!(e instanceof MicBusyError)) throw e;
-          await sleep(1000); // another process is in a voice turn: don't compete with it
+          await sleep(1000);
           continue;
         }
-        // Check a few times a second, so the mic closes right away when the user types or voice mode
-        // ends, not only after the next 15-second wait. Another session taking the mic aborts session.signal.
         const stopped = new AbortController();
         const watch = setInterval(() => {
           if (!ours(readListening()) || stopRequestedSince(turnEnd) || Date.now() - turnEnd > idleMs) stopped.abort();
@@ -116,11 +88,11 @@ class WorkListener {
         try {
           heard = await listenForTurn(session, 30, { signal: AbortSignal.any([signal, session.signal, stopped.signal]) });
         } catch (e) {
-          if (e instanceof CancelledError) continue; // the checks at the top of the loop decide what's next
+          if (e instanceof CancelledError) continue;
           throw e;
         } finally {
           clearInterval(watch);
-          await session.close(); // one recorder at a time: the next loop (or a turn) opens the mic again
+          await session.close(); // one recorder at a time
         }
         if (signal.aborted) return;
         if (heard.reason === "no-speech" || heard.digitalSilence) continue;
@@ -129,7 +101,7 @@ class WorkListener {
         debug(`work listener heard: ${JSON.stringify(text)} → ${said === null ? "not for Claude" : JSON.stringify(said)}`);
         if (said === null || signal.aborted) continue;
         addToInbox(said);
-        void chime("stop"); // a soft "got it"
+        void chime("stop");
       }
     }
   }

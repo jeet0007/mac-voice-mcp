@@ -1,27 +1,17 @@
-/**
- * Pure text helpers (no I/O, unit-tested):
- *   - prepareSpeech: turn "screen text" into "ear text" before it's spoken
- *   - cleanTranscript: strip whisper.cpp's non-speech markers from a transcript
- */
+// Pure text helpers: screen text to ear text, and whisper transcript cleanup. See docs/specs/speech-output.md.
 
 export interface PreparedSpeech {
   text: string;
-  /** Feedback for the model when its input had to be rewritten for speech. */
   notes: string[];
 }
 
 export interface PrepareOptions {
-  /** Cut at a sentence boundary beyond this many words (0 = no limit). */
+  // 0 = no limit
   maxWords?: number;
-  /** Hard cap on characters handed to the TTS engine. */
   maxChars?: number;
 }
 
-/**
- * Phrases that send the user to look at something. Deliberately specific: bare words like
- * "above", "below" or "see the" also occur in ordinary speech ("above thirty degrees",
- * "see the doctor") and must not trigger the reminder.
- */
+// Deliberately specific: "above" or "see the" alone occur in ordinary speech ("see the doctor").
 const ON_SCREEN_PATTERN = new RegExp(
   [
     String.raw`\bon[\s-]?screen\b`,
@@ -33,13 +23,6 @@ const ON_SCREEN_PATTERN = new RegExp(
   "i",
 );
 
-/**
- * Safety net for speakability. The model is asked (tool description, server
- * instructions, voice_mode prompt) to send plain spoken sentences; this catches
- * whatever slips through so the user never hears "backtick backtick backtick"
- * or a 40-segment file path read aloud.
- */
-/** Short replies that open a sentence ("Okay.", "Got it.") followed by more speech. */
 const OPENER =
   /^((?:okay|ok|sure|done|right|alright|all right|got it|found it|hmm|yes|yep|yeah|no|nope|great|good|perfect|so|well|cool|nice|thanks|thank you))[.!]\s+(?=[\p{L}\p{N}])(\S)/iu;
 
@@ -49,7 +32,6 @@ export function prepareSpeech(input: string, opts: PrepareOptions = {}): Prepare
   const notes = new Set<string>();
   let s = input.replace(/\r\n?/g, "\n");
 
-  // Fenced code blocks and markdown tables can't be spoken meaningfully.
   s = s.replace(/```[\s\S]*?(?:```|$)/g, () => {
     notes.add("code blocks");
     return "\n(I've left the code on screen.)\n";
@@ -59,7 +41,6 @@ export function prepareSpeech(input: string, opts: PrepareOptions = {}): Prepare
     return "\n(There's a table on screen.)\n";
   });
 
-  // Inline code: keep short, word-like snippets; drop long or symbol-heavy ones.
   s = s.replace(/`([^`\n]+)`/g, (_m, code: string) => {
     if (code.length <= 32 && !/[{}();=<>[\]$]/.test(code)) return code;
     notes.add("inline code");
@@ -67,28 +48,25 @@ export function prepareSpeech(input: string, opts: PrepareOptions = {}): Prepare
   });
 
   s = s
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1") // images → alt text
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1") // links → link text
-    .replace(/<\/?[a-z][^>]*>/gi, " "); // stray HTML tags
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/<\/?[a-z][^>]*>/gi, " ");
 
-  // Bare URLs → "a link to github.com".
   s = s.replace(/\bhttps?:\/\/(?:www\.)?([^\s/?#)]+)[^\s)]*?(?=[.,;:!?)]*(?:\s|$))/g, (_m, host: string) => {
     notes.add("URLs");
     return `a link to ${host}`;
   });
 
-  // Long file paths → just the file name.
   s = s.replace(/(?<![\w/:])(?:(?:~|\.{1,2})?(?:\/[\w@.+-]+){2,}|[\w@.+-]+(?:\/[\w@.+-]+){2,})\/?/g, (m) => {
-    if (/^[\d/.-]+$/.test(m)) return m; // dates like 9/23/2026
+    if (/^[\d/.-]+$/.test(m)) return m; // a date like 9/23/2026
     notes.add("file paths");
     const parts = m.split("/").filter(Boolean);
     return parts[parts.length - 1] ?? m;
   });
   s = s
-    .replace(/\b([\w-]+\.[a-z]{1,5}):\d+(?::\d+)?\b/gi, "$1") // index.ts:120 → index.ts
-    .replace(/(?<![\d/])(\d+)\/(\d+)(?![\d/])/g, "$1 of $2"); // 42/42 → 42 of 42
+    .replace(/\b([\w-]+\.[a-z]{1,5}):\d+(?::\d+)?\b/gi, "$1")
+    .replace(/(?<![\d/])(\d+)\/(\d+)(?![\d/])/g, "$1 of $2");
 
-  // Markdown structure → sentences. Headings and bullets become their own sentence.
   s = s
     .split("\n")
     .map((line) =>
@@ -104,8 +82,8 @@ export function prepareSpeech(input: string, opts: PrepareOptions = {}): Prepare
     .join(" ");
 
   s = s
-    .replace(/(\*\*|__|\*|~~)(?=\S)([\s\S]*?\S)\1/g, "$2") // emphasis markers
-    .replace(/\p{Extended_Pictographic}️?/gu, "") // emoji
+    .replace(/(\*\*|__|\*|~~)(?=\S)([\s\S]*?\S)\1/g, "$2")
+    .replace(/\p{Extended_Pictographic}️?/gu, "")
     .replace(/\s*(?:->|=>|→)\s*/g, " to ")
     .replace(/\s&\s/g, " and ")
     .replace(/[*_#~|^\\]+/g, " ")
@@ -114,12 +92,8 @@ export function prepareSpeech(input: string, opts: PrepareOptions = {}): Prepare
     .replace(/\s+/g, " ")
     .trim();
 
-  // A one-word opener ("Okay. This is what I found") runs into the next sentence ("Okay, this is…"):
-  // voices pause after a full stop, and after a one-word sentence that pause stands out. With Siri
-  // Voice 4 the longest pause in such replies fell from about 0.5 s to 0.3 s on average.
   s = s.replace(OPENER, "$1, $2");
 
-  // Keep it listenable: cut at a sentence boundary once it gets long.
   let cutNote: string | undefined;
   const words = s.split(" ");
   if (maxWords > 0 && words.length > maxWords) {
@@ -144,9 +118,7 @@ export function prepareSpeech(input: string, opts: PrepareOptions = {}): Prepare
     : [];
   if (cutNote) noteList.push(cutNote);
 
-  // When the spoken text points the user at something to look at, remind the model that only
-  // its own assistant message renders — not the speech, and not Bash/tool output (issue #3).
-  // Checked on the original input, so the "The rest is on screen." added above doesn't count.
+  // The input, not `s`: the added "The rest is on screen." must not trigger it.
   if (ON_SCREEN_PATTERN.test(input)) {
     noteList.push(
       "voice-mcp reminder: you told the user to look at something. Spoken text and Bash/tool output are " +
@@ -158,45 +130,31 @@ export function prepareSpeech(input: string, opts: PrepareOptions = {}): Prepare
   return { text: s, notes: noteList };
 }
 
-/** Remove timestamps and non-speech markers like [BLANK_AUDIO] from whisper output. */
-/**
- * whisper's notes about sounds rather than words: [BLANK_AUDIO], [MUSIC PLAYING], [gunshot] (for a
- * cough), [APPLAUSE] (for typing), (sound of running) (for a fan), *laughs*, ♪. Never something the user said.
- */
 const SOUND_NOTES = /\[[^\]]*\]|\([^)]*\)|\*[^*\n]+\*|[♪♫]+/g;
 
-/**
- * Sentences whisper invents from the videos it learned from, typically on noise or a clipped start.
- * Only whole sentences that nobody says to a coding assistant; "Thank you." and "Bye." are real answers.
- */
+// "Thank you." and "Bye." are real answers, so only sentences nobody says to a coding assistant.
 const STOCK_SENTENCES = [
   /^(?:thanks|thank you)(?: (?:so|very) much)? for (?:watching|listening)(?: and see you next time)?$/,
   /^(?:please |don'?t forget to )?(?:like and )?subscribe(?: to (?:my|our|the) channel)?$/,
   /^(?:you can )?find the links? in the description(?: below)?$/,
   /^see you in the next (?:video|episode)$/,
-  /^(?:subtitles|captions|transcription|translated|transcribed|subtitled) (?:by|provided by) .*$/, // a credit line
+  /^(?:subtitles|captions|transcription|translated|transcribed|subtitled) (?:by|provided by) .*$/,
 ];
 
-/**
- * A bare credit word ("Transcription.", "Subtitles"): whisper invents these from noise. Dropped only
- * when it is the whole transcript and nothing else is said, so "Transcription is wrong." is kept.
- */
 const LOOSE_CREDITS = /^(?:subtitles|subtitled|captions|transcription|translated|transcribed)$/;
 
 const squash = (sentence: string) => sentence.toLowerCase().replace(/[.!?,"“”]/g, "").replace(/\s+/g, " ").trim();
 const isStockSentence = (sentence: string): boolean => STOCK_SENTENCES.some((re) => re.test(squash(sentence)));
 
-/** whisper's raw output → just the words: no timestamps, sound notes or invented stock sentences. */
 export function cleanTranscript(raw: string, dropped?: string[]): string {
   const text = raw
     .split("\n")
-    .map((l) => l.replace(/^\s*\[[\d:.\s\->]+\]\s*/, "")) // stray timestamps
+    .map((l) => l.replace(/^\s*\[[\d:.\s\->]+\]\s*/, ""))
     .join(" ")
     .replace(SOUND_NOTES, " ")
     .replace(/\s+/g, " ")
     .trim();
-  const sentences = text.match(/.+?(?:[.!?]+(?=\s|$)|$)/g) ?? []; // a "." inside "1.2.3" or "Amara.org" doesn't end a sentence
-  // A loose credit line ("Transcription by…") that is all there is: whisper made it up from noise.
+  const sentences = text.match(/.+?(?:[.!?]+(?=\s|$)|$)/g) ?? []; // the "." in "1.2.3" or "Amara.org" doesn't end one
   if (sentences.length === 1 && LOOSE_CREDITS.test(squash(sentences[0]!))) {
     dropped?.push(sentences[0]!.trim());
     return "";

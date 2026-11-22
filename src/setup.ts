@@ -1,11 +1,4 @@
-/**
- * voice_setup: check what's already on this machine, install only what's missing,
- * and only when asked (install=true, after the user agreed).
- *
- * Installs run in the background: if they take longer than a tool call should
- * wait, the report says "installing…" and the next voice_setup call picks up
- * the result. A slow `brew install` can never time the client out.
- */
+// voice_setup and `setup`: check what's installed, and install what's missing only after the user agrees. See docs/specs/setup-and-doctor.md.
 import { statSync } from "node:fs";
 import { buildNative, findSwiftc, nativeBuilding, nativeState } from "./native-build.js";
 import { describeRecorder, findRecorder } from "./audio/device.js";
@@ -22,28 +15,20 @@ interface Check {
   label: string;
   status: CheckStatus;
   detail: string;
-  /** Homebrew formula that fixes this item. */
+  // What fixes this item: a Homebrew formula, or the install named by the flag.
   brew?: string;
-  /** Fixed by the one-time model download. */
   model?: boolean;
-  /** Fixed by installing the optional Kokoro voice (kokoro=true). */
   kokoro?: boolean;
-  /** Fixed by building the call bubble (bubble=true). */
   bubble?: boolean;
-  /** Fixed by building the audio worker (install=true). */
   worker?: boolean;
-  /** Fixed by downloading the silence filter (install=true). */
   vad?: boolean;
 }
 
 export interface SetupOptions {
-  /** true only after the user agreed: brew-install missing formulae, download the model if absent. */
+  // Each install flag is true only after the user agreed.
   install?: boolean;
-  /** true only after the user agreed: install the optional Kokoro voice (npm + ~330 MB model). */
   kokoro?: boolean;
-  /** true only after the user agreed: build the floating call bubble with swiftc (macOS). */
   bubble?: boolean;
-  /** Optional heartbeat while waiting (used for MCP progress notifications). */
   onProgress?: (message: string) => void;
 }
 
@@ -51,24 +36,19 @@ export interface SetupOutcome {
   ready: boolean;
   installing: boolean;
   report: string;
-  /** The first READY after an install=true run: the server says the ready line once (see cues.ts). */
+  /** The first READY after an install=true run: the server says the ready line once. */
   announceReady?: boolean;
 }
 
-/** An install=true run happened in this server process and its READY hasn't been announced yet. */
 let installRequested = false;
-/** The ready line is said once per server process. */
 let readyAnnounced = false;
 
-/** How long one voice_setup call waits for installs before reporting "still installing". */
 const INSTALL_WAIT_MS = 40_000;
 
 export function findBrew(): string | null {
   if (process.env.VOICE_MCP_EXTRA_PATH !== undefined) return which("brew"); // isolated (tests): PATH only
   return which("brew") ?? ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"].find(isExecutable) ?? null;
 }
-
-// --- Background jobs (survive across tool calls) --------------------------------------------
 
 interface Job {
   label: string;
@@ -84,9 +64,7 @@ let kokoroJob: Job | null = null;
 let bubbleJob: Job | null = null;
 let workerJob: Job | null = null;
 let vadJob: Job | null = null;
-/** The Kokoro install's latest progress line. */
 let kokoroProgress = "";
-/** Results of finished jobs not yet shown to the user. */
 const finishedMessages: string[] = [];
 
 function startJob(label: string, work: () => Promise<string>): Job {
@@ -133,8 +111,6 @@ function startKokoroInstall(): Job {
 
 const running = (j: Job | null): j is Job => !!j && !j.done;
 const elapsed = (j: Job) => `${Math.round((Date.now() - j.startedAt) / 1000)}s`;
-
-// --- Checks -------------------------------------------------------------------------------
 
 async function checkRequirements(): Promise<Check[]> {
   const checks: Check[] = [];
@@ -237,7 +213,6 @@ async function checkRequirements(): Promise<Check[]> {
   return checks;
 }
 
-/** The optional Kokoro voice: shown once it's installed or asked for (VOICE_MCP_TTS=kokoro), or while installing. */
 function kokoroCheck(): Check | null {
   const label = "Kokoro voice";
   if (running(kokoroJob)) return { label, status: "installing", detail: `${kokoroProgress} (${elapsed(kokoroJob!)} so far)` };
@@ -261,7 +236,6 @@ function kokoroCheck(): Check | null {
   return null;
 }
 
-/** The optional call bubble (macOS): built on this Mac with swiftc, never downloaded. */
 function bubbleCheck(): Check | null {
   if (!IS_MAC) return null;
   const label = "Call bubble";
@@ -276,7 +250,6 @@ function bubbleCheck(): Check | null {
   return { label, status: "optional", detail: state === "stale" ? "a new version needs building" : "a floating call window; built on this Mac in about 10 s", bubble: true };
 }
 
-/** The audio worker (macOS 15+; VOICE_MCP_AUDIO=process turns it off): built on this Mac with swiftc, never downloaded. */
 function workerCheck(): Check | null {
   if (!IS_MACOS_15 || CONFIG.audio !== "native") return null;
   const label = "Audio worker";
@@ -287,8 +260,6 @@ function workerCheck(): Check | null {
   if (!findSwiftc()) return { label, status: "optional", detail: `${what}; it needs Xcode's Command Line Tools (\`xcode-select --install\`)` };
   return { label, status: "optional", detail: state === "stale" ? "a new version needs building" : `${what}; built on this Mac in about 10 s`, worker: true };
 }
-
-// --- The flow ------------------------------------------------------------------------------
 
 export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcome> {
   const { install = false, onProgress } = opts;
@@ -315,7 +286,6 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
   if ((install || nativeState("audio-worker") === "stale") && checks.some((c) => c.worker) && !running(workerJob)) workerJob = startJob("Building the audio worker", () => buildNative("audio-worker"));
   if (opts.kokoro && !running(kokoroJob) && !(isKokoroInstalled() && isKokoroModelPresent())) kokoroJob = startKokoroInstall();
 
-  // Wait (bounded) for anything in flight, with a heartbeat.
   const jobs = [brewJob, modelJob, kokoroJob, bubbleJob, workerJob, vadJob].filter(running);
   if (jobs.length) {
     const deadline = Date.now() + INSTALL_WAIT_MS;

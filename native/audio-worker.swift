@@ -1,25 +1,4 @@
-// audio-worker: the native audio backend of a call (docs/specs/call-audio-redesign.md). One macOS
-// voice-processing unit owns the mic AND the speaker, so macOS cancels what we play from what the
-// mic hears. No speech detection, no whisper, no rules: those stay in Node. Built on the user's Mac
-// by src/native-build.ts. The wire protocol is defined once, in src/audio/protocol.ts; this file
-// mirrors it and test/audio-worker-contract.test.mjs keeps the two in step.
-//
-//   audio-worker [--no-aec] [--no-device]
-//   stdin   one JSON command per line, each with "seq"; each is answered by an `ack` event
-//   stdout  mic audio only: 16 kHz mono s16le in whole 30 ms frames (960 bytes), the bytes `rec` gives.
-//           Never blocks: a frame the reader has no room for is dropped and counted (`frames-dropped`)
-//   fd 3    one JSON event per line (stderr when fd 3 isn't open, so it can be run by hand)
-//   stdin EOF or SIGTERM: fade out, stop the unit, `mic-closed`, exit 0
-//
-// --no-device swaps the unit for a loop that feeds what is played straight back as mic audio, in
-// real time. The contract test uses it: no microphone, no permission, no sound. There, SIGUSR1 acts
-// as an output device change and SIGUSR2 stalls the mic.
-//
-// Threads. The audio callbacks take no lock and allocate nothing: they talk to the rest through
-// single-reader single-writer rings and atomics. Everything else (commands, events, resampling, the
-// stdout writes) runs on one serial queue, `control`, which also ticks every 5 ms.
-//
-// Needs macOS 15 and Swift 6 for the Synchronization module's atomics.
+// The native audio worker: one voice-processing unit owns the mic and the speaker, so what it plays is cancelled from the mic. See docs/specs/audio.md.
 import AVFoundation
 import AudioToolbox
 import CoreAudio
@@ -36,7 +15,6 @@ let dropReportNs: UInt64 = 1_000_000_000
 let maxGain = 2.0
 let maxCallbackFrames = 16384
 
-// --- Events ---------------------------------------------------------------------------------
 
 let eventFd: Int32 = fcntl(3, F_GETFD) == -1 ? 2 : 3
 
@@ -52,9 +30,7 @@ func emit(_ event: [String: Any]) {
     }
 }
 
-// --- What the audio threads share with the control queue --------------------------------------
 
-/// A ring of samples with one writer thread and one reader thread, and no lock.
 final class Ring {
     private let buffer: UnsafeMutablePointer<Float>
     private let capacity: Int
@@ -70,7 +46,6 @@ final class Ring {
     var count: Int { writeIndex.load(ordering: .acquiring) - readIndex.load(ordering: .acquiring) }
     var space: Int { capacity - count }
 
-    /// The writer's side: all of `n` or nothing.
     func write(_ source: UnsafePointer<Float>, _ n: Int) -> Bool {
         let w = writeIndex.load(ordering: .relaxed)
         guard n <= capacity - (w - readIndex.load(ordering: .acquiring)) else { return false }
@@ -82,7 +57,6 @@ final class Ring {
         return true
     }
 
-    /// The reader's side: copies up to `n` and returns how many.
     func read(_ target: UnsafeMutablePointer<Float>, _ n: Int) -> Int {
         let r = readIndex.load(ordering: .relaxed)
         let take = min(n, writeIndex.load(ordering: .acquiring) - r)
@@ -104,7 +78,7 @@ final class Ring {
 
 enum Phase {
     static let free = 0
-    /// The render callback owns the voice's render state. Only the control queue sets this.
+    /// Set only by the control queue; the render callback then owns the voice's render state.
     static let active = 1
     /// Set by the render callback, which then never touches the voice again.
     static let finished = 2
@@ -117,23 +91,20 @@ enum Run {
     static let stop = 2
 }
 
-/// One sound being played. A fixed set exists from the start, so the render callback never sees one appear.
 final class Voice {
     let ring = Ring(capacity: 1 << 16)
     let phase = Atomic<Int>(Phase.free)
     let run = Atomic<Int>(Run.play)
-    /// Every sample of the sound is in the ring: empty now means it has played out.
     let drained = Atomic<Bool>(false)
     let targetGain = Atomic<UInt32>(Float(1).bitPattern)
     let rampSamples = Atomic<Int>(1)
-    /// Samples the render callback has taken, at the unit's rate.
+    /// At the unit's rate.
     let played = Atomic<Int>(0)
 
     // Render callback only, while active.
     var gain: Float = 1
     var gainTarget: Float = 1
     var gainStep: Float = 0
-    /// 1 playing, 0 silent: the short ramp that keeps pause, resume and stop from clicking.
     var fade: Float = 1
 
     // Control queue only.
@@ -171,7 +142,6 @@ final class Voice {
         phase.store(Phase.active, ordering: .releasing)
     }
 
-    /// Move waiting samples into the ring, as many as fit.
     func pump() {
         let n = min(ring.space, pending.count - pendingAt)
         if n > 0 {
@@ -186,9 +156,7 @@ final class Voice {
 }
 
 final class Shared {
-    /// Counts mic callbacks: the control queue ends the worker when it stops moving.
     let inputTicks = Atomic<Int>(0)
-    /// Mic samples lost because the control queue fell behind.
     let droppedSamples = Atomic<Int>(0)
     let stalled = Atomic<Bool>(false)
 }
@@ -202,9 +170,7 @@ var unitRate = 48000.0
 var fadeStep: Float = 0
 var ioUnit: AudioUnit?
 
-// --- The audio callbacks ----------------------------------------------------------------------
 
-/// Mix every active voice into `out`. Runs on the audio thread.
 func render(_ out: UnsafeMutablePointer<Float>, _ n: Int) {
     out.update(repeating: 0, count: n)
     guard n <= maxCallbackFrames else { return }
@@ -263,7 +229,6 @@ let inputProc: AURenderCallback = { _, flags, timeStamp, _, frames, _ in
     return noErr
 }
 
-/// --no-device: what is played comes straight back as mic audio, 10 ms at a time, in real time.
 func runLoopback() {
     let chunk = Int(unitRate / 100)
     let buffer = UnsafeMutablePointer<Float>.allocate(capacity: chunk)
@@ -280,7 +245,6 @@ func runLoopback() {
     }
 }
 
-// --- Sample-rate conversion (control queue) -----------------------------------------------------
 
 func floatFormat(_ rate: Double) -> AVAudioFormat {
     AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 1, interleaved: false)!
@@ -290,7 +254,7 @@ func int16Format(_ rate: Double) -> AVAudioFormat {
     AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: rate, channels: 1, interleaved: false)!
 }
 
-/// Streaming: the converter keeps its filter state between calls.
+/// Kept per stream: the converter holds filter state between calls.
 final class Resampler {
     let converter: AVAudioConverter
     let from: AVAudioFormat
@@ -303,7 +267,6 @@ final class Resampler {
         self.to = to
     }
 
-    /// `flush` ends the stream and returns what the filter still held.
     func run(_ input: AVAudioPCMBuffer?, flush: Bool = false) -> AVAudioPCMBuffer {
         let capacity = AVAudioFrameCount(Double(input?.frameLength ?? 0) * to.sampleRate / from.sampleRate) + 4096
         let out = AVAudioPCMBuffer(pcmFormat: to, frameCapacity: capacity)!
@@ -326,7 +289,6 @@ func floats(_ buffer: AVAudioPCMBuffer) -> [Float] {
     Array(UnsafeBufferPointer(start: buffer.floatChannelData![0], count: Int(buffer.frameLength)))
 }
 
-/// A whole audio file (anything AVAudioFile reads) as samples at the unit's rate.
 func decode(_ path: String) -> [Float]? {
     guard let file = try? AVAudioFile(forReading: URL(fileURLWithPath: path)), file.length > 0,
         let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)),
@@ -336,7 +298,6 @@ func decode(_ path: String) -> [Float]? {
     return floats(resampler.run(buffer, flush: true))
 }
 
-// --- The voice-processing unit ------------------------------------------------------------------
 
 func setProperty<T>(_ unit: AudioUnit, _ id: AudioUnitPropertyID, _ scope: AudioUnitScope, _ element: AudioUnitElement, _ value: T) -> OSStatus {
     withUnsafePointer(to: value) { AudioUnitSetProperty(unit, id, scope, element, $0, UInt32(MemoryLayout<T>.size)) }
@@ -344,7 +305,6 @@ func setProperty<T>(_ unit: AudioUnit, _ id: AudioUnitPropertyID, _ scope: Audio
 
 let duckingLevels: [String: AUVoiceIOOtherAudioDuckingLevel] = ["default": .default, "min": .min, "mid": .mid, "max": .max]
 
-/// How much the unit turns other apps down while it runs.
 func setDucking(_ unit: AudioUnit, _ level: AUVoiceIOOtherAudioDuckingLevel) -> OSStatus {
     setProperty(unit, kAUVoiceIOProperty_OtherAudioDuckingConfiguration, kAudioUnitScope_Global, 0,
         AUVoiceIOOtherAudioDuckingConfiguration(mEnableAdvancedDucking: false, mDuckingLevel: level))
@@ -392,7 +352,6 @@ func defaultDevice(_ selector: AudioObjectPropertySelector) -> AudioDeviceID {
     return id
 }
 
-/// The unit is bound to the devices it started on. When either default changes, say so and stop: Node falls back.
 func watchRoute() {
     for (which, selector) in [("input", kAudioHardwarePropertyDefaultInputDevice), ("output", kAudioHardwarePropertyDefaultOutputDevice)] {
         let was = defaultDevice(selector)
@@ -406,7 +365,6 @@ func watchRoute() {
     AudioObjectAddPropertyListenerBlock(defaultDevice(kAudioHardwarePropertyDefaultOutputDevice), &source, control) { _, _ in routeChanged("output") }
 }
 
-// --- The control queue --------------------------------------------------------------------------
 
 let control = DispatchQueue(label: "control", qos: .userInteractive)
 var micResampler: Resampler?
@@ -443,7 +401,7 @@ func writeFrames() {
             droppedFrames += behind
             return
         } else {
-            // The reader is gone. stdin EOF ends the process.
+            // The reader is gone; stdin EOF ends the process.
             stdoutOpen = false
             micBytes.removeAll()
             return
@@ -500,7 +458,6 @@ func tick() {
     }
 }
 
-/// Fade out what is playing, stop the unit, settle every sound, and exit.
 func shutdown(_ code: Int32) -> Never {
     for voice in voices where voice.inUse { voice.run.store(Run.stop, ordering: .relaxed) }
     if voices.contains(where: { $0.inUse }) { usleep(UInt32(fadeMs * 3 * 1000)) }
@@ -625,7 +582,6 @@ func handle(_ line: String) {
     emit(ack)
 }
 
-// --- Main ---------------------------------------------------------------------------------------
 
 func fail(_ stage: String, _ code: OSStatus, _ message: String) -> Never {
     emit(["ev": "error", "stage": stage, "code": Int(code), "message": message])

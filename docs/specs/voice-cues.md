@@ -1,7 +1,6 @@
-# Voice cues and spoken errors (unreleased)
+# Voice cues and spoken errors
 
-Status: design · Owner: Jeet · Designed by the Voice MCP UX Designer · Source to change: `src/audio.ts`
-(`chime`), `src/voice.ts` (`turn`), `src/worklisten.ts`, `src/setup.ts`, new `src/cues.ts`
+Status: shipped in 0.10.0 · Owner: Jeet · Designed by the Voice MCP UX Designer · Source: `src/cues.ts`
 
 ## Problem
 
@@ -111,6 +110,42 @@ export async function announceError(kind: SpokenError): Promise<{ spoken: boolea
 `cue("no-speech")`; otherwise `cue("close")`, then `cue("no-speech")` if the transcript is empty.
 `SetupError`s with `RECORDER_MISSING` / `STT_MISSING` and the model preflight → `announceError(...)` before
 the error is returned.
+
+## How `src/cues.ts` works
+
+The shipped code follows the shape above, with richer return values: `cue()` returns `true` when the tone
+played, and `announceError()` returns an `Announced` record (`spoken`, `line`, `repeat`, `toned`,
+`micElsewhere`).
+
+- `playSound()` plays `/System/Library/Sounds/<name>.aiff` through `play({ kind: "cue" })` in
+  `src/audio/device.ts`. It returns `true` only when the sound played to the end. Not macOS, a missing
+  sound file, a missing player or an already aborted signal all return `false` and never throw. Aborting
+  the signal stops a sound that is still playing.
+- `cue()` plays one entry of `CUES` and does nothing when `VOICE_MCP_CHIME` is `0`.
+- `chime("start")` is the mic-open cue. `chime("stop")` is the work listener's soft "got it": Pop at 0.6,
+  also off with `VOICE_MCP_CHIME=0`.
+- `thinkingTick()` is the call's tick while Claude thinks: Tink at 0.2. It is 60 ms of sound, too short for
+  the endpointer to take as speech.
+- The lines use the built-in voice through `play({ kind: "voice" })`, never Kokoro, because Kokoro may be
+  what is broken.
+- `announceError()` plays the error tone on every call, a repeat included. Then it returns early when
+  spoken errors are off or the same kind was spoken within `REPEAT_WINDOW_MS` (10 minutes). Otherwise it
+  waits 200 ms (only if the tone played) and says the line. A line that fails is logged with `debug` and not
+  marked as spoken, so the next failure of that kind tries again. Call it only once the speaker and the mic
+  are free.
+- `announceErrorIfMicFree()` is for moments when this session doesn't hold the mic lock: setup checks
+  before a turn, and a turn's error once its mic has closed. It takes the lock without waiting. If another
+  session holds it, nothing plays at all, not even the tone, because the tone would land in that
+  session's recording. Otherwise the line plays with the lock held.
+- `sayLineIfMicFree()` says one fixed line under the same lock rule. `sayLine()` never throws. The server uses
+  `sayLineIfMicFree()` for `READY_LINE` after a first install (`src/server.ts`), "Voice is ready. You'll hear a tick when I'm listening."
+- `SpokenError` has no "mic busy" kind on purpose: our voice would be transcribed as the other session's
+  user, so that case stays a text result only.
+- `errorNote()` builds the note for Claude. Besides the two notes above, a turn with no line said gets
+  one of two more. With the tone: "the user heard an error tone only, with no spoken explanation".
+  Without it: "voice can't work right now, and nothing was said out loud". Both end with the same
+  instruction not to retry by voice, because without a note Claude could retry by voice in a loop.
+- `resetAnnounced()` and the `now` option exist for tests.
 
 ## First-run touches to the `voice_setup` report (`src/setup.ts`)
 

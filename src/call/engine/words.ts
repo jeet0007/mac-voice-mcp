@@ -1,18 +1,14 @@
-/** What a transcript is to a call. The shell reads the words here and hands the engine only the verdict. */
+// What a transcript means to a call, as a verdict for the engine. See docs/specs/call-mode.md.
 import type { Heard } from "./types.js";
 
-/** About how fast the voices speak, to tell Claude how much of a reply was heard. */
 const WORDS_PER_SECOND = 2.7;
 
 const FILLERS = new Set(["mm", "mmm", "hmm", "mhm", "mm-hmm", "mm-hm", "uh-huh", "uh", "um", "ah", "oh", "okay", "ok", "yeah", "yep", "right", "sure"]);
 
-/**
- * Only backchannel ("Mm-hmm.", "Yeah, okay.")? Then talking over Claude doesn't cut its reply.
- * Sound tags whisper adds ("[BLANK_AUDIO]", "(coughs)") don't count as words.
- */
 function isFiller(text: string): boolean {
   const words = text
     .toLowerCase()
+    // whisper's sound tags ("[BLANK_AUDIO]", "(coughs)") aren't words
     .replace(/\[[^\]]*\]|\([^)]*\)/g, " ")
     .replace(/[^\p{L}\p{N}'\- ]+/gu, " ")
     .split(/\s+/)
@@ -20,10 +16,6 @@ function isFiller(text: string): boolean {
   return words.every((w) => FILLERS.has(w));
 }
 
-/**
- * Does the whole transcript mean "hang up"? Politeness and the name around it are fine
- * ("Okay, hang up now.", "Bye, Claude."); a negation is not ("Don't hang up yet.").
- */
 function isHangUp(text: string): boolean {
   const t = text.toLowerCase().replace(/[^a-z' ]+/g, " ").replace(/\s+/g, " ").trim();
   if (/\b(?:don't|do not|not|never)\b/.test(t)) return false;
@@ -38,7 +30,6 @@ export function classify(transcript: string): Heard {
   return isFiller(transcript) ? "filler" : "words";
 }
 
-/** The words of a reply the user heard in its first `playedMs`. */
 export function heardSoFar(text: string, playedMs: number): string {
   // shortcut: estimated from the time played at an average pace, so off by a few words; upgrade when the voices report word timings.
   const words = text.split(/\s+/).filter(Boolean);
@@ -53,7 +44,7 @@ const squash = (text: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
-/** Is `heard` only a stretch of `reply`, two words or more: our own reply, let through by the echo canceller? */
+// Our own reply let through by the echo canceller: two words or more of it, nothing else.
 export function echoes(heard: string, reply: string): boolean {
   const words = squash(heard);
   return words.includes(" ") && ` ${squash(reply)} `.includes(` ${words} `);

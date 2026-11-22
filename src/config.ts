@@ -1,7 +1,4 @@
-/**
- * Configuration (all optional environment variables) and logging.
- * stdout belongs to the MCP protocol, so every log line goes to stderr.
- */
+// Configuration from the optional VOICE_MCP_* environment variables, and logging. See docs/configuration.md.
 import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11,10 +8,9 @@ export const PKG = JSON.parse(readFileSync(new URL("../package.json", import.met
 
 export const IS_MAC = process.platform === "darwin";
 export const IS_WIN = process.platform === "win32";
-/** Darwin 24 is macOS 15, the oldest the native audio worker runs on (Swift's Synchronization atomics). */
+// Darwin 24 is macOS 15, the oldest the native audio worker runs on (Swift's Synchronization atomics).
 export const IS_MACOS_15 = IS_MAC && Number(os.release().split(".")[0]) >= 24;
 
-/** listen_seconds is an upper bound — listening normally ends when the user stops talking. */
 export const DEFAULT_LISTEN_SECONDS = 30;
 export const MAX_LISTEN_SECONDS = 120;
 export const MAX_SPEAK_CHARS = 4000;
@@ -35,15 +31,8 @@ export function envBool(name: string, fallback: boolean): boolean {
 const modelName = (process.env.VOICE_MCP_WHISPER_MODEL ?? "base.en").trim();
 const language = process.env.VOICE_MCP_LANGUAGE?.trim() || (modelName.endsWith(".en") ? "en" : "auto");
 
-/**
- * The default hint for English: a list of the developer words whisper mishears ("rebase", "JSON").
- * Measured with the silence filter on, 60 jargon clips: word errors 14.5% with no hint, 13.2% with
- * a sentence, 11.3% with this list. The sentence also turned foreign background talk into
- * "The code is used to make the code work.", where the list gave two short words.
- */
 export const DEVELOPER_PROMPT = "npm, JSON, TypeScript, git, main, rebase, pull request, CI, macOS.";
 
-/** VOICE_MCP_WHISPER_PROMPT: unset = the developer word list (English only), "none" = no hint, anything else = that text. */
 function whisperPrompt(): string | undefined {
   const raw = process.env.VOICE_MCP_WHISPER_PROMPT?.trim();
   if (raw && ["none", "off", "0", "false"].includes(raw.toLowerCase())) return undefined;
@@ -51,96 +40,47 @@ function whisperPrompt(): string | undefined {
   return language === "en" ? DEVELOPER_PROMPT : undefined;
 }
 
-/** Everything this server ever downloads or links lives here, shared by every version and every client. */
 const CACHE_ROOT = cacheRoot();
 
 export const CONFIG = {
-  /** Models, the mic lock and hook state live here. */
   cacheDir: CACHE_ROOT,
-  /** How long a voice turn waits for another session to finish with the mic. */
   lockWaitSeconds: Math.max(1, envNum("VOICE_MCP_LOCK_WAIT_SECONDS", 120)),
 
-  // --- Speaking
-  /**
-   * Which voice engine: auto (default: the Kokoro voice once it's installed, else the built-in one) |
-   * say (always the built-in voice: macOS `say`, espeak-ng elsewhere) | kokoro (Kokoro; voice_setup offers to install it).
-   */
   tts: (["say", "kokoro"].includes(process.env.VOICE_MCP_TTS?.trim().toLowerCase() ?? "")
     ? process.env.VOICE_MCP_TTS!.trim().toLowerCase()
     : "auto") as "auto" | "say" | "kokoro",
-  /** Kokoro voice, American (a…) or British (b…) English: af_heart (default), af_bella, am_michael, bf_emma, … */
   kokoroVoice: process.env.VOICE_MCP_KOKORO_VOICE?.trim() || "af_heart",
-  /** Kokoro speaking speed (1 = normal, 0.5–2). */
   kokoroSpeed: Math.min(2, Math.max(0.5, envNum("VOICE_MCP_KOKORO_SPEED", 1))),
-  /** Kokoro model precision: fp32 (default: about twice as fast on a CPU, ~330 MB) or q8 (~90 MB, slower). */
   kokoroDtype: (process.env.VOICE_MCP_KOKORO_DTYPE?.trim().toLowerCase() === "q8" ? "q8" : "fp32") as "fp32" | "q8",
-  /** Where the optional Kokoro voice (kokoro-js and its model) is installed. */
   kokoroDir: process.env.VOICE_MCP_KOKORO_DIR?.trim() || path.join(CACHE_ROOT, "kokoro"),
-  /**
-   * macOS voice name, e.g. "Ava (Premium)" (`say -v '?'` lists them). Unset: the most natural
-   * installed voice for the language (Premium, then Enhanced), else the system voice. "default": always the system voice.
-   */
   voice: process.env.VOICE_MCP_VOICE?.trim() || undefined,
-  /** Speech rate in words per minute (macOS `say -r`). */
   rate: process.env.VOICE_MCP_RATE?.trim() || undefined,
-  /** Spoken text longer than this is cut at a sentence boundary (0 = no limit). */
   maxSpeakWords: Math.max(0, Math.floor(envNum("VOICE_MCP_MAX_SPEAK_WORDS", 120))),
-  /**
-   * Claude Code plugin: after you answer out loud, keep listening while Claude works, and pass on
-   * anything you say that starts with "Claude, …". Off: VOICE_MCP_LISTEN_WHILE_WORKING=0.
-   */
   listenWhileWorking: envBool("VOICE_MCP_LISTEN_WHILE_WORKING", true),
-  /** Write the voice turn's phase to voice-mode/phase.json, for Voice Buddy or a display of your own. */
   phaseFile: envBool("VOICE_MCP_PHASE_FILE", true),
-  /** Start the built-in voice ahead of each reply, so it speaks sooner (about 0.8 s with Siri voices). */
   voiceStandby: envBool("VOICE_MCP_VOICE_STANDBY", true),
-  /** Play short sounds when the mic opens and closes, and when something goes wrong (macOS). */
   chime: envBool("VOICE_MCP_CHIME", true),
-  /** Say one short fixed line when a voice turn can't work (no mic access, no recorder, no model…). Off: VOICE_MCP_SPOKEN_ERRORS=0. */
   spokenErrors: envBool("VOICE_MCP_SPOKEN_ERRORS", true),
 
-  // --- Listening (turn-taking)
-  /** End of turn: stop listening after this much silence once the user has spoken. */
-  // 1.5 s: on 10 recorded explanations, 1.2 s cut off 3 mid-thought (pauses up to 1.5 s); 1.5 s cut off none.
   endSilenceMs: Math.max(300, envNum("VOICE_MCP_END_SILENCE_MS", 1500)),
-  /** Give up if the user hasn't started talking within this many seconds. */
   startTimeoutSeconds: Math.max(1, envNum("VOICE_MCP_START_TIMEOUT_SECONDS", 15)),
-  /** Speech must be this many dB above the room's background noise. Lower = more sensitive. */
   speechMarginDb: envNum("VOICE_MCP_SPEECH_MARGIN_DB", 12),
-  /** …and never quieter than this absolute level (dBFS). */
   minSpeechDb: envNum("VOICE_MCP_MIN_SPEECH_DB", -48),
-  /** Recorder: auto (SoX, else ffmpeg) | sox | ffmpeg. */
   recorder: (process.env.VOICE_MCP_RECORDER?.trim().toLowerCase() || "auto") as "auto" | "sox" | "ffmpeg",
-  /** ffmpeg avfoundation audio input (macOS fallback recorder). ":default" follows the input chosen in System Settings. */
   ffmpegDevice: process.env.VOICE_MCP_FFMPEG_DEVICE?.trim() || ":default",
 
-  // --- Calls
-  /** Can the mic stay open while Claude speaks: auto (default: on headphones) | full (yes, so you can interrupt) | half (no: speakers). */
   callDuplex: (["full", "half"].includes(process.env.VOICE_MCP_CALL_DUPLEX?.trim().toLowerCase() ?? "")
     ? process.env.VOICE_MCP_CALL_DUPLEX!.trim().toLowerCase()
     : "auto") as "auto" | "full" | "half",
-  /**
-   * "native" (default) plays and records a call through the audio worker (echo-cancelled, so the user can talk
-   * over Claude on speakers) once setup has built it, on macOS 15+ and the Mac's own or wired speakers.
-   * "process" (or 0, off, false, like the other switches) opts out: calls use the recorder and player programs.
-   */
   audio: (["process", "0", "off", "false"].includes(process.env.VOICE_MCP_AUDIO?.trim().toLowerCase() ?? "") ? "process" : "native") as "native" | "process",
-  /** Opt-in: a soft tick every 1.5 s after the user's words reach Claude, until it speaks (at most 10 s), so a call never goes silent (macOS). */
   callThinkingSound: envBool("VOICE_MCP_CALL_THINKING_SOUND", false),
-  /** Show the floating call bubble during a call, once setup has built it (macOS). Off: VOICE_MCP_CALL_BUBBLE=0. */
   callBubble: envBool("VOICE_MCP_CALL_BUBBLE", true),
-  /** Show what you're saying, live, next to the call bubble (docs/specs/live-transcript.md). Off: VOICE_MCP_LIVE_TRANSCRIPT=0. */
   liveTranscript: envBool("VOICE_MCP_LIVE_TRANSCRIPT", true),
-  /** How often a partial transcript is requested while you talk (ms, 400-2000). */
   liveTranscriptMs: Math.min(2000, Math.max(400, envNum("VOICE_MCP_LIVE_TRANSCRIPT_MS", 700))),
 
-  // --- Speech-to-text
-  /** whisper.cpp model name (tiny.en, base.en, small.en, large-v3-turbo-q5_0, ...). */
   modelName,
-  /** Absolute path to an existing ggml model — skips lookup and download entirely. */
   modelPath: process.env.VOICE_MCP_WHISPER_MODEL_PATH?.trim() || undefined,
   modelsDir: process.env.VOICE_MCP_MODELS_DIR?.trim() || path.join(CACHE_ROOT, "models"),
-  /** Extra folders to look in for an existing ggml model before downloading (":"-separated). */
   modelSearchPaths: (process.env.VOICE_MCP_MODEL_SEARCH_PATHS ?? "")
     .split(path.delimiter)
     .map((p) => p.trim())
@@ -148,23 +88,18 @@ export const CONFIG = {
   modelBaseUrl: (
     process.env.VOICE_MCP_MODEL_BASE_URL?.trim() || "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
   ).replace(/\/+$/, ""),
-  /** Explicit path to whisper.cpp's `whisper-cli`. */
   whisperBin: process.env.VOICE_MCP_WHISPER_BIN?.trim() || undefined,
-  /** Explicit path to whisper.cpp's `whisper-server`. */
   whisperServerBin: process.env.VOICE_MCP_WHISPER_SERVER_BIN?.trim() || undefined,
-  /** Keep the model loaded in a local whisper-server between turns (much lower latency). */
   useWhisperServer: envBool("VOICE_MCP_WHISPER_SERVER", true),
-  /** Stop the warm whisper-server after this many idle minutes to free memory. */
   serverIdleMinutes: Math.max(1, envNum("VOICE_MCP_SERVER_IDLE_MINUTES", 15)),
-  /** Spoken language code ("en", "th", "de", ...) or "auto". Defaults to "en" for *.en models, else "auto". */
   language,
-  /** Initial prompt that biases vocabulary: the developer word list by default (English), or your own (names, jargon). */
   prompt: whisperPrompt(),
   threads: Math.max(1, Math.floor(envNum("VOICE_MCP_THREADS", Math.min(8, os.cpus().length || 4)))),
 
   debug: envBool("VOICE_MCP_DEBUG", false),
 } as const;
 
+// stdout carries the MCP protocol, so every log line goes to stderr.
 export function log(...args: unknown[]): void {
   console.error("[voice-mcp]", ...args);
 }
@@ -173,10 +108,7 @@ export function debug(...args: unknown[]): void {
   if (CONFIG.debug) log(...args);
 }
 
-// GUI apps on macOS (Claude Desktop, Cursor) launch MCP servers with a minimal
-// PATH that misses Homebrew. Append the usual locations so `rec`, `ffmpeg`,
-// `brew` and the whisper.cpp tools are found without extra config.
-// VOICE_MCP_EXTRA_PATH overrides the list (":"-separated; empty = add nothing — the tests use this).
+// GUI apps (Claude Desktop, Cursor) start MCP servers with a PATH that misses Homebrew.
 if (!IS_WIN) {
   const extra =
     process.env.VOICE_MCP_EXTRA_PATH !== undefined

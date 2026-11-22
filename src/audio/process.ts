@@ -1,9 +1,4 @@
-/**
- * The process backend: the recorder (rec, sox or ffmpeg) for the mic; SoX `play` (or afplay) for
- * speech PCM, the built-in voice's own program with one started ahead of time, afplay for cues,
- * SIGSTOP/SIGCONT for a duck, and headphone detection. Internal to src/audio/: everything else goes
- * through device.ts.
- */
+// The process backend: recorder and player programs, SIGSTOP pause, and headphone detection. See docs/specs/audio.md.
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -13,10 +8,6 @@ import { FRAME_BYTES, wavHeader } from "../endpointer.js";
 import { activeChildren, CancelledError, isExecutable, run, SetupError, startWaiting, tail, which, type Waiting } from "../proc.js";
 import { builtInCommand } from "../speech/synthesize.js";
 import { SPEECH_RATE, type Playback, type PlayEnd, type Sound } from "./device.js";
-
-// ---------------------------------------------------------------------------
-// The mic
-// ---------------------------------------------------------------------------
 
 export type Recorder = { kind: "sox"; bin: string; viaSox: boolean } | { kind: "ffmpeg"; bin: string };
 
@@ -49,7 +40,6 @@ export const MIC_PERMISSION_HINT =
 
 function recorderArgs(r: Recorder): string[] {
   if (r.kind === "sox") {
-    // Raw 16 kHz mono s16le to stdout; SoX resamples from the device rate.
     return ["-q", "-V1", ...(r.viaSox ? ["-d"] : []), "-t", "raw", "-r", "16000", "-c", "1", "-b", "16", "-e", "signed-integer", "-"];
   }
   return [
@@ -59,20 +49,12 @@ function recorderArgs(r: Recorder): string[] {
   ];
 }
 
-/** One recorder process. */
 export interface Recording {
-  /**
-   * Its audio in FRAME_BYTES slices, from the start. Ends once stopped; throws when the recorder
-   * exits on its own or can't start. return() stops it without waiting for it to exit.
-   */
   readonly frames: AsyncIterableIterator<Buffer>;
-  /** SIGTERM, then SIGKILL if it hasn't exited after 2 s. Idempotent. */
   stop(): void;
-  /** Resolves once the process is gone. */
   readonly exited: Promise<void>;
 }
 
-/** Start the recorder: the mic stays open until stop(). */
 export function record(recorder: Recorder): Recording {
   const args = recorderArgs(recorder);
   debug("exec:", recorder.bin, args.join(" "));
@@ -83,7 +65,6 @@ export function record(recorder: Recorder): Recording {
   let stderr = "";
   let delivered = false;
   let stopped = false;
-  /** "done" once stopped, or why the recording failed. */
   let end: "done" | Error | null = null;
   let wake: (() => void) | null = null;
   const notify = () => {
@@ -146,15 +127,8 @@ export function record(recorder: Recorder): Recording {
   return { frames, stop, exited };
 }
 
-// ---------------------------------------------------------------------------
-// Playback
-// ---------------------------------------------------------------------------
-
-/** What a player gets from its Playback. */
 interface Track {
-  /** Make duck() and stop() reach `child` until it exits. */
   add(child: ChildProcess): void;
-  /** Aborted by stop(). */
   readonly signal: AbortSignal;
 }
 
@@ -173,11 +147,6 @@ export function play(sound: Sound): Playback {
   }
 }
 
-/**
- * One Playback over the processes `player` starts. A duck below 1 pauses them all with SIGSTOP
- * (`say` or SoX goes quiet within 200 ms; SIGCONT resumes mid-sentence), and one started while
- * paused is paused at once. A stopped process can't act on SIGTERM, so stop() resumes it first.
- */
 function playback(player: (t: Track) => Promise<void>): Playback {
   const children = new Set<ChildProcess>();
   const ctl = new AbortController();
@@ -197,7 +166,7 @@ function playback(player: (t: Track) => Promise<void>): Playback {
     },
   };
   const pause = () => {
-    // No SIGSTOP on Windows: it would kill the voice (detectDuplex keeps calls there half duplex).
+    // No SIGSTOP on Windows: it would kill the voice.
     if (IS_WIN || ctl.signal.aborted || paused()) return;
     pausedAt = Date.now();
     signalAll("SIGSTOP");
@@ -223,14 +192,13 @@ function playback(player: (t: Track) => Promise<void>): Playback {
     resume,
     stop() {
       if (ctl.signal.aborted) return;
-      resume();
+      resume(); // a stopped process can't act on SIGTERM
       ctl.abort();
     },
     playedMs: () => Date.now() - startedAt - pausedMs - (paused() ? Date.now() - pausedAt : 0),
   };
 }
 
-/** SoX `play`, streaming raw PCM: gapless, and starts with the first sentence. */
 async function soxSpeech(bin: string, chunks: AsyncIterable<Buffer>, t: Track): Promise<void> {
   const child = spawn(bin, ["-q", "-t", "raw", "-r", String(SPEECH_RATE), "-e", "signed-integer", "-b", "16", "-c", "1", "-"], {
     stdio: ["pipe", "ignore", "pipe"],
@@ -255,7 +223,6 @@ async function soxSpeech(bin: string, chunks: AsyncIterable<Buffer>, t: Track): 
     }
     child.stdin!.end();
   })();
-  // The source failing stops the player at once; the player dying ends the wait for the source.
   const sourceFailed = pump.then(
     () => new Promise<never>(() => {}),
     (err: unknown) => {
@@ -273,7 +240,6 @@ async function soxSpeech(bin: string, chunks: AsyncIterable<Buffer>, t: Track): 
   }
 }
 
-/** macOS without SoX: one short WAV per sentence through afplay, back to back. */
 async function afplaySpeech(chunks: AsyncIterable<Buffer>, t: Track): Promise<void> {
   let dir: string | undefined;
   let n = 0;
@@ -303,12 +269,6 @@ async function afplaySpeech(chunks: AsyncIterable<Buffer>, t: Track): Promise<vo
   if (t.signal.aborted) throw new CancelledError();
 }
 
-/**
- * The built-in voice, started ahead of time. Loading a voice takes a while (about 1.4 s for a Siri
- * voice with `say`), and the engines read the text from stdin, so one is started early and waits:
- * the next reply only has to hand it the text. Measured with Siri Voice 4: 1.4 s → 0.6 s from the
- * text to the end of the speech, beyond the audio itself. Replaced after each reply; stopped when idle.
- */
 let standby: { key: string; proc: Waiting } | null = null;
 let standbyTimer: NodeJS.Timeout | undefined;
 
@@ -318,14 +278,14 @@ function takeStandby(key: string): Waiting | null {
   clearTimeout(standbyTimer);
   if (!s) return null;
   if (s.key === key && s.proc.ready) return s.proc;
-  s.proc.kill(); // the voice setting changed, or it stopped
+  s.proc.kill();
   return null;
 }
 
 function prepareStandby(bin: string, args: string[]): void {
   const key = [bin, ...args].join("\0");
   if (standby?.key === key && standby.proc.ready) return;
-  takeStandby(""); // drop a stale one
+  takeStandby("");
   standby = { key, proc: startWaiting(bin, args) };
   standbyTimer = setTimeout(() => takeStandby(""), CONFIG.serverIdleMinutes * 60_000);
   standbyTimer.unref();
@@ -336,7 +296,7 @@ async function voice(text: string, t: Track): Promise<void> {
   const opts = { signal: t.signal, timeoutMs: 180_000, onProcess: (child: ChildProcess) => t.add(child) };
   const ready = takeStandby([bin, ...args].join("\0"));
   const result = ready ? await ready.send(text, opts) : await run(bin, args, { ...opts, input: text });
-  if (standby) prepareStandby(bin, args); // for the next reply
+  if (standby) prepareStandby(bin, args);
   if (result.code !== 0) throw new Error(`Text-to-speech failed (exit ${result.code}): ${tail(result.stderr) || "no output"}`);
 }
 
@@ -346,16 +306,11 @@ async function cue(file: string, volume: number, t: Track): Promise<void> {
 }
 
 type ProfileItem = { _name?: string; coreaudio_default_audio_output_device?: string; coreaudio_device_transport?: string; coreaudio_output_source?: string };
-/** The default output in `system_profiler SPAudioDataType -json`. */
 function defaultOutput(json: unknown): ProfileItem | undefined {
   const groups = (json as { SPAudioDataType?: { _items?: ProfileItem[] }[] } | null)?.SPAudioDataType ?? [];
   return groups.flatMap((g) => g._items ?? []).find((i) => i.coreaudio_default_audio_output_device === "spaudio_yes");
 }
 
-/**
- * Does the profile say the default output is headphones? The built-in jack's headphones, or
- * Bluetooth unless its name says speaker (AirPods yes, a Bluetooth speaker no).
- */
 export function headphonesFromProfile(json: unknown): boolean {
   const out = defaultOutput(json);
   if (!out) return false;
@@ -363,10 +318,6 @@ export function headphonesFromProfile(json: unknown): boolean {
   return out.coreaudio_device_transport === "coreaudio_device_type_bluetooth" && !/speaker/i.test(out._name ?? "");
 }
 
-/**
- * Speakers whose echo the native backend may cancel (H2's allowlist): the Mac's own, or wired ones
- * (the built-in line out, or USB that says speaker). AirPlay, HDMI and Bluetooth speakers aren't measured yet.
- */
 export function speakersFromProfile(json: unknown): boolean {
   const out = defaultOutput(json);
   if (!out || headphonesFromProfile(json)) return false;
@@ -376,7 +327,6 @@ export function speakersFromProfile(json: unknown): boolean {
 
 export type Output = "headphones" | "speakers" | "other";
 
-/** Where the Mac's sound goes now ("speakers": allowlisted ones), or null when that can't be told. */
 export async function outputRoute(): Promise<Output | null> {
   if (!IS_MAC) return null;
   try {
@@ -391,11 +341,6 @@ export async function outputRoute(): Promise<Output | null> {
   }
 }
 
-/**
- * Can a call keep the mic open while Claude speaks? VOICE_MCP_CALL_DUPLEX, or for auto: full on
- * headphones (no echo to hear back), half otherwise. Never full where speech can't be paused (Windows).
- * `output`: the route, when the caller already has it.
- */
 export async function detectDuplex(output?: Output | null): Promise<"full" | "half"> {
   if (IS_WIN) return "half";
   if (CONFIG.callDuplex !== "auto") return CONFIG.callDuplex;
