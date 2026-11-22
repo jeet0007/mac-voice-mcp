@@ -76,7 +76,7 @@ Every line: `t` (ms since epoch), `ev`, `pid`, and `turn` (a per-process counter
 | `vad.discard` | a too-short sound is thrown away | `voicedMs` |
 | `stt.done` | transcript ready | `ms`, `chars`, `words`, `droppedChars` (what `cleanTranscript` removed) |
 | `speak.start` | speech starts | `engine` (say, kokoro), `chars`, `words`, `truncated` |
-| `speak.end` | speech ends | `finished`, `reason` (done, stopped, barge-in, error, fallback, timeout), `ms`, `unspokenChunks` |
+| `speak.end` | speech ends | `finished`, `reason` (done, stopped, barge-in, error, fallback), `ms`, `unspokenChunks` |
 | `call.mute` | call mic muted or unmuted | `muted`, `why` |
 | `call.event` | something happened on a call, as the call engine saw it (`src/call/engine/types.ts`, `Event`) | `type` (speech.onset, speech.dropped, utterance.ended, transcribed, transcribe.failed, words.checked, say.requested, playback.ended, inbox.drained, end.requested, tick), `at`, and that type's fields: `utterance` and `say` are counters, `reason`, `heard` (words, filler, hang-up, empty), `words` (true, false, or null when whisper couldn't take the check in time), `quietMs` |
 | `call.effect` | one thing the engine decided to do about the `call.event` before it (`Effect`) | `type` (speech.start, speech.duck, speech.restore, speech.pause, speech.resume, speech.stop, speech.drop, deliver, words.check, cue, teardown), `say`, `utterance`, `interrupted.say`, `interrupted.playedMs`, `missed`, `sound`, `reason` |
@@ -93,7 +93,7 @@ How `clean()` treats each field:
 - Numbers are rounded to two decimals. A non-finite number becomes `null`.
 - Booleans and `null` pass as they are.
 - A string passes only if the allowlist names that event, that field and that value. The flag `id` must
-  match `^\d{8}-\d{6}-\d{3}$`. The `listen.end` and `speak.end` reason lists also accept `timeout`.
+  match `^\d{8}-\d{6}-\d{3}$`.
 - `engineStrings()` folds one engine table into one allowlist: `type` takes every event or effect name,
   and each string field takes every value it has in any of them.
 - `recordStep()` writes one `call.event` line and then one `call.effect` line per effect, with no `turn`.

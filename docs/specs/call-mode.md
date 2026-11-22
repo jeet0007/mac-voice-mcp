@@ -75,27 +75,20 @@ One recorder for the whole call → endpointer splits utterances (end silence `V
 whisper → queue. Hang-up phrases are matched on the transcript in the server (deterministic, not by Claude).
 Empty or noise-only transcripts are dropped. Queue entries are deleted once delivered.
 
-### Echo policy (v1)
+### Who hears whom while Claude speaks
 
-`VOICE_MCP_CALL_DUPLEX = auto | full | half` (default auto).
+Which way a call handles Claude's own voice is decided once, when the call starts, by `route()` in
+`src/audio/device.ts` ([audio.md](audio.md)):
 
-- **half (speakers):** mic is gated while Claude speaks (what claude-call calls an echo gate); the call stays open. A reply that comes while the user is mid-sentence first waits for them to finish their sentence (no time limit; the recorder ends a sentence within a minute), so the gate never cuts them off.
-- **full (headphones):** mic stays open while Claude speaks; barge-in enabled.
-- **auto:** headphones detected at call start → full, else half. macOS: default output device transport and
-  data source (built-in "hdpn" = headphones; Bluetooth = headphones unless the name says speaker). First
-  version may read `system_profiler SPAudioDataType -json` once per call; replace with the 0.9.0 helper.
+| Output | Backend | While Claude speaks |
+|---|---|---|
+| The Mac's own or wired speakers, macOS 15+, worker built | native (echo-cancelled) | Mic stays open. Talking ducks the reply, words pause it, the transcript stops it or brings it back ([call-audio-redesign.md](call-audio-redesign.md#barge-in-native-backend-speakers)) |
+| Headphones | process | Mic stays open. A quarter second of voice pauses the reply (SIGSTOP); real words stop it, a filler resumes it |
+| Other speakers (AirPlay, HDMI, Bluetooth), older macOS, `VOICE_MCP_AUDIO=process` | process | Mic is gated. A reply that comes while the user is mid-sentence waits for them to finish |
 
-### Barge-in (full duplex only)
-
-Speech for ≥ 250 ms while Claude speaks → **pause** playback (Kokoro: stop feeding `play` / SIGSTOP; `say`:
-stop and remember the sentence). Transcribe it:
-
-- real words (≥ 2 words, or one that isn't a filler like "mm", "uh-huh", "okay") → drop the rest of the
-  reply and deliver: "(You interrupted Claude after: '…') <what you said>";
-- nothing real within 2 s → resume (Kokoro from the paused chunk; `say` from the remembered sentence).
-
-Thresholds follow Pipecat (0.2 s) and LiveKit (0.5 s, resume after 2 s); 150 ms is too aggressive.
-Optional later: Silero VAD when onnxruntime is already in the Kokoro cache.
+`VOICE_MCP_CALL_DUPLEX = full | half` forces the process backend's headphone or speaker behaviour. The rules
+themselves (duck, word check, pause, filler, 2 s give-up) live in the call engine, below. Fillers are the
+words in `src/call/engine/words.ts`; thresholds follow Pipecat (0.2 s) and LiveKit (0.5 s, resume after 2 s).
 
 ### Delivery: getting the user's words to Claude
 

@@ -36,7 +36,7 @@ Environment variables (all optional):
   VOICE_MCP_TTS                    auto (Kokoro once installed) | say | kokoro
   VOICE_MCP_KOKORO_VOICE           Kokoro voice (default af_heart; e.g. af_bella, am_michael, bf_emma)
   VOICE_MCP_KOKORO_SPEED           Kokoro speed, 0.5–2 (default 1)
-  VOICE_MCP_END_SILENCE_MS         pause length that ends your turn (default 1200)
+  VOICE_MCP_END_SILENCE_MS         pause length that ends your turn (default 1500)
   VOICE_MCP_START_TIMEOUT_SECONDS  wait this long for you to start talking (default 15)
   VOICE_MCP_SPEECH_MARGIN_DB       how far above room noise counts as speech (default 12)
   VOICE_MCP_WHISPER_SERVER         0 to always use whisper-cli (no warm server)
