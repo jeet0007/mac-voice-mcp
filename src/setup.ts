@@ -11,10 +11,10 @@ import { buildNative, findSwiftc, nativeBuilding, nativeState } from "./native-b
 import { describeRecorder, findRecorder } from "./audio/device.js";
 import { CONFIG, IS_MAC, IS_MACOS_15, IS_WIN, log } from "./config.js";
 import { installKokoro, isKokoroInstalled, isKokoroModelPresent, KOKORO_SIZES_MB, kokoroVoiceLabel } from "./kokoro.js";
-import { ensureModel, isModelDownloading, locateModel, modelSource, MODEL_SIZES_MB } from "./model.js";
+import { downloadVadModel, ensureModel, isModelDownloading, locateModel, locateVadModel, modelSource, MODEL_SIZES_MB } from "./model.js";
 import { isExecutable, resetWhichCache, run, sleep, tail, which } from "./proc.js";
 import { chooseVoice, findTts, resetVoiceChoice, VOICE_UPGRADE_HINT } from "./speech/synthesize.js";
-import { describeStt, findWhisperCli, findWhisperServer } from "./stt.js";
+import { describeStt, findWhisperCli, findWhisperServer, stopWhisperServer, supportsVad } from "./stt.js";
 
 type CheckStatus = "ok" | "missing" | "optional" | "installing";
 
@@ -32,6 +32,8 @@ interface Check {
   bubble?: boolean;
   /** Fixed by building the audio worker (install=true). */
   worker?: boolean;
+  /** Fixed by downloading the silence filter (install=true). */
+  vad?: boolean;
 }
 
 export interface SetupOptions {
@@ -81,6 +83,7 @@ let modelJob: Job | null = null;
 let kokoroJob: Job | null = null;
 let bubbleJob: Job | null = null;
 let workerJob: Job | null = null;
+let vadJob: Job | null = null;
 /** The Kokoro install's latest progress line. */
 let kokoroProgress = "";
 /** Results of finished jobs not yet shown to the user. */
@@ -179,7 +182,7 @@ async function checkRequirements(): Promise<Check[]> {
   const cli = findWhisperCli();
   const server = findWhisperServer();
   if (cli || server) {
-    checks.push({ label: "Speech-to-text", status: "ok", detail: `whisper.cpp — ${describeStt()}` });
+    checks.push({ label: "Speech-to-text", status: "ok", detail: `whisper.cpp — ${await describeStt()}` });
   } else {
     checks.push({
       label: "Speech-to-text",
@@ -208,6 +211,16 @@ async function checkRequirements(): Promise<Check[]> {
   } catch (e) {
     checks.push({ label: "Speech model", status: "missing", detail: e instanceof Error ? e.message : String(e) });
   }
+
+  checks.push(
+    cli && !(await supportsVad(cli))
+      ? { label: "Silence filter", status: "optional", detail: "this whisper.cpp is too old for Silero VAD, which stops it inventing words in silence; `brew upgrade whisper-cpp` adds it" }
+      : locateVadModel()
+        ? { label: "Silence filter", status: "ok", detail: "Silero VAD, so whisper skips silence instead of inventing words there" }
+        : running(vadJob)
+          ? { label: "Silence filter", status: "installing", detail: "downloading Silero VAD" }
+          : { label: "Silence filter", status: "optional", detail: `Silero VAD stops whisper inventing words in silence ("Thank you.") — a one-time download of under 1 MB to ${CONFIG.modelsDir}`, vad: true },
+  );
 
   if (checks.some((c) => c.brew && c.status === "missing")) {
     const brew = findBrew();
@@ -289,6 +302,13 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
     const brew = findBrew();
     if (formulae.length && brew && !running(brewJob)) brewJob = startBrewInstall(brew, formulae);
     if (checks.some((c) => c.model && c.status === "missing") && !running(modelJob)) modelJob = startModelDownload();
+    if (checks.some((c) => c.vad) && !running(vadJob)) {
+      vadJob = startJob("Downloading the silence filter", async () => {
+        await downloadVadModel();
+        stopWhisperServer(); // the next transcription starts it again, with the filter
+        return "Downloaded the silence filter (Silero VAD).";
+      });
+    }
   }
   // A stale bubble rebuilds without asking again: the user already opted in.
   if ((opts.bubble || nativeState("call-bubble") === "stale") && checks.some((c) => c.bubble) && !running(bubbleJob)) bubbleJob = startJob("Building the call bubble", () => buildNative("call-bubble"));
@@ -296,7 +316,7 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
   if (opts.kokoro && !running(kokoroJob) && !(isKokoroInstalled() && isKokoroModelPresent())) kokoroJob = startKokoroInstall();
 
   // Wait (bounded) for anything in flight, with a heartbeat.
-  const jobs = [brewJob, modelJob, kokoroJob, bubbleJob, workerJob].filter(running);
+  const jobs = [brewJob, modelJob, kokoroJob, bubbleJob, workerJob, vadJob].filter(running);
   if (jobs.length) {
     const deadline = Date.now() + INSTALL_WAIT_MS;
     while (jobs.some((j) => !j.done) && Date.now() < deadline) {
@@ -311,7 +331,7 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
     checks = await checkRequirements();
   }
 
-  const installing = running(brewJob) || running(modelJob) || running(kokoroJob) || running(bubbleJob) || running(workerJob);
+  const installing = running(brewJob) || running(modelJob) || running(kokoroJob) || running(bubbleJob) || running(workerJob) || running(vadJob);
   const ready = checks.every((c) => c.status === "ok" || c.status === "optional");
   const icon: Record<CheckStatus, string> = { ok: "✔", missing: "✘", optional: "•", installing: "…" };
   const done = finishedMessages.splice(0);
@@ -360,6 +380,12 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
           "(built on this Mac from source in about 10 s). Ask the user whether to build it. Only if they agree, call voice_setup with install=true.",
       );
     }
+    if (checks.some((c) => c.vad) && !install) {
+      lines.push(
+        "Recommended: ask the user whether to download the silence filter (under 1 MB), which stops whisper inventing words when nobody speaks. " +
+          "Only if they agree, call voice_setup with install=true.",
+      );
+    }
     if (checks.some((c) => c.label === "Voice" && c.status === "optional")) {
       lines.push(
         "Mention the optional voice tip (•) to the user once — it makes the voice sound far more natural. " +
@@ -369,7 +395,7 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
   } else if (installing) {
     lines.push("Next: installation is still running in the background. Tell the user, wait about a minute, then call voice_setup again (install=false) to check.");
   } else if (!install && (toInstall.length || needsModel) && (findBrew() || !toInstall.length)) {
-    const steps = [toInstall.length ? `brew install ${toInstall.join(" ")}` : "", needsModel ? `download the ${CONFIG.modelName} model` : ""]
+    const steps = [toInstall.length ? `brew install ${toInstall.join(" ")}` : "", needsModel ? `download the ${CONFIG.modelName} model` : "", checks.some((c) => c.vad) ? "download the silence filter (under 1 MB)" : ""]
       .filter(Boolean)
       .join(" and ");
     lines.push(`Next: ask the user whether to ${steps}. Only if they agree, call voice_setup with install=true.`);

@@ -18,7 +18,8 @@
 | It mishears me when there's background noise | Switch to `small.en` (`VOICE_MCP_WHISPER_MODEL=small.en`, then run setup to download it). In noise it makes about a third fewer mistakes than the default. |
 | The orange mic dot stays on while Claude works | That's [talking to Claude while it works](usage.md#talk-to-claude-while-it-works): it listens for "Claude, …". It stops when you type, when voice mode ends, or after 10 minutes. `VOICE_MCP_LISTEN_WHILE_WORKING=0` turns it off. |
 | Claude didn't get what I said while it worked | Start with its name: "Claude, …". It arrives after Claude's next step. It only works in Claude Code with the plugin. |
-| It garbles names or jargon | Describe the conversation in `VOICE_MCP_WHISPER_PROMPT` as a sentence that uses the words, e.g. `"A call with Priya about the Postgres and Kubernetes migration."`, or switch to `small.en`. |
+| It garbles names or jargon | List the words in `VOICE_MCP_WHISPER_PROMPT`, e.g. `"Priya, Postgres, Kubernetes, migration."`, or switch to `small.en`. |
+| It hears "Thank you." when nobody spoke | Run setup and accept the silence filter (see [The silence filter](configuration.md#the-silence-filter)). |
 | The voice sounds robotic | Choose a Premium voice as the System Voice in System Settings, or install the Kokoro voice (see [Voices](voices.md)). |
 | "The Kokoro voice didn't work" | The built-in voice spoke instead. Ask Claude to *check voice setup*, or run `npx -y mac-voice-mcp@latest setup`. To reinstall it, delete `~/.cache/mac-voice-mcp/kokoro/` and run `setup --kokoro`. |
 | It asks for approval every turn | Add the tool to Claude Code's allow list: see [Allow voice turns without prompts](install.md#allow-voice-turns-without-prompts). |

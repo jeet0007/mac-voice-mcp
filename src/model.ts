@@ -6,8 +6,9 @@
  *   3. the same model elsewhere on this machine → symlinked into the cache
  *   4. a one-time download — only via voice_setup(install=true) / `setup`
  */
-import { closeSync, createWriteStream, existsSync, fstatSync, lstatSync, openSync, readSync } from "node:fs";
-import { mkdir, rename, rm, symlink, unlink } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { closeSync, createWriteStream, existsSync, fstatSync, lstatSync, openSync, readSync, statSync } from "node:fs";
+import { mkdir, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -199,5 +200,42 @@ async function downloadModel(dest: string): Promise<string> {
     throw e;
   }
   log(`Model ready: ${dest}`);
+  return dest;
+}
+
+/** Silero VAD for whisper.cpp: whisper skips the stretches without speech instead of inventing words there (issue #62). */
+export const VAD_MODEL = {
+  file: "ggml-silero-v5.1.2.bin",
+  url: "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin",
+  sha256: "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf",
+  size: 885_098,
+};
+
+const vadModelFile = () => path.join(CONFIG.modelsDir, VAD_MODEL.file);
+
+/** The VAD model in our cache, or null. A file of the wrong size (truncated, replaced) makes whisper abort, so it's ignored until downloadVadModel replaces it. */
+export function locateVadModel(): string | null {
+  try {
+    return statSync(vadModelFile()).size === VAD_MODEL.size ? vadModelFile() : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function downloadVadModel(): Promise<string> {
+  const dest = vadModelFile();
+  // A mirror set with VOICE_MCP_MODEL_BASE_URL serves this file too.
+  const url = process.env.VOICE_MCP_MODEL_BASE_URL?.trim() ? `${CONFIG.modelBaseUrl}/${VAD_MODEL.file}` : VAD_MODEL.url;
+  log(`Downloading the silence filter → ${dest}`);
+  const res = await fetch(url, { redirect: "follow" });
+  if (!res.ok) throw new SetupError(`Could not download the silence filter from ${url} (HTTP ${res.status}).`);
+  const data = Buffer.from(await res.arrayBuffer());
+  const sha256 = createHash("sha256").update(data).digest("hex");
+  if (sha256 !== VAD_MODEL.sha256) throw new SetupError(`The silence filter from ${url} is not the expected file (${data.length} bytes, sha256 ${sha256}).`);
+  await mkdir(path.dirname(dest), { recursive: true });
+  const tmp = `${dest}.${process.pid}.part`;
+  await rm(tmp, { force: true });
+  await writeFile(tmp, data, { flag: "wx" }); // never through a symlink planted at the temp name
+  await rename(tmp, dest);
   return dest;
 }

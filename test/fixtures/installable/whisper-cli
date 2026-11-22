@@ -2,6 +2,15 @@
 // Stub whisper-cli: logs the WAV length it was given and prints a fixed transcript.
 const fs = require("fs");
 const args = process.argv.slice(2);
+// STUB_NO_VAD: a whisper.cpp from before VAD, which doesn't list --vad and exits on it.
+if (args.includes("--help")) {
+  process.stderr.write(`usage: whisper-cli [options]\n  -m FNAME, --model FNAME\n${process.env.STUB_NO_VAD ? "" : "  --vad\n"}`);
+  process.exit(0);
+}
+if (process.env.STUB_NO_VAD && args.includes("--vad")) {
+  process.stderr.write("error: unknown argument: --vad\n");
+  process.exit(1);
+}
 const wav = args[args.indexOf("-f") + 1];
 const seconds = (fs.statSync(wav).size - 44) / 32000;
 fs.appendFileSync(process.env.STUB_LOG, `whisper-cli wav=${seconds.toFixed(2)}s ${args.filter((a) => a !== wav).join(" ")}\n`);
