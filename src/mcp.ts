@@ -1,14 +1,7 @@
-/**
- * A small MCP server over stdio: newline-delimited JSON-RPC 2.0, with only what voice-mcp uses —
- * initialize, ping, tools, prompts, progress notifications and cancellation.
- *
- * It replaces @modelcontextprotocol/sdk at runtime. The SDK also installs an HTTP server stack
- * (express, hono, cors, …) that a stdio server never runs, which was about 95 packages for two tools.
- * The tests still drive this server with the official SDK client, so the two stay compatible.
- */
+// A small stdio MCP server, newline-delimited JSON-RPC 2.0, in place of the MCP SDK. See docs/specs/voice-turn.md.
 import { z } from "zod";
 
-/** Newest first. The server answers with the client's version when it knows it, else the newest. */
+/** Newest first. */
 export const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
 
 export interface TextContent {
@@ -23,11 +16,9 @@ export interface GetPromptResult {
   messages: { role: "user" | "assistant"; content: TextContent }[];
 }
 
-/** What a tool handler gets besides its arguments. */
 export interface ToolContext {
-  /** Aborted when the client cancels the call (notifications/cancelled). */
   signal: AbortSignal;
-  /** Sends notifications/progress; only there when the client asked for progress (a progressToken). */
+  /** Only there when the client sent a progressToken. */
   progress?: (message: string) => void;
 }
 
@@ -98,7 +89,6 @@ export class StdioMcpServer {
     });
   }
 
-  /** Prompt arguments are always strings in MCP. */
   registerPrompt<S extends Record<string, z.ZodString | z.ZodOptional<z.ZodString>>>(
     name: string,
     def: { title?: string; description: string; argsSchema?: S },
@@ -117,10 +107,9 @@ export class StdioMcpServer {
     });
   }
 
-  /** Starts reading requests from input and writing responses to output. */
   connect(input: NodeJS.ReadableStream = process.stdin, output: NodeJS.WritableStream = process.stdout): void {
     this.output = output;
-    output.on("error", () => {}); // the client went away; stdin's close handles shutdown
+    output.on("error", () => {}); // stdin's close handles shutdown
     let buffer = "";
     input.setEncoding("utf8");
     input.on("data", (chunk: string) => {
@@ -134,7 +123,6 @@ export class StdioMcpServer {
     });
   }
 
-  /** Cancels every call still running. */
   close(): void {
     for (const controller of this.inFlight.values()) controller.abort();
     this.inFlight.clear();
@@ -162,7 +150,6 @@ export class StdioMcpServer {
     const p = (typeof params === "object" && params !== null ? params : {}) as Record<string, unknown>;
 
     if (typeof id !== "string" && typeof id !== "number") {
-      // A notification. The only one that needs anything is a cancel.
       if (method === "notifications/cancelled") this.inFlight.get(p.requestId as RequestId)?.abort();
       return;
     }
@@ -175,7 +162,7 @@ export class StdioMcpServer {
           if (!controller.signal.aborted) this.send({ id, result });
         },
         (err: unknown) => {
-          if (controller.signal.aborted) return; // cancelled: the client expects no answer
+          if (controller.signal.aborted) return;
           const code = err instanceof RpcError ? err.code : -32603;
           this.send({ id, error: { code, message: err instanceof Error ? err.message : String(err) } });
         },
@@ -221,7 +208,7 @@ export class StdioMcpServer {
     if (!tool) return { content: [{ type: "text", text: `Tool ${name} not found` }], isError: true };
     const parsed = tool.schema.safeParse(params.arguments ?? {});
     if (!parsed.success) {
-      // A tool error rather than a protocol error, so the model sees what to fix.
+      // a tool error, not a protocol error, so the model sees what to fix
       return { content: [{ type: "text", text: `Invalid arguments for tool ${name}: ${describeIssues(parsed.error)}` }], isError: true };
     }
     const meta = params._meta as { progressToken?: unknown } | undefined;

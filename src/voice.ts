@@ -1,4 +1,4 @@
-/** The round trip: speak → listen for one turn → transcribe. */
+// One voice turn: speak, listen for one reply, transcribe. See docs/specs/voice-turn.md.
 import { findRecorder, MIC_PERMISSION_HINT, MicBusyError, openAudio, RECORDER_MISSING, type AudioSession } from "./audio/device.js";
 import { CONFIG, debug, DEFAULT_LISTEN_SECONDS, log, MAX_LISTEN_SECONDS, MAX_SPEAK_CHARS } from "./config.js";
 import { announceErrorIfMicFree, chime, cue, errorNote, type SpokenError } from "./cues.js";
@@ -18,13 +18,12 @@ export interface VoiceResult {
   ok: boolean;
   text: string;
   notes: string[];
-  /** The user answered out loud (a real transcript, not "no speech" or an error). */
   heard?: boolean;
-  /** A spoken error to announce once the mic is released (see cues.ts); the text above stays the explanation. */
+  /** Spoken once the mic is released; `text` stays the explanation. */
   announce?: SpokenError;
 }
 
-/** Everything speak_and_listen needs, checked before saying a word. Never installs anything. */
+/** Never installs anything. */
 export async function preflight(): Promise<{ model: string }> {
   let kind: SpokenError | null = null;
   try {
@@ -40,7 +39,6 @@ export async function preflight(): Promise<{ model: string }> {
     const model = await ensureModel({ download: false });
     return { model };
   } catch (err) {
-    // Nothing is playing or recording yet, so the user hears the error tone and one line, not Claude's text.
     if (kind && err instanceof SetupError) {
       const note = errorNote(await announceErrorIfMicFree(kind));
       if (note) Object.assign(err, { voiceNote: note });
@@ -52,32 +50,23 @@ export async function preflight(): Promise<{ model: string }> {
 export type Phase = "waiting" | "speaking" | "listening" | "transcribing";
 
 export interface SpeakOptions {
-  /** Upper limit on listening, in seconds. */
+  /** Seconds. */
   listenSeconds?: number;
-  /** false: only speak — don't open the mic (announcements, or saying goodbye when leaving voice mode). */
   listen?: boolean;
   signal?: AbortSignal;
   onPhase?: (phase: Phase) => void;
 }
 
-/**
- * A spoken update (listen: false) still playing in the background, and notes from it for the next
- * result (a Kokoro fallback, or an error after the call had already returned).
- */
 let speaking: Promise<void> | null = null;
 const laterNotes: string[] = [];
 
-/** How long a spoken update waits for an early failure (no voice installed…) before returning. */
 const EARLY_FAILURE_MS = 300;
 
-/** What Claude is told when the user starts typing during a voice turn (the voice-buddy mod's signal). */
 export const USER_TYPED =
   "(The user started typing instead of answering by voice, so voice-mcp stopped speaking and listening. " +
   "Stop here and wait for their typed message; don't call speak_and_listen again unless they ask to talk.)";
-/** How often a voice turn checks whether the user started typing. */
 const STOP_POLL_MS = 100;
 
-/** Abort when the user starts typing (a stop signal at or after `since`), or when `signal` aborts. */
 export function watchForTyping(since: number, signal?: AbortSignal) {
   const ctl = new AbortController();
   let typed = false;
@@ -105,12 +94,10 @@ export function watchForTyping(since: number, signal?: AbortSignal) {
   };
 }
 
-/** Wait for a spoken update to finish (another turn needs the speaker). */
 export async function finishSpeaking(): Promise<void> {
   await speaking;
 }
 
-/** Speech playing outside a voice turn (a spoken update, a call's `say`): the next turn waits for it. */
 export function trackSpeaking(done: Promise<unknown>): void {
   const tracked: Promise<void> = done.then(
     () => {},
@@ -122,7 +109,6 @@ export function trackSpeaking(done: Promise<unknown>): void {
 }
 
 export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {}): Promise<VoiceResult> {
-  // One speaker: a spoken update from the last call finishes first.
   await finishSpeaking();
   const { signal } = opts;
   const startedAt = Date.now();
@@ -130,8 +116,6 @@ export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {
     showPhase(phase);
     opts.onPhase?.(phase);
   };
-  // The mic is ours for this turn: stop listening in the background, and pass on anything the
-  // user said while Claude worked that the plugin's hook hasn't delivered yet.
   const wasListening = workListener.running;
   await workListener.stop();
   const waiting = interjectionNote(takeInbox());
@@ -139,21 +123,18 @@ export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {
   const requested = opts.listenSeconds ?? DEFAULT_LISTEN_SECONDS;
   const seconds = Math.min(MAX_LISTEN_SECONDS, Math.max(1, Number.isFinite(requested) ? requested : DEFAULT_LISTEN_SECONDS));
   const model = listen ? (await preflight()).model : null;
-  // Load the model into the warm server now, so it's ready when the user finishes (even if we wait below).
   if (model) prewarm(model);
 
-  // Wait for any other voice session on this Mac to finish with the speaker and mic.
   let session: AudioSession;
   try {
     session = await openAudio({ purpose: "turn", signal, onWait: () => onPhase("waiting") });
   } catch (err) {
-    showPhase(null); // gave up waiting for the mic, or cancelled: don't leave "waiting" showing
+    showPhase(null);
     if (err instanceof MicBusyError) return { ok: false, text: err.message, notes: waiting ? [waiting] : [] };
     throw err;
   }
   if (!listen) return speakInBackground(textToSpeak, { session, onPhase, waiting, keepListening: wasListening, startedAt });
   let result: VoiceResult;
-  // The user starts typing: stop talking and listening now, not after the 15-second wait for speech.
   const typing = watchForTyping(startedAt, signal);
   try {
     result = await turn(textToSpeak, seconds, model!, typing.signal, onPhase, session);
@@ -163,29 +144,20 @@ export async function speakAndListen(textToSpeak: string, opts: SpeakOptions = {
   } finally {
     typing.dispose();
     showPhase(null);
-    // The recorder was stopped once the turn was decided; the mic is given back once it has really exited.
     void session.close();
   }
   if (result.announce) {
-    // The recorder has exited by then, so the tone and the line can't be recorded. Spoken only if no
-    // other session took the mic meanwhile.
+    // after the recorder exits, so it can't record the tone
     await session.ended;
     const note = errorNote(await announceErrorIfMicFree(result.announce));
     if (note) result.notes.push(note);
   }
   result.notes.unshift(...laterNotes.splice(0));
   if (waiting) result.notes.unshift(waiting);
-  // They answered out loud: keep listening while Claude works, for "Claude, …" (once the turn's recorder is gone).
   if (result.heard) void session.ended.then(() => workListener.start());
   return result;
 }
 
-/**
- * A spoken update ("give me a few minutes"): return right away, so Claude carries on working while
- * it plays (each one used to hold Claude up for the whole sentence, 7-12 s), and keep the speaker
- * and mic until it's done. An error in the first moment (no voice installed) is still reported here;
- * anything later goes with the next result.
- */
 async function speakInBackground(
   textToSpeak: string,
   o: { session: AudioSession; onPhase: (phase: Phase) => void; waiting: string | null; keepListening: boolean; startedAt: number },
@@ -195,8 +167,7 @@ async function speakInBackground(
   let returned = false;
   let failure: unknown = null;
   o.onPhase("speaking");
-  // Not tied to this request's signal (the request is over long before the sentence is), but the
-  // user starting to type stops it.
+  // not the request's signal: the request ends long before the sentence does
   const typing = watchForTyping(o.startedAt);
   const done = speak(speech.text, typing.signal)
     .done.then(
@@ -208,7 +179,7 @@ async function speakInBackground(
       (err: unknown) => {
         if (err instanceof CancelledError) return;
         if (!returned) {
-          failure = err; // reported by this call, below
+          failure = err;
           return;
         }
         const message = err instanceof Error ? err.message : String(err);
@@ -220,13 +191,11 @@ async function speakInBackground(
       typing.dispose();
       showPhase(null);
       void o.session.close();
-      // Listening while Claude works resumes once the speaker is quiet, so it doesn't hear itself.
-      // It counts from when this call returned, which is when the plugin's hook marked the session.
+      // from t0: when this call returned, which is when the hook marks the session
       if (o.keepListening && !failure && !typing.typed) workListener.start(t0);
     });
   trackSpeaking(done);
 
-  // Fails right away (no voice installed, bad setup)? Then say so now, as before.
   await Promise.race([done, sleep(EARLY_FAILURE_MS)]);
   returned = true;
   if (failure) throw failure;
@@ -258,9 +227,8 @@ async function turn(
     const fallback = fallbackNote(spoken);
     if (fallback) notes.push(fallback);
     onPhase?.("listening");
-    prewarmKokoro(); // no-op unless its worker was idle-stopped or recycled: the next reply isn't cold
+    prewarmKokoro();
     const tListen = Date.now();
-    // The chime plays once the mic is really recording, so the first word is never lost.
     const heard = await listenForTurn(session, seconds, { signal, onListening: () => chime("start") });
     const t1 = Date.now();
     debug(`listen: ${heard.reason}, ${heard.wav.length} bytes of audio, ${heard.speechSeconds.toFixed(1)} s of speech, digitalSilence=${heard.digitalSilence}`);
@@ -268,7 +236,7 @@ async function turn(
       timingNote({ spokeMs: spoke, spoken, listenedMs: t1 - tListen, talkedSeconds: heard.speechSeconds, transcribedMs });
 
     if (heard.digitalSilence) {
-      resetWhichCache(); // if the user fixes it by installing SoX, the next turn picks it up
+      resetWhichCache(); // a SoX install counts on the next turn
       const viaFfmpeg = findRecorder()?.kind === "ffmpeg";
       return {
         ok: false,
@@ -288,11 +256,11 @@ async function turn(
       "Ask once more out loud. If there's still no answer, stop and say on screen that voice mode is paused " +
       "and they can type anything to carry on — speaking won't work until you call speak_and_listen again.)";
     if (heard.reason === "no-speech") {
-      void cue("no-speech"); // a low purr: nothing came in
+      void cue("no-speech");
       return { ok: true, text: noSpeech, notes: [...notes, timing()] };
     }
     const pop = new AbortController();
-    void cue("close", pop.signal); // a pop: the mic is closed
+    void cue("close", pop.signal);
 
     onPhase?.("transcribing");
     const dropped: string[] = [];
@@ -304,10 +272,9 @@ async function turn(
     }
     const transcribed = Date.now() - t1;
     if (!transcript) {
-      pop.abort(); // the pop may still be playing: the purr says it didn't count, and it starts right away
+      pop.abort();
       void cue("no-speech");
-      // Something was loud enough to sound like speech (a cough, typing, a door), but whisper found no words in it.
-      // Starts with "(No speech detected" so the plugin's voice-mode hook knows the user wasn't heard.
+      // must start with "(No speech detected": the hook matches the prefix
       const noWords =
         "(No speech detected — the microphone picked up a sound but no words, probably a cough or background noise. The microphone is now off. " +
         "Ask once more out loud. If there's still no answer, stop and say on screen that voice mode is paused " +
@@ -330,7 +297,6 @@ async function turn(
 
 const secs = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 
-/** Kokoro failures already reported in this session: say each once, not on every turn. */
 const reportedFallbacks = new Set<string>();
 
 function fallbackNote(spoken: Spoken): string | null {
@@ -342,7 +308,6 @@ function fallbackNote(spoken: Spoken): string | null {
   );
 }
 
-/** One compact line per turn, so "why did that feel slow?" has an answer. */
 export function timingNote(t: {
   spokeMs: number;
   spoken?: Spoken;

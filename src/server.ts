@@ -1,4 +1,4 @@
-/** MCP wiring: the tools (speak_and_listen, voice_setup, call, say, listen) and prompts (setup, voice_mode, call). */
+// The MCP tools and prompts, and the stdio server's startup and shutdown. See docs/specs/voice-turn.md.
 import { z } from "zod";
 import { call } from "./call/session.js";
 import { CONFIG, DEFAULT_LISTEN_SECONDS, log, MAX_LISTEN_SECONDS, MAX_SPEAK_CHARS, PKG } from "./config.js";
@@ -35,14 +35,13 @@ import { READY_LINE, sayLineIfMicFree } from "./cues.js";
 import { exclusive } from "./audio/device.js";
 import { finishSpeaking, preflight, speakAndListen, trackSpeaking } from "./voice.js";
 
-/** The longest `listen` may wait: the Cowork bridge drops tool calls after 60 s. */
+// the Cowork bridge drops tool calls after 60 s
 const MAX_LISTEN_WAIT_SECONDS = 40;
 
 const failed = (what: string, err: unknown): CallToolResult => {
   const message = err instanceof Error ? err.message : String(err);
   log(`${what} failed:`, message);
   const prefix = err instanceof SetupError ? "voice-mcp is not set up yet: " : "voice-mcp error: ";
-  // A spoken error already told the user (cues.ts); this note keeps Claude from repeating it aloud.
   const note = (err as { voiceNote?: unknown } | null)?.voiceNote;
   const notes = typeof note === "string" ? [{ type: "text" as const, text: `\n\n${note}` }] : [];
   return { content: [{ type: "text", text: prefix + message }, ...notes], isError: true };
@@ -114,7 +113,6 @@ export function createServer(): StdioMcpServer {
     },
     async ({ action }, { signal }): Promise<CallToolResult> => {
       if (action === "end") {
-        // An end while a start still waits for the mic cancels that start.
         for (const pending of startingCalls) pending.abort();
         await call.end("Claude ended the call");
         return reply(CALL_ENDED_BY_CLAUDE);
@@ -128,7 +126,6 @@ export function createServer(): StdioMcpServer {
           await workListener.stop();
           if (ended.signal.aborted) throw new CancelledError();
           if ((await call.start(AbortSignal.any([signal, ended.signal]))) === "already") return reply(CALL_ALREADY_ON);
-          // Nothing is spoken here: Claude greets once, with say, so the user doesn't hear two greetings.
           return reply(CALL_RULES);
         });
       } catch (err) {
@@ -237,7 +234,6 @@ export function createServer(): StdioMcpServer {
         const outcome = await exclusive(async () => {
           await finishSpeaking(); // its checks use the speaker too
           const done = await runSetupFlow({ install: install === true, kokoro: kokoro === true, bubble: bubble === true, onProgress: progress });
-          // The first READY after an install: one short line out loud, once per server process.
           if (done.announceReady) trackSpeaking(sayLineIfMicFree(READY_LINE));
           return done;
         });
@@ -250,21 +246,18 @@ export function createServer(): StdioMcpServer {
     },
   );
 
-  // Claude Code: /mcp__voice-mcp__setup
   server.registerPrompt(
     "setup",
     { title: "Set up voice", description: "Check what voice-mcp needs, install what's missing (with your OK), then test it." },
     () => ({ messages: [{ role: "user", content: { type: "text", text: SETUP_PROMPT } }] }),
   );
 
-  // Claude Desktop and Cursor: the prompt picker (Claude Code has /mac-voice-mcp:call).
   server.registerPrompt(
     "call",
     { title: "Call", description: "A call: the microphone stays open and you talk whenever you like, until you hang up." },
     () => ({ messages: [{ role: "user", content: { type: "text", text: CALL_PROMPT } }] }),
   );
 
-  // Claude Code: /mcp__voice-mcp__voice_mode [task]; Claude Desktop and Cursor: the prompt picker.
   server.registerPrompt(
     "voice_mode",
     {
@@ -293,7 +286,7 @@ export async function startServer(): Promise<void> {
     void workListener.stop();
     stopWhisperServer();
     stopKokoro();
-    await terminateChildren(); // SIGTERM, then SIGKILL for any that haven't exited
+    await terminateChildren();
     server.close();
     process.exit(code);
   };
@@ -307,8 +300,7 @@ export async function startServer(): Promise<void> {
     log("This is an MCP server and expects an MCP client on stdin. Try `setup` or `test` instead, or see --help.");
   }
 
-  startFlight(); // does nothing unless VOICE_MCP_FLIGHT_RECORDER is on
+  startFlight();
 
-  // Cheap, install-free: link an existing model into the cache if there is one.
   void locateModel().catch(() => null);
 }

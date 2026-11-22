@@ -1,9 +1,4 @@
-/**
- * Everything the model reads: speaking rules, server instructions, tool
- * descriptions and prompts. The rules are shared so every client sees the same
- * guidance through whichever channel it actually surfaces (Claude Desktop, for
- * instance, ignores server instructions but always shows tool descriptions).
- */
+// Everything the model reads: speaking rules, server instructions, tool descriptions and prompts. See docs/specs/voice-turn.md.
 
 export const SPEECH_RULES = [
   "Write text_to_speak for the ear, not the screen:",
@@ -17,7 +12,7 @@ export const SPEECH_RULES = [
   "- A spoken turn with no assistant message text shows the user nothing — never skip the on-screen reply.",
 ].join("\n");
 
-/** Claude Code reads these (truncated at 2 KB) — keep under that. */
+// Claude Code truncates these at 2 KB.
 export const SERVER_INSTRUCTIONS = [
   "voice-mcp speaks to the user through their computer's speakers and returns a local transcript of",
   "their spoken reply (tool: speak_and_listen). Use it when the user wants voice updates, is hands-free,",
@@ -108,8 +103,6 @@ export const VOICE_MODE_PROMPT = (task?: string) =>
       : "Start by calling speak_and_listen to say voice mode is on and ask what I'd like to work on.",
   ].join("\n");
 
-// --- A call: the mic stays open until the user hangs up (src/call/session.ts) -------------------
-
 export const CALL_TOOL_DESCRIPTION = [
   "Start or end a call: a hands-free session where the microphone stays open and the user talks whenever they",
   "like, like a phone call, until they hang up. action start takes the speaker and microphone and returns the",
@@ -132,7 +125,6 @@ export const LISTEN_TOOL_DESCRIPTION = [
   "Once it reports that the call ended, don't call it again.",
 ].join("\n");
 
-/** What `call start` returns. */
 export const CALL_RULES = [
   "The call is on: the microphone stays open until the user hangs up.",
   "- Nothing has been said yet. Greet the user once, in a few words, with say (for example \"Hi, I'm here.\"), then call listen.",
@@ -154,7 +146,6 @@ export const ON_CALL_USE_SAY = "(You're on a call with the user: speak with say 
 export const STILL_ON_CALL = "(still on the call, nothing said) Call listen again to keep waiting, or say something.";
 export const callEnded = (reason: string) => `(The call ended: ${reason}. Don't call listen or say again; the user can type, or start a new call.)`;
 export const SAID = "(Said. The microphone stays open, so carry on; what the user says next comes with your next say or listen.)";
-/** Said on a call when Claude Code shows a permission prompt (the plugin hook asks for it). */
 export const PERMISSION_NOTICE = "Claude needs your OK on screen.";
 
 export const CALL_PROMPT = [
