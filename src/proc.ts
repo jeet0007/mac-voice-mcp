@@ -1,10 +1,10 @@
-/** Child-process helpers: PATH lookup, a promise-based runner, and error types. */
+// Child-process helpers: PATH lookup, a promise-based runner, and error types. See docs/specs/setup-and-doctor.md.
 import { spawn, type ChildProcess } from "node:child_process";
 import { accessSync, constants as fsConstants, statSync } from "node:fs";
 import path from "node:path";
 import { debug, IS_WIN } from "./config.js";
 
-/** Something the user has to install or configure — the message says how. */
+/** Something the user has to install or configure; the message says how. */
 export class SetupError extends Error {
   override name = "SetupError";
 }
@@ -28,12 +28,11 @@ export function isExecutable(file: string): boolean {
 
 const whichCache = new Map<string, string | null>();
 
-/** Forget cached lookups — needed right after `brew install` adds new binaries. */
+/** Needed right after `brew install` adds new binaries. */
 export function resetWhichCache(): void {
   whichCache.clear();
 }
 
-/** Resolve a binary on PATH (cached). Absolute paths are checked as-is. */
 export function which(bin: string): string | null {
   if (whichCache.has(bin)) return whichCache.get(bin)!;
   let found: string | null = null;
@@ -70,19 +69,14 @@ export interface RunOptions {
   killSignal?: NodeJS.Signals;
   env?: NodeJS.ProcessEnv;
   cwd?: string;
-  /** Called with the process once it's started. */
   onProcess?: (child: ChildProcess) => void;
 }
 
-/** Every child we start, so shutdown can stop them all. */
 export const activeChildren = new Set<ChildProcess>();
 
 const alive = (c: ChildProcess) => c.exitCode === null && c.signalCode === null;
 
-/**
- * Shutdown: ask every child process to stop (SIGTERM), give them a moment, then SIGKILL the ones
- * still running — before the caller exits, so a slow recorder can't be left holding the mic.
- */
+// Before the caller exits, so a slow recorder can't be left holding the mic.
 export async function terminateChildren(graceMs = 400): Promise<void> {
   for (const c of activeChildren) if (alive(c)) c.kill("SIGTERM");
   const until = Date.now() + graceMs;
@@ -145,21 +139,16 @@ export function run(cmd: string, args: string[], opts: RunOptions = {}): Promise
   });
 }
 
-/** A process started ahead of time, waiting for its input on stdin (see startWaiting). */
+/** A process started ahead of time, waiting for its input on stdin. */
 export interface Waiting {
-  /** Still running and not yet given its input. */
   readonly ready: boolean;
-  /** When it was started (Date.now()). */
+  /** Date.now() when it started. */
   readonly startedAt: number;
-  /** Give it its input and wait for it to finish, like run(). */
   send(input: string, opts?: { signal?: AbortSignal; timeoutMs?: number; onProcess?: (child: ChildProcess) => void }): Promise<RunResult>;
   kill(): void;
 }
 
-/**
- * Start a process that reads its input from stdin, but don't give it the input yet: it can load
- * what it needs (a voice) in the meantime, and starts working the moment send() is called.
- */
+// Started before its input, so it can load what it needs (a voice) and start the moment send() is called.
 export function startWaiting(cmd: string, args: string[], opts: { env?: NodeJS.ProcessEnv } = {}): Waiting {
   debug("exec (waiting for input):", cmd, args.join(" "));
   const startedAt = Date.now();
