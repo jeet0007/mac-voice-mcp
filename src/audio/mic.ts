@@ -27,7 +27,7 @@ const POLL_MS = 250;
 interface Owner {
   pid: number;
   since: number;
-  /** Held for a whole call (src/call.ts): as long as the owner lives, however long that is. */
+  /** Held for a whole call (src/call/session.ts): as long as the owner lives, however long that is. */
   call?: true;
 }
 

@@ -305,7 +305,7 @@ test("when the user starts typing during a voice turn, voice mode ends: no nudge
 
 // --- A call ----------------------------------------------------------------------------------
 
-/** What the server writes at call start (src/call.ts). */
+/** What the server writes at call start (src/call/session.ts). */
 function startCall(env, session, run) {
   const file = path.join(env.VOICE_MCP_CACHE_DIR, "voice-mode", "call.json");
   mkdirSyncW(path.dirname(file), { recursive: true });
@@ -332,7 +332,7 @@ test("call start marks the call as this session's; what the user says on it is h
 test("the call never reads a half-written call.json while the hook marks it as this session's", async () => {
   const { env, run } = setup();
   const file = startCall(env, "s1", run);
-  // The call polls call.json and hangs up if it can't parse it (src/call.ts), so read it as hard as it can.
+  // The call polls call.json and hangs up if it can't parse it (src/call/session.ts), so read it as hard as it can.
   const poll = `const fs = require("fs"); let bad = 0; const end = Date.now() + 800;
     while (Date.now() < end) { try { JSON.parse(fs.readFileSync(${JSON.stringify(file)}, "utf8")); } catch { bad++; } }
     process.stdout.write(String(bad));`;

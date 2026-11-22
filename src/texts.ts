@@ -108,7 +108,7 @@ export const VOICE_MODE_PROMPT = (task?: string) =>
       : "Start by calling speak_and_listen to say voice mode is on and ask what I'd like to work on.",
   ].join("\n");
 
-// --- A call: the mic stays open until the user hangs up (src/call.ts) ---------------------------
+// --- A call: the mic stays open until the user hangs up (src/call/session.ts) -------------------
 
 export const CALL_TOOL_DESCRIPTION = [
   "Start or end a call: a hands-free session where the microphone stays open and the user talks whenever they",
