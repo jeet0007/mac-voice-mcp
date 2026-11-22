@@ -9,6 +9,7 @@
  * Fallback: `whisper-cli`, one process per transcription. Always correct, just slower.
  */
 import { spawn, type ChildProcess } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
@@ -29,9 +30,30 @@ export const STT_MISSING =
  */
 const VAD_PAD_MS = 400;
 
-function vadArgs(): string[] {
+/** Per installed binary (Homebrew upgrades change the real path): whisper.cpp builds from before VAD exit on --vad. */
+const vadSupport = new Map<string, Promise<boolean>>();
+
+export function supportsVad(bin: string): Promise<boolean> {
+  let real = bin;
+  try {
+    real = realpathSync(bin);
+  } catch {
+    /* use the path as given */
+  }
+  let known = vadSupport.get(real);
+  if (!known) {
+    known = run(bin, ["--help"], { timeoutMs: 10_000 }).then(
+      (r) => `${r.stdout}${r.stderr}`.includes("--vad"),
+      () => false,
+    );
+    vadSupport.set(real, known);
+  }
+  return known;
+}
+
+async function vadArgs(bin: string): Promise<string[]> {
   const vad = locateVadModel();
-  return vad ? ["--vad", "-vm", vad, "-vp", String(VAD_PAD_MS)] : [];
+  return vad && (await supportsVad(bin)) ? ["--vad", "-vm", vad, "-vp", String(VAD_PAD_MS)] : [];
 }
 
 /** Where people usually clone and build whisper.cpp themselves. */
@@ -145,13 +167,15 @@ class WarmWhisperServer {
 
   private async start(bin: string, model: string): Promise<string> {
     const port = await freePort();
-    const args = ["-m", model, "--host", "127.0.0.1", "--port", String(port), "-t", String(CONFIG.threads), "-l", CONFIG.language, "-nt", ...vadArgs()];
+    const args = ["-m", model, "--host", "127.0.0.1", "--port", String(port), "-t", String(CONFIG.threads), "-l", CONFIG.language, "-nt", ...(await vadArgs(bin))];
     if (CONFIG.prompt) args.push("--prompt", CONFIG.prompt);
     debug("starting whisper-server:", bin, args.join(" "));
 
     // Orphan guard: the server runs under a tiny shell that waits on our stdin pipe
     // and kills the server when that pipe closes — i.e. whenever this process exits,
     // even if it's killed hard. `detached` gives it a process group we can stop as one.
+    // A server that exits by itself (an unknown flag, a bad model) takes the shell with it,
+    // so start-up sees the exit instead of polling /health until the deadline.
     // The script is a fixed string. `bin` and `args` (which include settings such as the
     // model path and VOICE_MCP_WHISPER_PROMPT) reach it as positional parameters, and "$@"
     // passes each one on as a single word: the shell never parses or expands them. A test
@@ -160,7 +184,7 @@ class WarmWhisperServer {
       ? spawn(bin, args, { stdio: ["ignore", "ignore", "pipe"], windowsHide: true })
       : spawn(
           "/bin/sh",
-          ["-c", '"$@" </dev/null & pid=$!; read -r _; kill $pid 2>/dev/null; wait $pid 2>/dev/null', "voice-mcp-whisper", bin, ...args],
+          ["-c", '{ "$@" </dev/null; kill $$; } & read -r _; kill 0', "voice-mcp-whisper", bin, ...args],
           { stdio: ["pipe", "ignore", "pipe"], detached: true },
         );
     this.child = child;
@@ -274,17 +298,17 @@ export async function transcribePartial(wav: Buffer, signal: AbortSignal): Promi
 }
 
 /** Which engine the next transcription will use — for the setup report. */
-export function describeStt(): string {
+export async function describeStt(): Promise<string> {
   const cli = findWhisperCli();
   const server = findWhisperServer();
   const parts = [cli ? `whisper-cli (${cli})` : "", server ? "fast mode via whisper-server" : ""].filter(Boolean);
   if (server && !CONFIG.useWhisperServer) parts[parts.length - 1] = "whisper-server disabled by VOICE_MCP_WHISPER_SERVER=0";
-  if (locateVadModel()) parts.push("silence filter (Silero VAD)");
+  if (locateVadModel() && cli && (await supportsVad(cli))) parts.push("silence filter (Silero VAD)");
   return parts.join("; ");
 }
 
 async function transcribeCli(bin: string, wavFile: string, model: string, signal?: AbortSignal, dropped?: string[]): Promise<string> {
-  const args = ["-m", model, "-f", wavFile, "-l", CONFIG.language, "-t", String(CONFIG.threads), "-nt", "-np", ...vadArgs()];
+  const args = ["-m", model, "-f", wavFile, "-l", CONFIG.language, "-t", String(CONFIG.threads), "-nt", "-np", ...(await vadArgs(bin))];
   if (CONFIG.prompt) args.push("--prompt", CONFIG.prompt);
   const result = await run(bin, args, { signal, timeoutMs: 180_000 });
   if (result.code !== 0) {

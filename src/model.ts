@@ -7,7 +7,7 @@
  *   4. a one-time download — only via voice_setup(install=true) / `setup`
  */
 import { createHash } from "node:crypto";
-import { closeSync, createWriteStream, existsSync, fstatSync, lstatSync, openSync, readSync } from "node:fs";
+import { closeSync, createWriteStream, existsSync, fstatSync, lstatSync, openSync, readSync, statSync } from "node:fs";
 import { mkdir, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -208,13 +208,18 @@ export const VAD_MODEL = {
   file: "ggml-silero-v5.1.2.bin",
   url: "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin",
   sha256: "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf",
+  size: 885_098,
 };
 
 const vadModelFile = () => path.join(CONFIG.modelsDir, VAD_MODEL.file);
 
-/** The VAD model in our cache, or null. Only downloadVadModel puts it there, checked and renamed into place. */
+/** The VAD model in our cache, or null. A file of the wrong size (truncated, replaced) makes whisper abort, so it's ignored until downloadVadModel replaces it. */
 export function locateVadModel(): string | null {
-  return existsSync(vadModelFile()) ? vadModelFile() : null;
+  try {
+    return statSync(vadModelFile()).size === VAD_MODEL.size ? vadModelFile() : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function downloadVadModel(): Promise<string> {
@@ -229,7 +234,8 @@ export async function downloadVadModel(): Promise<string> {
   if (sha256 !== VAD_MODEL.sha256) throw new SetupError(`The silence filter from ${url} is not the expected file (${data.length} bytes, sha256 ${sha256}).`);
   await mkdir(path.dirname(dest), { recursive: true });
   const tmp = `${dest}.${process.pid}.part`;
-  await writeFile(tmp, data);
+  await rm(tmp, { force: true });
+  await writeFile(tmp, data, { flag: "wx" }); // never through a symlink planted at the temp name
   await rename(tmp, dest);
   return dest;
 }

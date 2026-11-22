@@ -148,7 +148,7 @@ export async function runDoctor(opts: { loopback?: boolean; reportDir?: string; 
     Object.assign(report.machine, {
       voice: kokoro ? `${kokoroVoiceLabel()}, built-in fallback: ${voice.label}` : voice.label,
       recorder: recorder ? describeRecorder(recorder) : "none",
-      stt: describeStt(),
+      stt: await describeStt(),
       model: CONFIG.modelPath ?? CONFIG.modelName,
     });
     const model = await ensureModel({ download: false });

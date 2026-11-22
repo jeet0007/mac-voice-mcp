@@ -170,7 +170,9 @@ test("talking past listen_seconds is flagged as possibly cut off", async () => {
 test("setup: check, install only what's missing (with consent), reuse the model, never redo", async () => {
   const sb = sandbox({ installed: false });
   const existing = fakeModel(path.join(sb.dir, "elsewhere")); // the model already exists somewhere else
-  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"), "ggml-silero-v5.1.2.bin"); // so is the silence filter
+  const models = path.join(sb.home, ".cache", "mac-voice-mcp", "models");
+  mkdirSync(models, { recursive: true });
+  writeFileSync(path.join(models, "ggml-silero-v5.1.2.bin"), Buffer.alloc(885_098)); // so is the silence filter
   const { client } = await connect(sb.env({ VOICE_MCP_MODEL_SEARCH_PATHS: path.dirname(existing) }));
   try {
     // Before setup, speaking points Claude at voice_setup.
@@ -616,24 +618,46 @@ test("whisper gets the developer hint by default in English; none turns it off; 
   }
 });
 
-test("whisper skips silence with the Silero VAD only once its model is in the cache, warm server and CLI alike", async () => {
+test("whisper skips silence with the Silero VAD only when its model is in the cache and whisper knows --vad, warm server and CLI alike", async () => {
+  const cases = [
+    { vad: null, flags: false },
+    { vad: 885_098, flags: true },
+    { vad: 1_000, flags: false, why: "a truncated model makes whisper abort" },
+    { vad: 885_098, flags: false, env: { STUB_NO_VAD: "1" }, why: "a whisper.cpp from before VAD exits on --vad" },
+  ];
   for (const server of ["1", "0"]) {
-    for (const withVad of [false, true]) {
+    for (const { vad, flags, env, why } of cases) {
       const sb = sandbox();
       const models = path.join(sb.home, ".cache", "mac-voice-mcp", "models");
       fakeModel(models);
-      const vad = withVad ? fakeModel(models, "ggml-silero-v5.1.2.bin") : null;
-      const { client } = await connect(sb.env({ VOICE_MCP_WHISPER_SERVER: server }));
+      const vadFile = path.join(models, "ggml-silero-v5.1.2.bin");
+      if (vad) writeFileSync(vadFile, Buffer.alloc(vad));
+      const { client } = await connect(sb.env({ VOICE_MCP_WHISPER_SERVER: server, ...env }));
       try {
-        await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Ready?" } });
+        const r = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Ready?" } });
+        assert.equal(r.content[0].text, `Stub transcript from the ${server === "1" ? "server" : "CLI"}.`, why);
         const start = sb.readLog().split("\n").find((l) => l.startsWith(server === "1" ? "whisper-server start" : "whisper-cli "));
         assert.ok(start, `server=${server}`);
-        if (vad) assert.ok(start.includes(` --vad -vm ${vad} -vp 400 `), start);
-        else assert.doesNotMatch(start, /--vad/);
+        if (flags) assert.ok(start.includes(` --vad -vm ${vadFile} -vp 400 `), start);
+        else assert.doesNotMatch(start, /--vad/, why);
       } finally {
         await client.close();
       }
     }
+  }
+});
+
+test("a whisper-server that exits at start-up falls back to whisper-cli at once, not after the start-up deadline", { skip: process.platform === "win32" && "the orphan-guard shell is POSIX-only" }, async () => {
+  const sb = sandbox();
+  fakeModel(path.join(sb.home, ".cache", "mac-voice-mcp", "models"));
+  const { client } = await connect(sb.env({ VOICE_MCP_WHISPER_SERVER_BIN: "/usr/bin/false" }));
+  try {
+    const started = Date.now();
+    const r = await client.callTool({ name: "speak_and_listen", arguments: { text_to_speak: "Ready?" } });
+    assert.equal(r.content[0].text, "Stub transcript from the CLI.");
+    assert.ok(Date.now() - started < 30_000, `took ${Date.now() - started} ms`);
+  } finally {
+    await client.close();
   }
 });
 

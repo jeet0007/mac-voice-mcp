@@ -14,7 +14,7 @@ import { installKokoro, isKokoroInstalled, isKokoroModelPresent, KOKORO_SIZES_MB
 import { downloadVadModel, ensureModel, isModelDownloading, locateModel, locateVadModel, modelSource, MODEL_SIZES_MB } from "./model.js";
 import { isExecutable, resetWhichCache, run, sleep, tail, which } from "./proc.js";
 import { chooseVoice, findTts, resetVoiceChoice, VOICE_UPGRADE_HINT } from "./speech/synthesize.js";
-import { describeStt, findWhisperCli, findWhisperServer, stopWhisperServer } from "./stt.js";
+import { describeStt, findWhisperCli, findWhisperServer, stopWhisperServer, supportsVad } from "./stt.js";
 
 type CheckStatus = "ok" | "missing" | "optional" | "installing";
 
@@ -182,7 +182,7 @@ async function checkRequirements(): Promise<Check[]> {
   const cli = findWhisperCli();
   const server = findWhisperServer();
   if (cli || server) {
-    checks.push({ label: "Speech-to-text", status: "ok", detail: `whisper.cpp — ${describeStt()}` });
+    checks.push({ label: "Speech-to-text", status: "ok", detail: `whisper.cpp — ${await describeStt()}` });
   } else {
     checks.push({
       label: "Speech-to-text",
@@ -213,11 +213,13 @@ async function checkRequirements(): Promise<Check[]> {
   }
 
   checks.push(
-    locateVadModel()
-      ? { label: "Silence filter", status: "ok", detail: "Silero VAD, so whisper skips silence instead of inventing words there" }
-      : running(vadJob)
-        ? { label: "Silence filter", status: "installing", detail: "downloading Silero VAD" }
-        : { label: "Silence filter", status: "optional", detail: `Silero VAD stops whisper inventing words in silence ("Thank you.") — a one-time download of under 1 MB to ${CONFIG.modelsDir}`, vad: true },
+    cli && !(await supportsVad(cli))
+      ? { label: "Silence filter", status: "optional", detail: "this whisper.cpp is too old for Silero VAD, which stops it inventing words in silence; `brew upgrade whisper-cpp` adds it" }
+      : locateVadModel()
+        ? { label: "Silence filter", status: "ok", detail: "Silero VAD, so whisper skips silence instead of inventing words there" }
+        : running(vadJob)
+          ? { label: "Silence filter", status: "installing", detail: "downloading Silero VAD" }
+          : { label: "Silence filter", status: "optional", detail: `Silero VAD stops whisper inventing words in silence ("Thank you.") — a one-time download of under 1 MB to ${CONFIG.modelsDir}`, vad: true },
   );
 
   if (checks.some((c) => c.brew && c.status === "missing")) {
