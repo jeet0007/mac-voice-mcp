@@ -34,12 +34,7 @@ const VAD_PAD_MS = 400;
 const vadSupport = new Map<string, Promise<boolean>>();
 
 export function supportsVad(bin: string): Promise<boolean> {
-  let real = bin;
-  try {
-    real = realpathSync(bin);
-  } catch {
-    /* use the path as given */
-  }
+  const real = realpathSync(bin);
   let known = vadSupport.get(real);
   if (!known) {
     known = run(bin, ["--help"], { timeoutMs: 10_000 }).then(
