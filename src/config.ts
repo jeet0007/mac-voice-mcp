@@ -51,7 +51,7 @@ export const CONFIG = {
     : "auto") as "auto" | "say" | "kokoro",
   kokoroVoice: process.env.VOICE_MCP_KOKORO_VOICE?.trim() || "af_heart",
   kokoroSpeed: Math.min(2, Math.max(0.5, envNum("VOICE_MCP_KOKORO_SPEED", 1))),
-  kokoroDtype: (process.env.VOICE_MCP_KOKORO_DTYPE?.trim().toLowerCase() === "q8" ? "q8" : "fp32") as "fp32" | "q8",
+  kokoroDtype: /^(fp32|q8)$/.exec(process.env.VOICE_MCP_KOKORO_DTYPE?.trim().toLowerCase() ?? "")?.[0] as "fp32" | "q8" | undefined,
   kokoroDir: process.env.VOICE_MCP_KOKORO_DIR?.trim() || path.join(CACHE_ROOT, "kokoro"),
   voice: process.env.VOICE_MCP_VOICE?.trim() || undefined,
   rate: process.env.VOICE_MCP_RATE?.trim() || undefined,

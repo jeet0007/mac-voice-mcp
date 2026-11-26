@@ -5,7 +5,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **The flight recorder logs a `speak.gap` event** when the next chunk of Kokoro speech is late, so stalls show up in the log.
+
 ### Changed
+
+- **Kokoro speech no longer stalls mid-sentence on a busy Mac.** New installs use the smaller q8 model (~90 MB instead of ~330 MB). It is as fast as the full model at best and keeps up when memory is tight, where the full model could fall to half real time and leave gaps. Installs that only have the full model keep using it; `VOICE_MCP_KOKORO_DTYPE` still picks either.
 - **A shorter README.** It follows the usual layout: highlights, installation, usage, troubleshooting and docs. The disclaimer and third-party licenses moved to [NOTICE.md](NOTICE.md), which now ships in the npm package, and the silence filter's Silero VAD model is listed there.
 
 ## [0.11.0] - 2026-11-22

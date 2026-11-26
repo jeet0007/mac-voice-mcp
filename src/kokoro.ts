@@ -20,14 +20,21 @@ const ENTRY_MJS =
   'export { KokoroTTS } from "kokoro-js";\n' +
   'export { env } from "@huggingface/transformers";\n';
 
+const modelFile = (dtype: "fp32" | "q8") =>
+  path.join(CONFIG.kokoroDir, "models", "onnx-community", "Kokoro-82M-v1.0-ONNX", "onnx", dtype === "q8" ? "model_quantized.onnx" : "model.onnx");
+
+export function kokoroDtype(): "fp32" | "q8" {
+  if (CONFIG.kokoroDtype) return CONFIG.kokoroDtype;
+  return existsSync(modelFile("fp32")) && !existsSync(modelFile("q8")) ? "fp32" : "q8";
+}
+
 export function kokoroFiles() {
   const dir = CONFIG.kokoroDir;
-  const modelDir = path.join(dir, "models", "onnx-community", "Kokoro-82M-v1.0-ONNX", "onnx");
   return {
     dir,
     entry: path.join(dir, "entry.mjs"),
     pkg: path.join(dir, "node_modules", "kokoro-js", "package.json"),
-    model: path.join(modelDir, CONFIG.kokoroDtype === "q8" ? "model_quantized.onnx" : "model.onnx"),
+    model: modelFile(kokoroDtype()),
   };
 }
 
@@ -84,7 +91,7 @@ class KokoroWorker {
       env: {
         ...process.env,
         KOKORO_DIR: CONFIG.kokoroDir,
-        KOKORO_DTYPE: CONFIG.kokoroDtype,
+        KOKORO_DTYPE: kokoroDtype(),
         KOKORO_VOICE: CONFIG.kokoroVoice,
         KOKORO_SPEED: String(CONFIG.kokoroSpeed),
         KOKORO_ALLOW_DOWNLOAD: opts.allowDownload ? "1" : "0",
@@ -259,7 +266,7 @@ export function prewarmKokoro(): void {
 
 export function kokoroVoiceLabel(): string {
   const voice = kokoroWorker.info?.voice ?? CONFIG.kokoroVoice;
-  return `Kokoro ${voice} (${CONFIG.kokoroDtype})`;
+  return `Kokoro ${voice} (${kokoroDtype()})`;
 }
 
 function findNpm(): string | null {
@@ -301,7 +308,7 @@ export async function installKokoro(onProgress?: (message: string) => void): Pro
     const info = await kokoroWorker.start({ allowDownload: true });
     kokoroWorker.stop(); // the next turn starts it with downloads off
     return (
-      `Installed the Kokoro voice (${info.voice}${hadModel ? "" : `, downloaded the ~${KOKORO_SIZES_MB[CONFIG.kokoroDtype]} MB model`}). ` +
+      `Installed the Kokoro voice (${info.voice}${hadModel ? "" : `, downloaded the ~${KOKORO_SIZES_MB[kokoroDtype()]} MB model`}). ` +
       "It's used from the next turn on."
     );
   } finally {

@@ -141,8 +141,11 @@ one.
 
 Last, it starts the worker once with downloads allowed. That downloads the model if it is missing and doubles
 as the install's self-test. The worker is then stopped, so the next turn starts it normally with downloads
-off. Model sizes are about 326 MB for fp32 and 92 MB for q8 (`KOKORO_SIZES_MB`). fp32 is the default because
-it is about twice as fast on a CPU.
+off. Model sizes are about 326 MB for fp32 and 92 MB for q8 (`KOKORO_SIZES_MB`). `kokoroDtype()` picks the model:
+`VOICE_MCP_KOKORO_DTYPE` if set, else fp32 when only fp32 is on disk (an older install keeps working with no
+download), else q8. q8 is the default because, measured on an M4 under memory pressure, it ran 1.4-1.5x real
+time every time, while fp32 swung from 1.6x down to 0.5x: fp32's larger weights get swapped out between
+replies, and paging them back in mid-reply leaves the speaker silent. At best the two are equally fast.
 
 ### The worker process
 

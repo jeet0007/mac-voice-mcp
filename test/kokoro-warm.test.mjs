@@ -26,7 +26,7 @@ function fakeKokoro(root, { model = true } = {}) {
 const withModel = path.join(dir, "with-model");
 fakeKokoro(withModel);
 Object.assign(process.env, { STUB_LOG: log, VOICE_MCP_KOKORO_DIR: withModel, VOICE_MCP_TTS: "" });
-const { prewarmKokoro, stopKokoro, kokoroVoiceLabel } = await import("../dist/kokoro.js");
+const { kokoroDtype, prewarmKokoro, stopKokoro, kokoroVoiceLabel } = await import("../dist/kokoro.js");
 const { CONFIG } = await import("../dist/config.js");
 
 const loads = () => (readFileSync(log, "utf8").match(/^kokoro-load/gm) ?? []).length;
@@ -69,4 +69,21 @@ test("nothing is loaded when Kokoro isn't in use: the model is missing, or VOICE
   await new Promise((r) => setTimeout(r, 400));
   assert.equal(loads(), before);
   assert.ok(kokoroVoiceLabel());
+});
+
+test("kokoroDtype: q8 unless only the fp32 model is on disk, and the setting always wins", () => {
+  const saved = { dir: CONFIG.kokoroDir, dtype: CONFIG.kokoroDtype };
+  const root = path.join(dir, "dtype");
+  const onnx = path.join(root, "models", "onnx-community", "Kokoro-82M-v1.0-ONNX", "onnx");
+  mkdirSync(onnx, { recursive: true });
+  CONFIG.kokoroDir = root;
+  CONFIG.kokoroDtype = undefined;
+  assert.equal(kokoroDtype(), "q8", "a fresh install gets the small model");
+  writeFileSync(path.join(onnx, "model.onnx"), "fake");
+  assert.equal(kokoroDtype(), "fp32", "an older install keeps the model it has");
+  writeFileSync(path.join(onnx, "model_quantized.onnx"), "fake");
+  assert.equal(kokoroDtype(), "q8");
+  CONFIG.kokoroDtype = "fp32";
+  assert.equal(kokoroDtype(), "fp32");
+  Object.assign(CONFIG, { kokoroDir: saved.dir, kokoroDtype: saved.dtype });
 });
