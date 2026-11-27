@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-27
+
 ### Added
 
 - **The flight recorder logs a `speak.gap` event** when the next chunk of Kokoro speech is late, so stalls show up in the log.
@@ -253,7 +255,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   - `voice_setup`: checks first, installs only what's missing, and only after you agree.
   - The `setup` and `voice_mode` prompts.
 
-[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.8.1...v0.9.0
