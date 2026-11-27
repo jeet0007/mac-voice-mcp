@@ -76,6 +76,7 @@ Every line: `t` (ms since epoch), `ev`, `pid`, and `turn` (a per-process counter
 | `vad.discard` | a too-short sound is thrown away | `voicedMs` |
 | `stt.done` | transcript ready | `ms`, `chars`, `words`, `droppedChars` (what `cleanTranscript` removed) |
 | `speak.start` | speech starts | `engine` (say, kokoro), `chars`, `words`, `truncated` |
+| `speak.gap` | a Kokoro chunk arrives after the one before it should have finished playing, so the speaker went quiet | `seq` (chunk index), `ms` (how late). Estimated from audio lengths, so a reply paused for barge-in can log a gap that wasn't heard |
 | `speak.end` | speech ends | `finished`, `reason` (done, stopped, barge-in, error, fallback), `ms`, `unspokenChunks` |
 | `call.mute` | call mic muted or unmuted | `muted`, `why` |
 | `call.event` | something happened on a call, as the call engine saw it (`src/call/engine/types.ts`, `Event`) | `type` (speech.onset, speech.dropped, utterance.ended, transcribed, transcribe.failed, words.checked, say.requested, playback.ended, inbox.drained, end.requested, tick), `at`, and that type's fields: `utterance` and `say` are counters, `reason`, `heard` (words, filler, hang-up, empty), `words` (true, false, or null when whisper couldn't take the check in time), `quietMs` |

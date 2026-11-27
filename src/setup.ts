@@ -3,7 +3,7 @@ import { statSync } from "node:fs";
 import { buildNative, findSwiftc, nativeBuilding, nativeState } from "./native-build.js";
 import { describeRecorder, findRecorder } from "./audio/device.js";
 import { CONFIG, IS_MAC, IS_MACOS_15, IS_WIN, log } from "./config.js";
-import { installKokoro, isKokoroInstalled, isKokoroModelPresent, KOKORO_SIZES_MB, kokoroVoiceLabel } from "./kokoro.js";
+import { installKokoro, isKokoroInstalled, isKokoroModelPresent, KOKORO_SIZES_MB, kokoroDtype, kokoroVoiceLabel } from "./kokoro.js";
 import { downloadVadModel, ensureModel, isModelDownloading, locateModel, locateVadModel, modelSource, MODEL_SIZES_MB } from "./model.js";
 import { isExecutable, resetWhichCache, run, sleep, tail, which } from "./proc.js";
 import { chooseVoice, findTts, resetVoiceChoice, VOICE_UPGRADE_HINT } from "./speech/synthesize.js";
@@ -218,7 +218,7 @@ function kokoroCheck(): Check | null {
   if (running(kokoroJob)) return { label, status: "installing", detail: `${kokoroProgress} (${elapsed(kokoroJob!)} so far)` };
   if (CONFIG.tts === "say") return null;
   const installed = isKokoroInstalled();
-  const size = `~${KOKORO_SIZES_MB[CONFIG.kokoroDtype]} MB`;
+  const size = `~${KOKORO_SIZES_MB[kokoroDtype()]} MB`;
   if (installed && isKokoroModelPresent()) {
     return { label, status: "ok", detail: `${kokoroVoiceLabel()} — the natural on-device voice, used for speaking (VOICE_MCP_TTS=say turns it off)` };
   }

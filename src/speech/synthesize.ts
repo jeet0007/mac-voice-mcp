@@ -4,6 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import type { Sound } from "../audio/device.js";
 import { CONFIG, IS_MAC, IS_WIN } from "../config.js";
 import { wavHeader } from "../endpointer.js";
+import { flightEvent } from "../flight.js";
 import { prepareForKokoro } from "../kokoro-text.js";
 import { isKokoroInstalled, KOKORO_RATE, kokoroEnabled, kokoroWorker } from "../kokoro.js";
 import { resamplePcm16, wavSeconds } from "../pcm.js";
@@ -143,6 +144,7 @@ export function kokoroSpeech(text: string, signal: AbortSignal): KokoroSpeech {
   const t0 = Date.now();
   const stats = { firstAudioMs: 0, coldStart: false };
   let handed = 0;
+  let playsUntil = 0;
 
   async function* pcm(): AsyncGenerator<Buffer> {
     const ready: Buffer[] = [];
@@ -154,8 +156,12 @@ export function kokoroSpeech(text: string, signal: AbortSignal): KokoroSpeech {
       .speak(
         chunks,
         (seq, audio) => {
-          if (seq === 0) stats.firstAudioMs = Date.now() - t0;
-          ready.push(withPause(audio, chunks[seq]!, seq === chunks.length - 1));
+          const now = Date.now();
+          if (seq === 0) stats.firstAudioMs = now - t0;
+          else if (now > playsUntil) flightEvent("speak.gap", { seq, ms: Math.round(now - playsUntil) });
+          const sound = withPause(audio, chunks[seq]!, seq === chunks.length - 1);
+          playsUntil = Math.max(playsUntil, now) + (sound.length / 2 / KOKORO_RATE) * 1000;
+          ready.push(sound);
           s.wake?.();
         },
         cancel.signal,
