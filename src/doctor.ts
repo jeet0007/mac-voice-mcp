@@ -3,10 +3,10 @@ import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describeCallAudio, describeRecorder, findRecorder, openAudio } from "./audio/device.js";
-import { CONFIG, IS_MAC, PKG } from "./config.js";
+import { CONFIG, IS_MAC, PKG, settingsSet } from "./config.js";
 import { FRAME_MS, wavHeader } from "./endpointer.js";
 import { flightDir, flightEnabled, flightMode } from "./flight.js";
-import { kokoroEnabled, kokoroVoiceLabel, stopKokoro } from "./kokoro.js";
+import { kokoroDtype, kokoroEnabled, kokoroVoiceLabel, stopKokoro } from "./kokoro.js";
 import { ensureModel } from "./model.js";
 import { run } from "./proc.js";
 import { runSetupFlow } from "./setup.js";
@@ -39,6 +39,7 @@ export interface DoctorReport {
   version: string;
   date: string;
   machine: Record<string, string>;
+  settings: { set: Record<string, string>; resolved: Record<string, unknown> };
   checks: Check[];
   ok: boolean;
   reportFile?: string;
@@ -113,6 +114,7 @@ export async function runDoctor(opts: { loopback?: boolean; reportDir?: string; 
     version: PKG.version,
     date: new Date().toISOString(),
     machine: { platform: `${process.platform} ${os.release()}`, arch: process.arch, node: process.version, ...(flightEnabled() ? { flightRecorder: `${flightMode()} (events kept on this Mac in ${flightDir()}; "flight purge" deletes them)` } : {}), ...(await audioDevices()) },
+    settings: { set: settingsSet(), resolved: { ...CONFIG, kokoroDtype: kokoroDtype() } },
     checks,
     ok: false,
   };

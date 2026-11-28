@@ -5,6 +5,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **See what voice-mcp is set to.** The setup checklist (`voice_setup` and the `setup` command) ends with every `VOICE_MCP_*` setting that's set. The doctor report saves those plus the value each setting resolved to, defaults included, so a user can share their whole configuration. `--help` now lists `VOICE_MCP_KOKORO_DTYPE`.
+
 ## [0.12.0] - 2026-11-27
 
 ### Added
