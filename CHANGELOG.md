@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-11-29
+
 ### Added
 
 - **See what voice-mcp is set to.** The setup checklist (`voice_setup` and the `setup` command) ends with every `VOICE_MCP_*` setting that's set. The doctor report saves those plus the value each setting resolved to, defaults included, so a user can share their whole configuration. `--help` now lists `VOICE_MCP_KOKORO_DTYPE`.
@@ -259,7 +261,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   - `voice_setup`: checks first, installs only what's missing, and only after you agree.
   - The `setup` and `voice_mode` prompts.
 
-[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/jeet0007/mac-voice-mcp/compare/v0.9.0...v0.10.0
