@@ -156,7 +156,11 @@ under -50 dB warns, which is expected with headphones.
 Doctor writes the report as JSON to `<cache>/doctor/doctor-<date>.json`, so runs on different Macs and audio
 setups (headphones, Bluetooth, external mics) can be compared. The report includes the version, the platform,
 the default input and output devices from `system_profiler`, the voice, the recorder, the call audio path, the
-speech-to-text setup and the model. It notes the flight recorder when it is on. If the report file cannot be
+speech-to-text setup and the model. It notes the flight recorder when it is on. `settings.set` lists every
+`VOICE_MCP_*` variable that is set, and `settings.resolved` the value each setting resolved to, defaults included.
+The setup checklist (the `setup` command and `voice_setup`) ends with the same `set` list on one line. Run
+inside a session, `voice_setup` shows the variables the MCP client passed to the server, which a terminal doesn't see.
+If the report file cannot be
 written, doctor still prints the results. `doctor --json` also prints the report to stdout. The command exits
 with 0 when no check failed, and with 1 otherwise.
 

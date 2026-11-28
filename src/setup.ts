@@ -2,7 +2,7 @@
 import { statSync } from "node:fs";
 import { buildNative, findSwiftc, nativeBuilding, nativeState } from "./native-build.js";
 import { describeRecorder, findRecorder } from "./audio/device.js";
-import { CONFIG, IS_MAC, IS_MACOS_15, IS_WIN, log } from "./config.js";
+import { CONFIG, IS_MAC, IS_MACOS_15, IS_WIN, log, settingsSet } from "./config.js";
 import { installKokoro, isKokoroInstalled, isKokoroModelPresent, KOKORO_SIZES_MB, kokoroDtype, kokoroVoiceLabel } from "./kokoro.js";
 import { downloadVadModel, ensureModel, isModelDownloading, locateModel, locateVadModel, modelSource, MODEL_SIZES_MB } from "./model.js";
 import { isExecutable, resetWhichCache, run, sleep, tail, which } from "./proc.js";
@@ -261,6 +261,11 @@ function workerCheck(): Check | null {
   return { label, status: "optional", detail: state === "stale" ? "a new version needs building" : `${what}; built on this Mac in about 10 s`, worker: true };
 }
 
+function settingsLine(): string {
+  const set = Object.entries(settingsSet()).map(([k, v]) => `${k}="${v}"`);
+  return `• Settings: ${set.length ? `${set.join(", ")}; everything else at its default` : "every VOICE_MCP_* setting at its default"}.`;
+}
+
 export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcome> {
   const { install = false, onProgress } = opts;
   resetWhichCache(); // see anything installed since the last check (e.g. `brew install sox` in a terminal)
@@ -316,6 +321,7 @@ export async function runSetupFlow(opts: SetupOptions = {}): Promise<SetupOutcom
     IS_MAC
       ? "• Sounds: a soft tick means the mic is open, a pop means it heard you, a low purr means it heard nothing, a low thud means something is wrong (it also says what)."
       : "",
+    settingsLine(),
   ];
   if (done.length) lines.push("", "What was done:", ...done.map((d) => `- ${d}`));
   if ((install || opts.kokoro || opts.bubble) && !done.length && !installing && ready) lines.push("", "Nothing to install — everything was already present.");

@@ -99,6 +99,14 @@ export const CONFIG = {
   debug: envBool("VOICE_MCP_DEBUG", false),
 } as const;
 
+export function settingsSet(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(process.env)
+      .filter(([k, v]) => k.startsWith("VOICE_MCP_") && v?.trim())
+      .sort(([a], [b]) => a.localeCompare(b)) as [string, string][],
+  );
+}
+
 // stdout carries the MCP protocol, so every log line goes to stderr.
 export function log(...args: unknown[]): void {
   console.error("[voice-mcp]", ...args);

@@ -51,6 +51,8 @@ test("doctor passes when the transcript matches what was spoken, and saves a JSO
   assert.equal(report.machine.callAudio, "process: the recorder, with the mic muted while Claude speaks", "the audio worker isn't built");
   assert.ok(report.reportFile.startsWith(path.join(sb.home, ".cache", "mac-voice-mcp", "doctor")));
   assert.ok(existsSync(report.reportFile));
+  assert.deepEqual(report.settings.set, { VOICE_MCP_RECORDER: "sox", VOICE_MCP_WHISPER_MODEL: "tiny.en" }, "only the variables that are set, an empty one left out");
+  assert.equal(report.settings.resolved.endSilenceMs, 1500, "and the value each setting resolved to, defaults included");
   assert.match(readFileSync(sb.log, "utf8"), /^speak-to-file "The build passed/m);
   assert.match(r.stderr, /PASS  Speech → text: 100% of words right/);
 });
